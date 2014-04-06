@@ -1,5 +1,8 @@
 module Main where
 
+import System.IO
+import System.Exit
+
 import Op
 import Codegen
 
@@ -11,4 +14,7 @@ drop_abc = [AssocR, Drop]
 input = dup_abc ++ dup_abc ++ mult_abc ++ add_abc
 
 main :: IO ()
-main = putStrLn . either ("FAILURE: " ++) ("SUCCESS: " ++) . compile $ input
+main = case compile input of
+           Left  err  -> do hPutStrLn stderr $ "Failure: " ++ err
+                            exitFailure
+           Right prog -> putStr prog
