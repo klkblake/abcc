@@ -33,7 +33,7 @@ void *malloc(long size) {
 	}
 	*/
 	if (base == limit) {
-		limit = brk(limit + 4096);
+		limit = brk(limit + 16*4096);
 		if (limit == base) {
 			DIE(out_of_mem);
 		}
