@@ -23,15 +23,6 @@ void init_mm(void) {
 }
 
 void *malloc(long size) {
-	/*
-	if (base == &end) {
-		write(2, &base, 8);
-		base = brk(0);
-		write(2, &base, 8);
-		write(2, &limit, 8);
-		exit(0);
-	}
-	*/
 	if (base == limit) {
 		limit = brk(limit + 16*4096);
 		if (limit == base) {
