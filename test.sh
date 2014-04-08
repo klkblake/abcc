@@ -6,5 +6,7 @@ RTSFILES="
 	rts/syscalls.c
 	rts/rts.c
 "
-./backend/Test > $TMPSRC && gcc -std=c99 -ffreestanding -nostdlib -static -g -o test -Irts $RTSFILES $TMPSRC
+
+# Make sure to align functions so that we have free bits in the pointer.
+./backend/Test > $TMPSRC && gcc -std=c99 -ffreestanding -nostdlib -falign-functions=4 -static -Wall -g -o test -Irts $RTSFILES $TMPSRC
 rm $TMPSRC

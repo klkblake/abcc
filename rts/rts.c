@@ -1,15 +1,5 @@
 #include "syscalls.h"
-#include "ops.h"
-
-struct pair {
-	const void *fst, *snd;
-};
-
-#define Pair const struct pair *
-#define to_pair(v) ((Pair) (v))
-
-#define Unit ((Any) 0x1)
-#define Void ((Any) 0x0)
+#include "rts.h"
 
 #define DIE(name) do { write(2, name, sizeof(name)); exit(1); } while (0)
 char out_of_mem[] = "Out of memory\n";
@@ -41,8 +31,15 @@ Pair pair(Any a, Any b) {
 	return (Pair) result;
 }
 
-#define f(v) (to_pair(v)->fst)
-#define s(v) (to_pair(v)->snd)
+CompBlock compBlock(Any a, Any b) {
+	const void **result = malloc(sizeof(struct comp_block));
+	result[0] = a;
+	result[1] = b;
+	return (CompBlock) ((long) result | BLOCK_COMP);
+}
+
+#define f(v) (((Pair)(v))->fst)
+#define s(v) (((Pair)(v))->snd)
 
 #define ff(v) f(f(v))
 #define fs(v) s(f(v))
@@ -104,6 +101,37 @@ OP(copy) {
 	return list2(v0, v0, vt1);
 }
 
+Any applyBlock(Any b, Any x) {
+	long ptr = (long) b;
+	long type = ptr & 0x3;
+	ptr &= ~0x3;
+	CompBlock cb;
+	switch (type) {
+		case BLOCK_NORMAL:
+		x = ((Block) ptr)(x);
+		break;
+
+		case BLOCK_COMP:
+		cb = (CompBlock) ptr;
+		x = applyBlock(cb->xy, x);
+		x = applyBlock(cb->yz, x);
+		break;
+
+		case BLOCK_QUOTE:
+		x = pair(*((Any *) ptr), x);
+		break;
+	}
+	return x;
+}
+
+OP(apply) {
+	return list1(applyBlock(v0, v1), vt2);
+}
+
+OP(compose) {
+	return list1(compBlock(v1, v0), vt2);
+}
+
 OP(add) {
 	return list1((Any) ((long)v0 + (long) v1), vt2);
 }
@@ -114,14 +142,14 @@ OP(multiply) {
 
 #define COUNT 1000
 
-extern Any run_abc(Any);
+extern Any block_0(Any);
 
 int main(void) {
 	init_mm();
 	long out[COUNT];
 	for (long i = 0; i < COUNT; i++) {
 		Any v = pair(pair((void *) i, Unit), Unit);
-		v = run_abc(v);
+		v = block_0(v);
 		out[i] = (long) ff(v);
 	}
 	return -write(1, (const char *)out, sizeof(out));

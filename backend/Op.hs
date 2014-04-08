@@ -1,6 +1,7 @@
 module Op where
 
-data Op = AssocL
+data Op = LitBlock [Op]
+        | AssocL
         | AssocR
         | Swap
         | SwapD
@@ -8,6 +9,8 @@ data Op = AssocL
         | Elim1
         | Drop
         | Copy
+        | Apply
+        | Compose
         | Add
         | Multiply
         deriving Show
