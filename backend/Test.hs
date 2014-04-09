@@ -25,6 +25,8 @@ parseOp '\'' = Quote
 parseOp '+' = Add
 parseOp '*' = Multiply
 
+parse ps ('k':cs) = parse ps cs
+parse ps ('f':cs) = parse ps cs
 parse (p:ps)   ('[':cs) = parse ([]:p:ps) cs
 parse (p:q:ps) (']':cs) = parse ((q ++ [LitBlock p]):ps) cs
 parse (p:ps)   (c:cs) = parse ((p ++ [parseOp c]):ps) cs
