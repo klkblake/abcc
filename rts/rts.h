@@ -38,5 +38,7 @@ OP(drop);
 OP(apply);
 OP(compose);
 OP(quote);
+OP(introNum);
+Any digit(int d, Any v);
 OP(add);
 OP(multiply);

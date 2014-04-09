@@ -22,6 +22,17 @@ parseOp '^' = Copy
 parseOp '$' = Apply
 parseOp 'o' = Compose
 parseOp '\'' = Quote
+parseOp '#' = IntroNum
+parseOp '0' = Digit 0
+parseOp '1' = Digit 1
+parseOp '2' = Digit 2
+parseOp '3' = Digit 3
+parseOp '4' = Digit 4
+parseOp '5' = Digit 5
+parseOp '6' = Digit 6
+parseOp '7' = Digit 7
+parseOp '8' = Digit 8
+parseOp '9' = Digit 9
 parseOp '+' = Add
 parseOp '*' = Multiply
 
@@ -34,8 +45,8 @@ parse [p]      [] = p
 
 --input = concat [dup_abc, dup_abc, mult_abc, add_abc]
 
--- dup quote dup apply swap apply * +
-input = parse [[]] "r^wzlw'[l]o^wzlwvr$crwrwzwlwvr$crwrzw*wrzw+l"
+-- dup quote dup apply swap apply * + 1000 +
+input = parse [[]] "r^wzlw'[l]o^wzlwvr$crwrwzwlwvr$crwrzw*wrzw+l#1000wrzw+l"
 
 main :: IO ()
 main = case compile input of

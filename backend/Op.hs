@@ -12,6 +12,8 @@ data Op = LitBlock [Op]
         | Apply
         | Compose
         | Quote
+        | IntroNum
+        | Digit Int
         | Add
         | Multiply
         deriving Show

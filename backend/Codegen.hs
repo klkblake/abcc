@@ -51,6 +51,8 @@ compileOp Copy         = emitOp "copy"
 compileOp Apply        = emitOp "apply"
 compileOp Compose      = emitOp "compose"
 compileOp Quote        = emitOp "quote"
+compileOp IntroNum     = emitOp "introNum"
+compileOp (Digit d)    = emit $ "\tv = digit(" ++ show d ++ ", v);\n"
 compileOp Add          = emitOp "add"
 compileOp Multiply     = emitOp "multiply"
 
