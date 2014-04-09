@@ -37,5 +37,6 @@ OP(copy);
 OP(drop);
 OP(apply);
 OP(compose);
+OP(quote);
 OP(add);
 OP(multiply);

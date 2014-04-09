@@ -3,6 +3,7 @@
 
 #define DIE(name) do { write(2, name, sizeof(name)); exit(1); } while (0)
 char out_of_mem[] = "Out of memory\n";
+char alignment_failure[] = "Not correctly aligned\n";
 
 void *base = 0;
 void *limit = 0;
@@ -130,6 +131,13 @@ OP(apply) {
 
 OP(compose) {
 	return list1(compBlock(v1, v0), vt2);
+}
+
+OP(quote) {
+	if ((((long) &v0) & 0x3) != 0) {
+		DIE(alignment_failure);
+	}
+	return list1((Any) ((long) &v0 | BLOCK_QUOTE), vt1);
 }
 
 OP(add) {

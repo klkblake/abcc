@@ -11,6 +11,7 @@ data Op = LitBlock [Op]
         | Copy
         | Apply
         | Compose
+        | Quote
         | Add
         | Multiply
         deriving Show

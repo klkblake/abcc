@@ -11,8 +11,29 @@ mult_abc = [AssocR, Swap, AssocR, SwapD, Swap, Multiply, AssocL]
 dup_abc  = [AssocR, Copy, Swap, SwapD, AssocL, Swap, AssocL]
 drop_abc = [AssocR, Drop]
 
+parseOp 'l' = AssocL
+parseOp 'r' = AssocR
+parseOp 'w' = Swap
+parseOp 'z' = SwapD
+parseOp 'v' = Intro1
+parseOp 'c' = Elim1
+parseOp '%' = Drop
+parseOp '^' = Copy
+parseOp '$' = Apply
+parseOp 'o' = Compose
+parseOp '\'' = Quote
+parseOp '+' = Add
+parseOp '*' = Multiply
+
+parse (p:ps)   ('[':cs) = parse ([]:p:ps) cs
+parse (p:q:ps) (']':cs) = parse ((q ++ [LitBlock p]):ps) cs
+parse (p:ps)   (c:cs) = parse ((p ++ [parseOp c]):ps) cs
+parse [p]      [] = p
+
 --input = concat [dup_abc, dup_abc, mult_abc, add_abc]
-input = [Intro1, LitBlock dup_abc, Apply, LitBlock dup_abc, Apply, LitBlock mult_abc, LitBlock add_abc, Compose, Apply, Elim1]
+
+-- dup quote dup apply swap apply * +
+input = parse [[]] "r^wzlw'[l]o^wzlwvr$crwrwzwlwvr$crwrzw*wrzw+l"
 
 main :: IO ()
 main = case compile input of

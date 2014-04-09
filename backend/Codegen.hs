@@ -50,6 +50,7 @@ compileOp Drop         = emitOp "drop"
 compileOp Copy         = emitOp "copy"
 compileOp Apply        = emitOp "apply"
 compileOp Compose      = emitOp "compose"
+compileOp Quote        = emitOp "quote"
 compileOp Add          = emitOp "add"
 compileOp Multiply     = emitOp "multiply"
 
