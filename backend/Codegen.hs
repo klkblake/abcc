@@ -39,7 +39,7 @@ emitBlock b = do
     return n
 
 compileOp :: Op -> Codegen ()
-compileOp (LitBlock b) = emitBlock b >>= \n -> emit $ "\tv = pair(&block_" ++ show n ++ ", v);\n"
+compileOp (LitBlock b) = emitBlock b >>= \n -> emit $ "\tv = pair((Any) &block_" ++ show n ++ ", v);\n"
 compileOp AssocL       = emitOp "assocl"
 compileOp AssocR       = emitOp "assocr"
 compileOp Swap         = emitOp "swap"

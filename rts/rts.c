@@ -24,22 +24,22 @@ void *malloc(long size) {
 	return result;
 }
 
-Pair pair(Any a, Any b) {
-	const void **result = malloc(sizeof(struct pair));
+Any pair(Any a, Any b) {
+	union any *result = malloc(sizeof(struct pair));
 	result[0] = a;
 	result[1] = b;
-	return (Pair) result;
+	return (Any) (Pair) result;
 }
 
-CompBlock compBlock(Any a, Any b) {
-	const void **result = malloc(sizeof(struct comp_block));
+Any compBlock(Any a, Any b) {
+	union any *result = malloc(sizeof(struct comp_block));
 	result[0] = a;
 	result[1] = b;
-	return (CompBlock) ((long) result | BLOCK_COMP);
+	return TAG((Any) (CompBlock) result, BLOCK_COMP);
 }
 
-#define f(v) (((Pair)(v))->fst)
-#define s(v) (((Pair)(v))->snd)
+#define f(v) (((v).as_pair)->fst)
+#define s(v) (((v).as_pair)->snd)
 
 #define ff(v) f(f(v))
 #define fs(v) s(f(v))
@@ -102,23 +102,22 @@ OP(copy) {
 }
 
 Any applyBlock(Any b, Any x) {
-	long ptr = (long) b;
-	long type = ptr & 0x3;
-	ptr &= ~0x3;
+	long type = GET_TAG(b);
+	b = CLEAR_TAG(b);
 	CompBlock cb;
 	switch (type) {
 		case BLOCK_NORMAL:
-		x = ((Block) ptr)(x);
+		x = b.as_block(x);
 		break;
 
 		case BLOCK_COMP:
-		cb = (CompBlock) ptr;
+		cb = b.as_comp_block;
 		x = applyBlock(cb->xy, x);
 		x = applyBlock(cb->yz, x);
 		break;
 
 		case BLOCK_QUOTE:
-		x = pair(*((Any *) ptr), x);
+		x = pair(*(b.as_quote_block), x);
 		break;
 	}
 	return x;
@@ -133,23 +132,23 @@ OP(compose) {
 }
 
 OP(quote) {
-	return list1((Any) ((long) &v0 | BLOCK_QUOTE), vt1);
+	return list1(TAG((Any) &v0, BLOCK_QUOTE), vt1);
 }
 
 OP(introNum) {
-	return list1((Any) 0, v);
+	return list1((Any) 0.0, v);
 }
 
 Any digit(int d, Any v) {
-	return list1((Any) ((long)v0 * 10 + d), vt1);
+	return list1((Any) (v0.as_num * 10 + d), vt1);
 }
 
 OP(add) {
-	return list1((Any) ((long)v0 + (long) v1), vt2);
+	return list1((Any) (v0.as_num + v1.as_num), vt2);
 }
 
 OP(multiply) {
-	return list1((Any) ((long)v0 * (long) v1), vt2);
+	return list1((Any) (v0.as_num * v1.as_num), vt2);
 }
 
 #define COUNT 1000
@@ -158,11 +157,11 @@ extern Any block_0(Any);
 
 int main(void) {
 	init_mm();
-	long out[COUNT];
+	double out[COUNT];
 	for (long i = 0; i < COUNT; i++) {
-		Any v = pair(pair((void *) i, Unit), Unit);
+		Any v = pair(pair((Any) (double) i, Unit), Unit);
 		v = block_0(v);
-		out[i] = (long) ff(v);
+		out[i] = ff(v).as_num;
 	}
 	return -write(1, (const char *)out, sizeof(out));
 }

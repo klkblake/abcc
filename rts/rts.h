@@ -1,10 +1,5 @@
-#define Any const void *
-
-struct pair {
-	const void *fst, *snd;
-};
-
-typedef const struct pair *Pair;
+struct pair;
+struct comp_block;
 
 enum block_type {
 	BLOCK_NORMAL,
@@ -12,18 +7,39 @@ enum block_type {
 	BLOCK_QUOTE,
 };
 
-typedef Any (*Block)(Any);
+union any {
+	const struct pair *as_pair;
+	union any (*as_block)(union any);
+	const struct comp_block *as_comp_block;
+	const union any *as_quote_block;
+	double as_num;
+	long as_tagged;
+};
+
+typedef union any Any;
+
+struct pair {
+	const Any fst, snd;
+};
+
+typedef const struct pair *Pair;
+
+typedef const Any (*Block)(const Any);
 
 struct comp_block {
-	Block xy, yz;
+	const Any xy, yz;
 };
 
 typedef const struct comp_block *CompBlock;
 
-#define Unit ((Any) 0x1)
-#define Void ((Any) 0x0)
+#define Unit ((Any) (long) 0x1)
+#define Void ((Any) (long) 0x0)
 
-Pair pair(Any a, Any b);
+#define TAG(v, t) ((Any) ((v).as_tagged | t))
+#define GET_TAG(v) ((v).as_tagged & 0x3)
+#define CLEAR_TAG(v) ((Any) ((v).as_tagged &~ 0x3))
+
+Any pair(Any a, Any b);
 
 #define OP(name) Any name(Any v)
 
