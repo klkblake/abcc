@@ -181,7 +181,9 @@ int main(void) {
 	init_mm();
 	double out[COUNT];
 	for (long i = 0; i < COUNT; i++) {
-		Any v = pair(pair((Any) (double) i, Unit), Unit);
+		Any power = Unit;
+		Any name = sum(Unit, SUM_LEFT);
+		Any v = pair(pair((Any) (double) i, Unit), pair(Unit, pair(power, pair(pair(name, Unit), Unit))));
 		v = block_0(v);
 		out[i] = ff(v).as_num;
 	}
