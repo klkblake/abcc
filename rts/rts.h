@@ -58,3 +58,6 @@ OP(introNum);
 Any digit(int d, Any v);
 OP(add);
 OP(multiply);
+OP(inverse);
+OP(negate);
+OP(divmod);

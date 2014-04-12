@@ -55,6 +55,9 @@ compileOp IntroNum     = emitOp "introNum"
 compileOp (Digit d)    = emit $ "\tv = digit(" ++ show d ++ ", v);\n"
 compileOp Add          = emitOp "add"
 compileOp Multiply     = emitOp "multiply"
+compileOp Inverse      = emitOp "inverse"
+compileOp Negate       = emitOp "negate"
+compileOp Divmod       = emitOp "divmod"
 
 genC :: Map.Map Int String -> String
 genC bs = "#include \"rts.h\"\n" ++ concatMap (uncurry genC') (revsort $ Map.toList bs)

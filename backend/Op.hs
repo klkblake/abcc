@@ -16,4 +16,7 @@ data Op = LitBlock [Op]
         | Digit Int
         | Add
         | Multiply
+        | Inverse
+        | Negate
+        | Divmod
         deriving Show

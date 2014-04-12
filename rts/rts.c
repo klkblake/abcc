@@ -3,6 +3,7 @@
 
 #define DIE(name) do { write(2, name, sizeof(name)); exit(1); } while (0)
 char out_of_mem[] = "Out of memory\n";
+char divide_by_zero[] = "Division by zero\n";
 
 void *base = 0;
 void *limit = 0;
@@ -149,6 +150,26 @@ OP(add) {
 
 OP(multiply) {
 	return list1((Any) (v0.as_num * v1.as_num), vt2);
+}
+
+OP(inverse) {
+	if (v0.as_num == 0) {
+		DIE(divide_by_zero);
+	}
+	return list1((Any) (1 / v0.as_num), vt1);
+}
+
+OP(negate) {
+	return list1((Any) (-v0.as_num), vt1);
+}
+
+typedef double v2df __attribute__((vector_size(16)));
+
+OP(divmod) {
+	double a = v1.as_num, b = v0.as_num;
+	v2df q = {a / b};
+	q = __builtin_ia32_roundsd(q, q, 0x1);
+	return list2((Any) q[0], (Any) (a - q[0]*b), vt2);
 }
 
 #define COUNT 1000

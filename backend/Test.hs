@@ -35,6 +35,9 @@ parseOp '8' = Digit 8
 parseOp '9' = Digit 9
 parseOp '+' = Add
 parseOp '*' = Multiply
+parseOp '/' = Inverse
+parseOp '-' = Negate
+parseOp 'Q' = Divmod
 
 parse ps ('k':cs) = parse ps cs
 parse ps ('f':cs) = parse ps cs
@@ -47,6 +50,9 @@ parse [p]      [] = p
 
 -- dup quote dup apply swap apply * + 1000 +
 input = parse [[]] "r^wzlw'[l]o^wzlwvr$crwrwzwlwvr$crwrzw*wrzw+l#1000wrzw+l"
+
+-- -500 + 10 .divMod swap drop
+--input = parse [[]] "#500-wrzw+l#10wrzwQwzlw%"
 
 main :: IO ()
 main = case compile input of

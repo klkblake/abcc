@@ -8,5 +8,5 @@ RTSFILES="
 "
 
 # Make sure to align functions so that we have free bits in the pointer.
-./backend/Test > $TMPSRC && gcc -std=c99 -ffreestanding -nostdlib -falign-functions=4 -static -Wall -g -o test -Irts $RTSFILES $TMPSRC
+./backend/Test > $TMPSRC && gcc -std=c99 -msse4.1 -ffreestanding -nostdlib -falign-functions=4 -static -Wall -g -o test -Irts $RTSFILES $TMPSRC
 rm $TMPSRC
