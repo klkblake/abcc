@@ -48,16 +48,10 @@ parse (p:q:ps) (']':cs) = parse ((q ++ [LitBlock p]):ps) cs
 parse (p:ps)   (c:cs) = parse ((p ++ [parseOp c]):ps) cs
 parse [p]      [] = p
 
---input = concat [dup_abc, dup_abc, mult_abc, add_abc]
-
--- dup quote dup apply swap apply * + 1000 +
-input = parse [[]] "r^wzlw'[l]o^wzlwvr$crwrwzwlwvr$crwrzw*wrzw+l#1000wrzw+l"
-
--- -500 + 10 .divMod swap drop
---input = parse [[]] "#500-wrzw+l#10wrzwQwzlw%"
-
 main :: IO ()
-main = case compile input of
+main = do
+    input <- getContents
+    case compile $ parse [[]] input of
            Left  err  -> do hPutStrLn stderr $ "Failure: " ++ err
                             exitFailure
            Right prog -> putStr prog
