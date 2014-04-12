@@ -94,7 +94,7 @@ OP(elim1) {
 }
 
 OP(drop) {
-	return v1;
+	return vt1;
 }
 
 OP(copy) {
