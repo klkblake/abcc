@@ -4,6 +4,7 @@
 #define DIE(name) do { write(2, name, sizeof(name)); exit(1); } while (0)
 char out_of_mem[] = "Out of memory\n";
 char divide_by_zero[] = "Division by zero\n";
+char assertion_failure[] = ": Assertion failure\n";
 
 void *base = 0;
 void *limit = 0;
@@ -40,6 +41,12 @@ Any compBlock(Any a, Any b) {
 	return TAG((Any) (CompBlock) result, BLOCK_COMP);
 }
 
+Any sum(Any s, long tag) {
+	Any *result = malloc(sizeof(Any));
+	*result = s;
+	return TAG((Any) (const Any *) result, tag);
+}
+
 #define f(v) (((v).as_pair)->fst)
 #define s(v) (((v).as_pair)->snd)
 
@@ -70,6 +77,16 @@ Any compBlock(Any a, Any b) {
 #define list1(a, l) pair(a, l)
 #define list2(a, b, l) pair(a, pair(b, l))
 #define list3(a, b, c, l) pair(a, pair(b, pair(c, l)))
+
+#define deref(v) (*(CLEAR_TAG(v).as_indirect))
+
+#define s0 f(v)
+#define s1 deref(s0)
+#define s2 deref(s1)
+
+#define EITHER(v, l, r) (GET_TAG(v) == SUM_LEFT) ? (l) : (r)
+#define EITHER3(v1, v2, l, m, r) EITHER(v1, l, EITHER(v2, m, r))
+#define EITHER4(v1, v2, v3, b0, b1, b2, b3) EITHER3(v1, v2, b0, b1, EITHER(v3, b2, b3))
 
 OP(assocl) {
 	return pair(pair(f(v), sf(v)), ss(v));
@@ -119,7 +136,7 @@ Any applyBlock(Any b, Any x) {
 		break;
 
 		case BLOCK_QUOTE:
-		x = pair(*(b.as_quote_block), x);
+		x = pair(*(b.as_indirect), x);
 		break;
 	}
 	return x;
@@ -171,6 +188,82 @@ OP(divmod) {
 	v2df q = {a / b};
 	q = __builtin_ia32_roundsd(q, q, 0x1);
 	return list2((Any) (a - q[0]*b), (Any) q[0], vt2);
+}
+
+OP(assocls) {
+	return list1(EITHER3(s0, s1,
+				sum(s0, SUM_LEFT),
+				sum(TAG(s1, SUM_RIGHT), SUM_LEFT),
+				s1),
+			vt1);
+}
+
+OP(assocrs) {
+	return list1(EITHER(s0,
+				EITHER(s1,
+					s1,
+					sum(TAG(s1, SUM_LEFT), SUM_RIGHT)),
+				sum(s0, SUM_RIGHT)),
+			vt1);
+}
+
+OP(swaps) {
+	return list1(EITHER3(s0, s1,
+				sum(s0, SUM_RIGHT),
+				s1,
+				s0),
+			vt1);
+}
+
+OP(swapds) {
+	return list1(EITHER4(s0, s1, s2,
+				s0,
+				sum(s0, SUM_RIGHT),
+				s1,
+				s0),
+			vt1);
+}
+
+OP(intro0) {
+	return list1(sum(v0, SUM_LEFT), vt1);
+}
+
+OP(elim0) {
+	return list1(s1, vt1);
+}
+
+OP(condapply) {
+	return list1(EITHER(v1,
+				sum(applyBlock(v0, deref(v1)), SUM_LEFT),
+				v1),
+			vt2);
+}
+
+OP(distrib) {
+	return list1(sum(pair(v0, deref(v1)), GET_TAG(v1)), vt2);
+}
+
+OP(factor) {
+	return list2(sum(f(s1), GET_TAG(s0)), sum(s(s1), GET_TAG(s0)) , vt1);
+}
+
+OP(merge) {
+	return list1(s1, vt1);
+}
+
+Any _assert(char *line, int size, Any v) {
+	if (GET_TAG(s0) == SUM_LEFT) {
+		write(2, line, size);
+		DIE(assertion_failure);
+	}
+	return list1(s1, vt1);
+}
+
+OP(greater) {
+	double x = v0.as_num;
+	double y = v1.as_num;
+	int g = y > x;
+	return list1(sum(pair((Any) (g ? x : y), (Any) (g ? y : x)), g ? SUM_RIGHT : SUM_LEFT), vt2);
 }
 
 #define COUNT 1000

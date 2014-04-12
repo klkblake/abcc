@@ -58,6 +58,18 @@ compileOp Multiply     = emitOp "multiply"
 compileOp Inverse      = emitOp "inverse"
 compileOp Negate       = emitOp "negate"
 compileOp Divmod       = emitOp "divmod"
+compileOp AssocLS      = emitOp "assocls"
+compileOp AssocRS      = emitOp "assocrs"
+compileOp SwapS        = emitOp "swaps"
+compileOp SwapDS       = emitOp "swapds"
+compileOp Intro0       = emitOp "intro0"
+compileOp Elim0        = emitOp "elim0"
+compileOp CondApply    = emitOp "condapply"
+compileOp Distrib      = emitOp "distrib"
+compileOp Factor       = emitOp "factor"
+compileOp Merge        = emitOp "merge"
+compileOp Assert       = emitOp "assert"
+compileOp Greater      = emitOp "greater"
 
 genC :: Map.Map Int String -> String
 genC bs = "#include \"rts.h\"\n" ++ concatMap (uncurry genC') (revsort $ Map.toList bs)

@@ -19,4 +19,16 @@ data Op = LitBlock [Op]
         | Inverse
         | Negate
         | Divmod
+        | AssocLS
+        | AssocRS
+        | SwapS
+        | SwapDS
+        | Intro0
+        | Elim0
+        | CondApply
+        | Distrib
+        | Factor
+        | Merge
+        | Assert
+        | Greater
         deriving Show

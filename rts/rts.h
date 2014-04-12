@@ -7,11 +7,16 @@ enum block_type {
 	BLOCK_QUOTE,
 };
 
+enum sum_side {
+	SUM_LEFT,
+	SUM_RIGHT,
+};
+
 union any {
 	const struct pair *as_pair;
 	union any (*as_block)(union any);
 	const struct comp_block *as_comp_block;
-	const union any *as_quote_block;
+	const union any *as_indirect;
 	double as_num;
 	long as_tagged;
 };
@@ -35,9 +40,9 @@ typedef const struct comp_block *CompBlock;
 #define Unit ((Any) (long) 0x1)
 #define Void ((Any) (long) 0x0)
 
-#define TAG(v, t) ((Any) ((v).as_tagged | t))
-#define GET_TAG(v) ((v).as_tagged & 0x3)
 #define CLEAR_TAG(v) ((Any) ((v).as_tagged &~ 0x3))
+#define TAG(v, t) ((Any) (CLEAR_TAG(v).as_tagged | t))
+#define GET_TAG(v) ((v).as_tagged & 0x3)
 
 Any pair(Any a, Any b);
 
@@ -61,3 +66,19 @@ OP(multiply);
 OP(inverse);
 OP(negate);
 OP(divmod);
+OP(assocls);
+OP(assocrs);
+OP(swaps);
+OP(swapds);
+OP(intro0);
+OP(elim0);
+OP(condapply);
+OP(distrib);
+OP(factor);
+OP(merge);
+Any _assert(char *line, int size, Any v);
+#define __stringify(line) #line
+#define __str(line) __stringify(line)
+#define _assert2(line, v) _assert(line, sizeof(line), v)
+#define assert(v) _assert2("Line " __str(__LINE__), (v))
+OP(greater);
