@@ -14,9 +14,10 @@ void init_mm(void) {
 }
 
 void *malloc(long size) {
-	if (base == limit) {
+	if (limit - base < size) {
+		void *old = limit;
 		limit = brk(limit + 16*4096);
-		if (limit == base) {
+		if (limit == old) {
 			DIE(out_of_mem);
 		}
 	}
