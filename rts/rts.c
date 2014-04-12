@@ -170,7 +170,7 @@ OP(divmod) {
 	double a = v1.as_num, b = v0.as_num;
 	v2df q = {a / b};
 	q = __builtin_ia32_roundsd(q, q, 0x1);
-	return list2((Any) q[0], (Any) (a - q[0]*b), vt2);
+	return list2((Any) (a - q[0]*b), (Any) q[0], vt2);
 }
 
 #define COUNT 1000
