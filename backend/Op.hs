@@ -32,4 +32,6 @@ data Op = LitBlock [Op]
         | Merge
         | Assert
         | Greater
+        | DebugPrintRaw
+        | DebugPrintText
         deriving Show

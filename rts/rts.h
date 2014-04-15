@@ -82,3 +82,5 @@ Any _assert(char *line, int size, Any v);
 #define _assert2(line, v) _assert(line, sizeof(line), v)
 #define assert(v) _assert2("Line " __str(__LINE__), (v))
 OP(greater);
+OP(debug_print_raw);
+OP(debug_print_text);

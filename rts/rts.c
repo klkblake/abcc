@@ -7,6 +7,7 @@ const Any Unit = (Any) 1l;
 char out_of_mem[] = "Out of memory\n";
 char divide_by_zero[] = "Division by zero\n";
 char assertion_failure[] = ": Assertion failure\n";
+char write_failed[] = "Write failed\n";
 
 void *base = 0;
 void *limit = 0;
@@ -268,19 +269,49 @@ OP(greater) {
 	return list1(sum(pair((Any) (g ? x : y), (Any) (g ? y : x)), g ? SUM_RIGHT : SUM_LEFT), vt2);
 }
 
+void write_force(int fd, const char *buf, long size) {
+	long res = write(fd, buf, size);
+	if (res != 0) {
+		DIE(write_failed);
+	}
+}
+
+OP(debug_print_raw) {
+	write_force(2, (const char *) &v0, sizeof(v0));
+	return vt1;
+}
+
+void debug_print_text2(Any v) {
+	char buf[256];
+	int size = 0;
+	while (GET_TAG(v) == SUM_RIGHT) {
+		v = *CLEAR_TAG(v).as_indirect;
+		buf[size++] = (char) (long) f(v).as_num;
+		if (size == sizeof(buf)) {
+			write_force(2, buf, size);
+			size = 0;
+		}
+		v = s(v);
+	}
+	if (size > 0) {
+		write_force(2, buf, size);
+	}
+}
+
+OP(debug_print_text) {
+	debug_print_text2(v0);
+	return vt1;
+}
+
 #define COUNT 1000
 
 extern Any block_0(Any);
 
 int main(void) {
 	init_mm();
-	double out[COUNT];
-	for (long i = 0; i < COUNT; i++) {
-		Any power = Unit;
-		Any name = sum(Unit, SUM_LEFT);
-		Any v = pair(pair((Any) (double) i, Unit), pair(Unit, pair(power, pair(pair(name, Unit), Unit))));
-		v = block_0(v);
-		out[i] = ff(v).as_num;
-	}
-	return -write(1, (const char *)out, sizeof(out));
+	Any power = Unit;
+	Any name = sum(Unit, SUM_LEFT);
+	Any v = pair(Unit, pair(Unit, pair(power, pair(pair(name, Unit), Unit))));
+	v = block_0(v);
+	return 0;
 }

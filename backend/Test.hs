@@ -54,6 +54,8 @@ parseOp op = error $ "Unrecognised opcode: " ++ show op
 
 parseCap (':':_) = []
 parseCap ('.':_) = []
+parseCap "&debug print raw" = [DebugPrintRaw]
+parseCap "&debug print text" = [DebugPrintText]
 parseCap cap = error $ "Unrecognised capability: " ++ show cap
 
 parseText ('\n':' ':cs) = let (text, cs') = parseText cs
@@ -68,7 +70,7 @@ parse ps ('k':cs) = parse ps cs
 parse ps ('f':cs) = parse ps cs
 parse ps (' ':cs) = parse ps cs
 parse ps ('\n':cs) = parse ps cs
-parse ps ('{':cs) = parse (parseCap (takeWhile (/= '}') cs) ++ ps) (tail $ dropWhile (/= '}') cs)
+parse (p:ps) ('{':cs) = parse ((p ++ parseCap (takeWhile (/= '}') cs)):ps) (tail $ dropWhile (/= '}') cs)
 parse (p:ps)   ('"':cs) = let (text, cs') = parseText cs in parse ((p ++ [LitText text]):ps) cs'
 parse (p:ps)   ('[':cs) = parse ([]:p:ps) cs
 parse (p:q:ps) (']':cs) = parse ((q ++ [LitBlock p]):ps) cs
