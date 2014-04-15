@@ -7,6 +7,7 @@ enum block_type {
 	BLOCK_QUOTE,
 };
 
+// Must match Codegen.hs
 enum sum_side {
 	SUM_LEFT,
 	SUM_RIGHT,
@@ -37,8 +38,7 @@ struct comp_block {
 
 typedef const struct comp_block *CompBlock;
 
-#define Unit ((Any) (long) 0x1)
-#define Void ((Any) (long) 0x0)
+extern const Any Unit;
 
 #define CLEAR_TAG(v) ((Any) ((v).as_tagged &~ 0x3))
 #define TAG(v, t) ((Any) (CLEAR_TAG(v).as_tagged | t))

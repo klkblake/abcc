@@ -1,6 +1,7 @@
 module Op where
 
 data Op = LitBlock [Op]
+        | LitText String
         | AssocL
         | AssocR
         | Swap

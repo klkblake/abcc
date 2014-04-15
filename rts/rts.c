@@ -1,6 +1,8 @@
 #include "syscalls.h"
 #include "rts.h"
 
+const Any Unit = (Any) 1l;
+
 #define DIE(name) do { write(2, name, sizeof(name)); exit(1); } while (0)
 char out_of_mem[] = "Out of memory\n";
 char divide_by_zero[] = "Division by zero\n";

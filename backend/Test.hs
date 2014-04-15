@@ -52,10 +52,24 @@ parseOp 'K' = Assert
 parseOp '>' = Greater
 parseOp op = error $ "Unrecognised opcode: " ++ show op
 
+parseCap (':':_) = []
+parseCap ('.':_) = []
+parseCap cap = error $ "Unrecognised capability: " ++ show cap
+
+parseText ('\n':' ':cs) = let (text, cs') = parseText cs
+                          in ('\n':text, cs')
+parseText ('\n':'~':cs) = ("", cs)
+parseText ('\n':c:cs) = error $ "Invalid character " ++ show c ++ " after newline in text literal"
+parseText (c:cs) = let (text, cs') = parseText cs
+                   in (c:text, cs')
+
+parse :: [[Op]] -> String -> [Op]
 parse ps ('k':cs) = parse ps cs
 parse ps ('f':cs) = parse ps cs
 parse ps (' ':cs) = parse ps cs
 parse ps ('\n':cs) = parse ps cs
+parse ps ('{':cs) = parse (parseCap (takeWhile (/= '}') cs) ++ ps) (tail $ dropWhile (/= '}') cs)
+parse (p:ps)   ('"':cs) = let (text, cs') = parseText cs in parse ((p ++ [LitText text]):ps) cs'
 parse (p:ps)   ('[':cs) = parse ([]:p:ps) cs
 parse (p:q:ps) (']':cs) = parse ((q ++ [LitBlock p]):ps) cs
 parse (p:ps)   (c:cs) = parse ((p ++ [parseOp c]):ps) cs
