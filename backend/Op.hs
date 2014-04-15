@@ -11,6 +11,7 @@ data Op = LitBlock [Op]
         | Drop
         | Copy
         | Apply
+        | ApplyTail
         | Compose
         | Quote
         | IntroNum

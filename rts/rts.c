@@ -50,47 +50,6 @@ Any sum(Any s, long tag) {
 	return TAG((Any) (const Any *) result, tag);
 }
 
-#define f(v) (((v).as_pair)->fst)
-#define s(v) (((v).as_pair)->snd)
-
-#define ff(v) f(f(v))
-#define fs(v) s(f(v))
-#define sf(v) f(s(v))
-#define ss(v) s(s(v))
-
-#define ssf(v) f(s(s(v)))
-#define sss(v) s(s(s(v)))
-
-#define l0(v) f(v)
-#define l1(v) sf(v)
-#define l2(v) ssf(v)
-
-#define t1(v) s(v)
-#define t2(v) ss(v)
-#define t3(v) sss(v)
-
-#define v0 l0(v)
-#define v1 l1(v)
-#define v2 l2(v)
-
-#define vt1 t1(v)
-#define vt2 t2(v)
-#define vt3 t3(v)
-
-#define list1(a, l) pair(a, l)
-#define list2(a, b, l) pair(a, pair(b, l))
-#define list3(a, b, c, l) pair(a, pair(b, pair(c, l)))
-
-#define deref(v) (*(CLEAR_TAG(v).as_indirect))
-
-#define s0 f(v)
-#define s1 deref(s0)
-#define s2 deref(s1)
-
-#define EITHER(v, l, r) (GET_TAG(v) == SUM_LEFT) ? (l) : (r)
-#define EITHER3(v1, v2, l, m, r) EITHER(v1, l, EITHER(v2, m, r))
-#define EITHER4(v1, v2, v3, b0, b1, b2, b3) EITHER3(v1, v2, b0, b1, EITHER(v3, b2, b3))
-
 OP(assocl) {
 	return pair(pair(f(v), sf(v)), ss(v));
 }

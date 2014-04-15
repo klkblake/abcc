@@ -70,6 +70,7 @@ parse ps ('k':cs) = parse ps cs
 parse ps ('f':cs) = parse ps cs
 parse ps (' ':cs) = parse ps cs
 parse ps ('\n':cs) = parse ps cs
+parse (p:ps) ('$':'c':']':cs) = parse ((p ++ [ApplyTail]):ps) (']':cs)
 parse (p:ps) ('{':cs) = parse ((p ++ parseCap (takeWhile (/= '}') cs)):ps) (tail $ dropWhile (/= '}') cs)
 parse (p:ps)   ('"':cs) = let (text, cs') = parseText cs in parse ((p ++ [LitText text]):ps) cs'
 parse (p:ps)   ('[':cs) = parse ([]:p:ps) cs
