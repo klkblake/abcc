@@ -99,16 +99,7 @@ OP(copy);
 OP(drop);
 Any applyBlock(Any b, Any x);
 OP(apply);
-// XXX GCC does not actually tail-call optimise this for some reason
-#define apply_tail(v) \
-	do { \
-		if (GET_TAG(v0) == BLOCK_NORMAL) { \
-			return CLEAR_TAG(v0).as_block(v1); \
-		} else { \
-			return applyBlock(v0, v1); \
-		} \
-	} while (0)
-
+OP(apply_tail);
 OP(compose);
 OP(quote);
 OP(introNum);

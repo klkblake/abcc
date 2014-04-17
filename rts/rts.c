@@ -108,6 +108,10 @@ OP(apply) {
 	return list1(applyBlock(v0, v1), vt2);
 }
 
+OP(apply_tail) {
+	return applyBlock(v0, v1);
+}
+
 OP(compose) {
 	return list1(compBlock(v1, v0), vt2);
 }
@@ -261,8 +265,6 @@ OP(debug_print_text) {
 	debug_print_text2(v0);
 	return vt1;
 }
-
-#define COUNT 1000
 
 extern Any block_0(Any);
 
