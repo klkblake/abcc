@@ -1,0 +1,7 @@
+std
+
+@debugPrintRaw %r {&debug print raw}
+
+@debugPrintText %r {&debug print text}
+
+@sample1000 0 [inc dup pick apply debugPrintRaw] 1000 repeat drop
