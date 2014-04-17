@@ -1,5 +1,7 @@
 module Main
 
+import parse
+
 partial -- no error checking!
 readHandle : File -> IO String
 readHandle h = readHandle' ""
@@ -13,16 +15,22 @@ readHandle h = readHandle' ""
                     readHandle' $ contents ++ l
             else return contents
 
-optimise : List Char -> List Char
-optimise = List.filter (not . flip List.elem [' ', '\n'])
+elimWhitespace : List Char -> List Char
+elimWhitespace = List.filter (not . flip List.elem [' ', '\n'])
+
+optimise : String -> String
+optimise input = case parse . elimWhitespace $ unpack input of
+                      Left  err         => "ERROR: " ++ err
+                      Right (_ ** prog) => show prog
 
 main : IO ()
 main = do
-  frontend <- popen "ao abcRaw fibonacci" Read
-  input <- readHandle frontend
-  pclose frontend -- Silently ignores errors. Hopefully will actually return the code in the future.
+  --frontend <- popen "ao abcRaw fibonacci" Read
+  --input <- readHandle frontend
+  --pclose frontend -- Silently ignores errors. Hopefully will actually return the code in the future.
+  let input = "lrlrlrlr"
   putStrLn $ "Received input:\n" ++ input
-  let output = pack . optimise . unpack $  input
+  let output = optimise input
   putStrLn $ "Optimised form:\n" ++ output
   putStrLn "Passing to backend"
   backend <- popen "abcc-backend" Write
