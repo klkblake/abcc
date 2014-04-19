@@ -12,7 +12,7 @@ RTSFILES="
 (cd backend && ghc --make Test)
 AO_DICT=abcc AO_PATH="./ao:$AO_PATH" ao abc "$@" | ./backend/Test > $TMPSRC
 # With gcc, pass -falign-functions=3 so that we have free bits in the function pointers.
-clang -std=c99 -march=native -msse4.1 -ffreestanding -nostdlib -O4 -static -Wall -g -o abc.out -Irts $RTSFILES $TMPSRC
+clang -std=c99 -march=native -msse4.1 -ffreestanding -nostdlib -O3 -static -Wall -g -o abc.out -Irts $RTSFILES $TMPSRC
 echo Running
 ./abc.out # | hexdump -e '8/8 "%f\t" "\n"'
 echo Done
