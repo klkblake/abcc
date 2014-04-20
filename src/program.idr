@@ -11,22 +11,6 @@ DivModType : Float -> Float -> AType a -> AType a
 DivModType a b e = let q = floor $ a / b
                    in Number (a - q * b) .* Number q .* e
 
-IsPairType : AType a -> AType a -> AType a
-IsPairType free (x .* y) = free .+ x .* y
-IsPairType free x         = x .+ free 
-
-IsSumType : AType a -> AType a -> AType a
-IsSumType free (x .+ y) = free .+ x .+ y
-IsSumType free x         = x .+ free 
-
-IsBlockType : AType a -> AType a -> AType a
-IsBlockType free (x ~> y) = free .+ (x ~> y)
-IsBlockType free x        = x .+ free 
-
-IsNumberType : AType a -> AType a -> AType a
-IsNumberType free (Number x) = free .+ (Number x)
-IsNumberType free x          = x .+ free 
-
 mutual
   -- We only need to predeclare the ones that appear bare.
   using (a : AType v, e : AType v)
@@ -71,10 +55,6 @@ mutual
       Merge     : Op ((a .+ a) .* e) (a .* e) -- stricter than necessary
       Assert    : Op ((a .+ b) .* e) (b .* e)
 
-      IsPair   : Observable x => Op x (IsPairType a x)
-      IsSum    : Observable x => Op x (IsSumType a x)
-      IsBlock  : Observable x => Op x (IsBlockType a x)
-      IsNumber : Observable x => Op x (IsNumberType a x)
       Compare  : Comparable x y => Op (x .* y .* e) ((y .* x .+ x .* y) .* e)
   {-
     ProgramConsType : AType Nat -> AType Nat -> AType Nat -> AType Nat -> Type

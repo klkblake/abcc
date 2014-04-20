@@ -53,9 +53,6 @@ instance Foldable AType where
   foldr f acc (Var k) = f k acc
   foldr _ acc _ = acc
 
-class Observable (ty : AType a) where
-  ignoreme : Int
-
 class Droppable (ty : AType a) where
   ignoreme2 : Int
 
