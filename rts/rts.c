@@ -51,11 +51,11 @@ Any sum(Any s, long tag) {
 }
 
 OP(assocl) {
-	return pair(pair(f(v), sf(v)), ss(v));
+	return pair(pair(f(v), f(s(v))), s(s(v)));
 }
 
 OP(assocr) {
-	return list2(ff(v), fs(v), s(v));
+	return list2(f(f(v)), s(f(v)), s(v));
 }
 
 OP(swap) {
