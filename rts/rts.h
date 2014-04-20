@@ -73,6 +73,9 @@ Any pair(Any a, Any b);
 
 #define OP(name) Any name(Any v)
 
+#define OP1(name, expr) OP(name) { return list1(expr, vt1); }
+#define OP21(name, expr) OP(name) { return list1(expr, vt2); }
+
 OP(assocl);
 OP(assocr);
 OP(swap);

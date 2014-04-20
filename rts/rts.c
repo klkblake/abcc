@@ -104,21 +104,15 @@ Any applyBlock(Any b, Any x) {
 	return x;
 }
 
-OP(apply) {
-	return list1(applyBlock(v0, v1), vt2);
-}
+OP21(apply, applyBlock(v0, v1));
 
 OP(apply_tail) {
 	return applyBlock(v0, v1);
 }
 
-OP(compose) {
-	return list1(compBlock(v1, v0), vt2);
-}
+OP21(compose, compBlock(v1, v0));
 
-OP(quote) {
-	return list1(TAG((Any) &v0, BLOCK_QUOTE), vt1);
-}
+OP1(quote, TAG((Any) &v0, BLOCK_QUOTE));
 
 OP(introNum) {
 	return list1((Any) 0.0, v);
@@ -128,13 +122,9 @@ Any digit(int d, Any v) {
 	return list1((Any) (v0.as_num * 10 + d), vt1);
 }
 
-OP(add) {
-	return list1((Any) (v0.as_num + v1.as_num), vt2);
-}
+OP21(add, (Any) (v0.as_num + v1.as_num));
 
-OP(multiply) {
-	return list1((Any) (v0.as_num * v1.as_num), vt2);
-}
+OP21(multiply, (Any) (v0.as_num * v1.as_num));
 
 OP(inverse) {
 	if (v0.as_num == 0) {
@@ -143,9 +133,7 @@ OP(inverse) {
 	return list1((Any) (1 / v0.as_num), vt1);
 }
 
-OP(negate) {
-	return list1((Any) (-v0.as_num), vt1);
-}
+OP1(negate, (Any) (-v0.as_num));
 
 typedef double v2df __attribute__((vector_size(16)));
 
@@ -156,66 +144,43 @@ OP(divmod) {
 	return list2((Any) (a - q[0]*b), (Any) q[0], vt2);
 }
 
-OP(assocls) {
-	return list1(EITHER3(s0, s1,
-				sum(s0, SUM_LEFT),
-				sum(TAG(s1, SUM_RIGHT), SUM_LEFT),
-				s1),
-			vt1);
-}
+OP1(assocls, EITHER3(s0, s1,
+			sum(s0, SUM_LEFT),
+			sum(TAG(s1, SUM_RIGHT), SUM_LEFT),
+			s1));
 
-OP(assocrs) {
-	return list1(EITHER(s0,
-				EITHER(s1,
-					s1,
-					sum(TAG(s1, SUM_LEFT), SUM_RIGHT)),
-				sum(s0, SUM_RIGHT)),
-			vt1);
-}
-
-OP(swaps) {
-	return list1(EITHER3(s0, s1,
-				sum(s0, SUM_RIGHT),
+OP1(assocrs, EITHER(s0,
+			EITHER(s1,
 				s1,
-				s0),
-			vt1);
-}
+				sum(TAG(s1, SUM_LEFT), SUM_RIGHT)),
+			sum(s0, SUM_RIGHT)));
 
-OP(swapds) {
-	return list1(EITHER4(s0, s1, s2,
-				s0,
-				sum(s0, SUM_RIGHT),
-				s1,
-				s0),
-			vt1);
-}
+OP1(swaps, EITHER3(s0, s1,
+			sum(s0, SUM_RIGHT),
+			s1,
+			s0));
 
-OP(intro0) {
-	return list1(sum(v0, SUM_LEFT), vt1);
-}
+OP1(swapds, EITHER4(s0, s1, s2,
+			s0,
+			sum(s0, SUM_RIGHT),
+			s1,
+			s0));
 
-OP(elim0) {
-	return list1(s1, vt1);
-}
+OP1(intro0, sum(v0, SUM_LEFT));
 
-OP(condapply) {
-	return list1(EITHER(v1,
-				sum(applyBlock(v0, deref(v1)), SUM_LEFT),
-				v1),
-			vt2);
-}
+OP1(elim0, s1);
 
-OP(distrib) {
-	return list1(sum(pair(v0, deref(v1)), GET_TAG(v1)), vt2);
-}
+OP21(condapply, EITHER(v1,
+			sum(applyBlock(v0, deref(v1)), SUM_LEFT),
+			v1));
+
+OP21(distrib, sum(pair(v0, deref(v1)), GET_TAG(v1)));
 
 OP(factor) {
 	return list2(sum(f(s1), GET_TAG(s0)), sum(s(s1), GET_TAG(s0)) , vt1);
 }
 
-OP(merge) {
-	return list1(s1, vt1);
-}
+OP1(merge, s1);
 
 Any _assert(char *line, int size, Any v) {
 	if (GET_TAG(s0) == SUM_LEFT) {
