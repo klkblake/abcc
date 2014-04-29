@@ -109,10 +109,10 @@ op(distrib);
 op(factor);
 op(merge);
 Any _assert(char *line, int size, Any v);
-#define __stringify(line) #line
-#define __str(line) __stringify(line)
-#define _assert2(line, v) _assert(line, sizeof(line), v)
-#define assert(v) _assert2("Line " __str(__LINE__), (v))
+#define _STRINGIFY(line) #line
+#define STRINGIFY(line) _STRINGIFY(line)
+#define ASSERT(line, v) _assert(line, sizeof(line), v)
+#define assert(v) ASSERT("Line " STRINGIFY(__LINE__) ": ", (v))
 op(greater);
 op(debug_print_raw);
 op(debug_print_text);
