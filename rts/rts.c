@@ -50,38 +50,6 @@ Any sum(Any s, long tag) {
 	return TAG((Any) (const Any *) result, tag);
 }
 
-OP(assocl) {
-	return pair(pair(f(v), f(s(v))), s(s(v)));
-}
-
-OP(assocr) {
-	return list2(f(f(v)), s(f(v)), s(v));
-}
-
-OP(swap) {
-	return list2(v1, v0, vt2);
-}
-
-OP(swapd) {
-	return list3(v0, v2, v1, vt3);
-}
-
-OP(intro1) {
-	return pair(v, Unit);
-}
-
-OP(elim1) {
-	return v0;
-}
-
-OP(drop) {
-	return vt1;
-}
-
-OP(copy) {
-	return list2(v0, v0, vt1);
-}
-
 Any applyBlock(Any b, Any x) {
 	long type = GET_TAG(b);
 	b = CLEAR_TAG(b);
@@ -104,19 +72,39 @@ Any applyBlock(Any b, Any x) {
 	return x;
 }
 
+// ---- BEGIN OPS ----
+
+// -- Basic plumbing --
+
+OP(assocl, pair(pair(f(v), f(s(v))), s(s(v))));
+
+OP(assocr, list2(f(f(v)), s(f(v)), s(v)));
+
+OP(swap, list2(v1, v0, vt2));
+
+OP(swapd, list3(v0, v2, v1, vt3));
+
+OP(intro1, pair(v, Unit));
+
+OP(elim1, v0);
+
+OP(drop, vt1);
+
+OP(copy, list2(v0, v0, vt1));
+
+// -- Block operations --
+
 OP21(apply, applyBlock(v0, v1));
 
-OP(apply_tail) {
-	return applyBlock(v0, v1);
-}
+OP(apply_tail, applyBlock(v0, v1));
 
 OP21(compose, compBlock(v1, v0));
 
 OP1(quote, TAG((Any) &v0, BLOCK_QUOTE));
 
-OP(introNum) {
-	return list1((Any) 0.0, v);
-}
+// -- Math --
+
+OP(introNum, list1((Any) 0.0, v));
 
 Any digit(int d, Any v) {
 	return list1((Any) (v0.as_num * 10 + d), vt1);
@@ -126,7 +114,7 @@ OP21(add, (Any) (v0.as_num + v1.as_num));
 
 OP21(multiply, (Any) (v0.as_num * v1.as_num));
 
-OP(inverse) {
+OPFUNC(inverse) {
 	if (v0.as_num == 0) {
 		DIE(divide_by_zero);
 	}
@@ -137,12 +125,14 @@ OP1(negate, (Any) (-v0.as_num));
 
 typedef double v2df __attribute__((vector_size(16)));
 
-OP(divmod) {
+OPFUNC(divmod) {
 	double a = v1.as_num, b = v0.as_num;
 	v2df q = {a / b};
 	q = __builtin_ia32_roundsd(q, q, 0x1);
 	return list2((Any) (a - q[0]*b), (Any) q[0], vt2);
 }
+
+// -- Basic sum plumbing --
 
 OP1(assocls, EITHER3(s0, s1,
 			sum(s0, SUM_LEFT),
@@ -170,17 +160,19 @@ OP1(intro0, sum(v0, SUM_LEFT));
 
 OP1(elim0, s1);
 
+// -- Other sum operations --
+
 OP21(condapply, EITHER(v1,
 			sum(applyBlock(v0, deref(v1)), SUM_LEFT),
 			v1));
 
 OP21(distrib, sum(pair(v0, deref(v1)), GET_TAG(v1)));
 
-OP(factor) {
-	return list2(sum(f(s1), GET_TAG(s0)), sum(s(s1), GET_TAG(s0)) , vt1);
-}
+OP(factor, list2(sum(f(s1), GET_TAG(s0)), sum(s(s1), GET_TAG(s0)) , vt1));
 
 OP1(merge, s1);
+
+// -- Misc --
 
 Any _assert(char *line, int size, Any v) {
 	if (GET_TAG(s0) == SUM_LEFT) {
@@ -190,7 +182,7 @@ Any _assert(char *line, int size, Any v) {
 	return list1(s1, vt1);
 }
 
-OP(greater) {
+OPFUNC(greater) {
 	double x = v0.as_num;
 	double y = v1.as_num;
 	int g = y > x;
@@ -204,7 +196,7 @@ void write_force(int fd, const char *buf, long size) {
 	}
 }
 
-OP(debug_print_raw) {
+OPFUNC(debug_print_raw) {
 	write_force(2, (const char *) &v0, sizeof(v0));
 	return vt1;
 }
@@ -226,10 +218,12 @@ void debug_print_text2(Any v) {
 	}
 }
 
-OP(debug_print_text) {
+OPFUNC(debug_print_text) {
 	debug_print_text2(v0);
 	return vt1;
 }
+
+// ---- END OPS ----
 
 extern Any block_0(Any);
 

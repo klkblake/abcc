@@ -71,46 +71,49 @@ extern const Any Unit;
 
 Any pair(Any a, Any b);
 
-#define OP(name) Any name(Any v)
+#define OPFUNC(name) Any name(Any v)
 
-#define OP1(name, expr) OP(name) { return list1(expr, vt1); }
-#define OP21(name, expr) OP(name) { return list1(expr, vt2); }
+#define OP(name, expr) OPFUNC(name) { return (expr); }
+#define OP1(name, expr) OP(name, list1((expr), vt1))
+#define OP21(name, expr) OP(name, list1((expr), vt2))
 
-OP(assocl);
-OP(assocr);
-OP(swap);
-OP(swapd);
-OP(intro1);
-OP(elim1);
-OP(copy);
-OP(drop);
+#define op(name) OPFUNC(name)
+op(assocl);
+op(assocr);
+op(swap);
+op(swapd);
+op(intro1);
+op(elim1);
+op(copy);
+op(drop);
 Any applyBlock(Any b, Any x);
-OP(apply);
-OP(apply_tail);
-OP(compose);
-OP(quote);
-OP(introNum);
+op(apply);
+op(apply_tail);
+op(compose);
+op(quote);
+op(introNum);
 Any digit(int d, Any v);
-OP(add);
-OP(multiply);
-OP(inverse);
-OP(negate);
-OP(divmod);
-OP(assocls);
-OP(assocrs);
-OP(swaps);
-OP(swapds);
-OP(intro0);
-OP(elim0);
-OP(condapply);
-OP(distrib);
-OP(factor);
-OP(merge);
+op(add);
+op(multiply);
+op(inverse);
+op(negate);
+op(divmod);
+op(assocls);
+op(assocrs);
+op(swaps);
+op(swapds);
+op(intro0);
+op(elim0);
+op(condapply);
+op(distrib);
+op(factor);
+op(merge);
 Any _assert(char *line, int size, Any v);
 #define __stringify(line) #line
 #define __str(line) __stringify(line)
 #define _assert2(line, v) _assert(line, sizeof(line), v)
 #define assert(v) _assert2("Line " __str(__LINE__), (v))
-OP(greater);
-OP(debug_print_raw);
-OP(debug_print_text);
+op(greater);
+op(debug_print_raw);
+op(debug_print_text);
+#undef op
