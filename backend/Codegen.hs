@@ -8,10 +8,9 @@ import qualified Data.Map.Lazy as Map
 import Numeric
 
 import qualified LLVM.General.AST as LLVM
-import LLVM.General.AST hiding (Type, Add)
+import LLVM.General.AST hiding (Add)
 
 import Op
-import Type
 
 double :: LLVM.Type
 double = FloatingPointType 64 IEEE
