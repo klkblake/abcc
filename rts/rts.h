@@ -111,7 +111,7 @@ op(merge);
 Any _assert(char *line, int size, Any v);
 #define _STRINGIFY(line) #line
 #define STRINGIFY(line) _STRINGIFY(line)
-#define ASSERT(line, v) _assert(line, sizeof(line), v)
+#define ASSERT(line, v) _assert(line, sizeof(line) - 1, v)
 #define assert(v) ASSERT("Line " STRINGIFY(__LINE__) ": ", (v))
 op(greater);
 op(debug_print_raw);
