@@ -114,7 +114,7 @@ compileOp DebugPrintRaw  = emitOp "debug_print_raw"
 compileOp DebugPrintText = emitOp "debug_print_text"
 
 genC :: Map.Map Int String -> Map.Map String (Int, (String, (String, String))) -> String
-genC bs ts = let ts' = map snd . map snd . sortFst . map snd . Map.toList $ ts
+genC bs ts = let ts' = map (snd . snd) . sortFst . map snd . Map.toList $ ts
              in "#include \"rts.h\"\n\nextern const Any text[];\nextern const struct pair text_nodes[];\n\n" ++ genText (map fst ts') ++ "\n" ++ genTextNodes (map snd ts') ++ "\n" ++ "\n" ++ concatMap (uncurry genBlocks) (reverse . sortFst . Map.toList $ bs)
   where
     sortFst = sortBy (compare `on` fst)
