@@ -15,6 +15,7 @@ import Op
 double :: LLVM.Type
 double = FloatingPointType 64 IEEE
 
+run :: String -> String
 run op = "\tv = " ++ op ++ "(v);\n"
 
 data CodegenState = CodegenState { blocks       :: Map.Map Int String
@@ -37,7 +38,7 @@ emitBlock b = do
     let n = Map.size bs
     put $ CodegenState (Map.insert n [] bs) ts n
     mapM_ compileOp b
-    modify $ \(CodegenState bs ts _) -> CodegenState bs ts c
+    modify $ \(CodegenState bs' ts' _) -> CodegenState bs' ts' c
     return n
 
 emitText :: String -> Codegen (Int, String)
@@ -50,29 +51,29 @@ emitText t = do
             case t of
                 (c:cs) -> do
                     -- Allocate this ID
-                    insertTextNode t n "" "" ""
-                    (tid, tref) <- emitText cs
+                    insertTextNode n "" "" ""
+                    (_, tref) <- emitText cs
                     -- Ideally, we'd be ORing in the sumLeft/sumRight
                     -- values, but GAS only permits addition when the
                     -- operands are in different sections, e.g. .rodata and
                     -- *ABS*.
                     let ref = quad $ "(text + " ++ show n ++ "*8) + " ++ show sumRight
                     let text = quad $ "_text_nodes + " ++ show n ++ "*16"
-                    insertTextNode t n ref text $ line (".double " ++ show (fromIntegral $ ord c :: Double)) ++ tref
+                    insertTextNode n ref text $ line (".double " ++ show (fromIntegral $ ord c :: Double)) ++ tref
                     return (n, ref)
                 [] -> do
                     let ref = quad $ "Unit + " ++ show sumLeft
                     let text = quad deadbeef
-                    insertTextNode t n ref text $ text ++ text
+                    insertTextNode n ref text $ text ++ text
                     return (n, ref)
   where
     -- Must match rts.h
-    sumLeft = 0
-    sumRight = 1
-    deadbeef = "0x" ++ showHex 0xd34db33f ""
+    sumLeft = 0 :: Int
+    sumRight = 1 :: Int
+    deadbeef = "0x" ++ showHex (0xd34db33f :: Int) ""
     line x = "\"\t " ++ x ++ "\\n\"\n"
     quad x = line $ ".quad " ++ x
-    insertTextNode t n ref text textNode =
+    insertTextNode n ref text textNode =
         modify $ \(CodegenState bs ts c) -> CodegenState bs (Map.insert t (n, (ref, (text, textNode))) ts) c
 
 compileOp :: Op -> Codegen ()

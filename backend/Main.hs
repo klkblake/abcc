@@ -6,6 +6,7 @@ import System.Exit
 import Op
 import Codegen
 
+opcodes :: [(Char, Op)]
 opcodes = [ ('l', AssocL)
           , ('r', AssocR)
           , ('w', Swap)
@@ -61,9 +62,10 @@ parseText :: String -> Either String (String, String)
 parseText ('\n':' ':cs) = do (text, cs') <- parseText cs
                              return ('\n':text, cs')
 parseText ('\n':'~':cs) = return ("", cs)
-parseText ('\n':c:cs) = fail $ "Invalid character " ++ show c ++ " after newline in text literal"
+parseText ('\n':c:_) = fail $ "Invalid character " ++ show c ++ " after newline in text literal"
 parseText (c:cs) = do (text, cs') <- parseText cs
                       return (c:text, cs')
+parseText "" = fail "Unterminated text"
 
 -- parse code or block, accumulating in reverse on left
 --   return properly ordered result and remaining text
@@ -91,8 +93,8 @@ parse :: [Op] -> String -> Either String [Op]
 parse ps cs = do
     (ps', cs') <- parse' ps cs
     case cs' of
-        ""  -> return ps'
-        rem -> fail $ "Unmatched closing bracket. Remaining:\n" ++ rem
+        "" -> return ps'
+        _  -> fail $ "Unmatched closing bracket. Remaining:\n" ++ cs'
 
 main :: IO ()
 main = do
