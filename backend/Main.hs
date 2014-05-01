@@ -6,11 +6,6 @@ import System.Exit
 import Op
 import Codegen
 
-add_abc  = [AssocR, Swap, AssocR, SwapD, Swap, Add, AssocL]
-mult_abc = [AssocR, Swap, AssocR, SwapD, Swap, Multiply, AssocL]
-dup_abc  = [AssocR, Copy, Swap, SwapD, AssocL, Swap, AssocL]
-drop_abc = [AssocR, Drop]
-
 opcodes = [ ('l', AssocL)
           , ('r', AssocR)
           , ('w', Swap)
