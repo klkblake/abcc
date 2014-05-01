@@ -26,7 +26,7 @@ typedef union any Any;
 
 struct pair {
 	const Any fst, snd;
-};
+} __attribute__((packed));
 
 typedef const struct pair *Pair;
 
@@ -34,7 +34,7 @@ typedef Any (*Block)(Any);
 
 struct comp_block {
 	const Any xy, yz;
-};
+} __attribute__((packed));
 
 typedef const struct comp_block *CompBlock;
 

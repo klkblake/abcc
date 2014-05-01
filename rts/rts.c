@@ -5,47 +5,51 @@ char out_of_mem[] = "Out of memory\n";
 char divide_by_zero[] = "Division by zero\n";
 char assertion_failure[] = "Assertion failure\n";
 
-const Any Unit = (Any) 1l;
+const Any Unit = (Any) (double) 'Unit'; // endianness is undefined -- for debugging only
+const Any deadbeef = (Any) (double) 0xdeadbeef;
 
-void *base = 0;
-void *limit = 0;
+// The memory manager uses a cons cell memory model. All allocations are
+// exactly 2 words in length, where a word is assumed to be 64 bits.
+// Additionally, pointers and numbers are distinguished by examining the top 12
+// bits -- on current amd64 architectures, all pointers have these bits all
+// equal. The only valid float permitted by ABC's numeric model which has the
+// top 12 bits all equal is zero. Hence, care must be taken to not use null
+// pointers in the implementation.
+
+Any *base = 0;
+Any *limit = 0;
 
 void init_mm(void) {
 	base = brk(0);
 	limit = base;
 }
 
-void *malloc(long size) {
-	if (limit - base < size) {
+Any *malloc(Any a, Any b) {
+	// The cell size better evenly divide the page size, or this won't fire
+	// when it needs to.
+	if (base == limit) {
 		void *old = limit;
 		limit = brk(limit + 16*4096);
 		if (limit == old) {
 			DIE(out_of_mem);
 		}
 	}
-	void *result = base;
-	base += size;
+	Any *result = base;
+	*base++ = a;
+	*base++ = b;
 	return result;
 }
 
 Any pair(Any a, Any b) {
-	union any *result = malloc(sizeof(struct pair));
-	result[0] = a;
-	result[1] = b;
-	return (Any) (Pair) result;
+	return (Any) (Pair) malloc(a, b);
 }
 
 Any compBlock(Any a, Any b) {
-	union any *result = malloc(sizeof(struct comp_block));
-	result[0] = a;
-	result[1] = b;
-	return TAG((Any) (CompBlock) result, BLOCK_COMP);
+	return TAG((Any) (CompBlock) malloc(a, b), BLOCK_COMP);
 }
 
 Any sum(Any s, long tag) {
-	Any *result = malloc(sizeof(Any));
-	*result = s;
-	return TAG((Any) (const Any *) result, tag);
+	return TAG((Any) (const Any *) malloc(s, deadbeef), tag);
 }
 
 Any applyBlock(Any b, Any x) {
