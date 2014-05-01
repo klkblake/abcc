@@ -53,8 +53,6 @@ emitText t = do
                     -- Allocate this ID
                     insertTextNode t n "" "" ""
                     (tid, tref) <- emitText cs
-                    -- XXX check differences between haskell and C char
-                    -- literals
                     -- Ideally, we'd be ORing in the sumLeft/sumRight
                     -- values, but GAS only permits addition when the
                     -- operands are in different sections, e.g. .rodata and
