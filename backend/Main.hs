@@ -65,23 +65,33 @@ parseText ('\n':c:cs) = error $ "Invalid character " ++ show c ++ " after newlin
 parseText (c:cs) = let (text, cs') = parseText cs
                    in (c:text, cs')
 
-parse :: [[Op]] -> String -> [Op]
+-- parse code or block, accumulating in reverse on left
+--   return properly ordered result and remaining text
+
+parse :: [Op] -> String -> ([Op],String)
 parse ps ('k':cs) = parse ps cs
 parse ps ('f':cs) = parse ps cs
 parse ps (' ':cs) = parse ps cs
 parse ps ('\n':cs) = parse ps cs
-parse (p:ps) ('$':'c':']':cs) = parse ((p ++ [ApplyTail]):ps) (']':cs)
-parse (p:ps) ('{':cs) = parse ((p ++ parseCap (takeWhile (/= '}') cs)):ps) (tail $ dropWhile (/= '}') cs)
-parse (p:ps)   ('"':cs) = let (text, cs') = parseText cs in parse ((p ++ [LitText text]):ps) cs'
-parse (p:ps)   ('[':cs) = parse ([]:p:ps) cs
-parse (p:q:ps) (']':cs) = parse ((q ++ [LitBlock p]):ps) cs
-parse (p:ps)   (c:cs) = parse ((p ++ [parseOp c]):ps) cs
-parse [p]      [] = p
+parse ps ('$':'c':']':cs) = (reverse (ApplyTail:ps), cs)
+parse ps (']':cs) = (reverse ps, cs)
+
+parse ps ('[':cs) = let (bops, cs') = parse [] cs
+                    in parse (LitBlock bops : ps) cs'
+
+parse ps ('{':cs) = parse (parseCap (takeWhile (/= '}') cs) ++ ps) (tail $ dropWhile (/= '}') cs)
+parse ps ('"':cs) = let (text, cs') = parseText cs in parse (LitText text : ps) cs'
+parse ps (c:cs) = parse (parseOp c : ps) cs
+parse ps [] = (reverse ps,[])
 
 main :: IO ()
 main = do
     input <- getContents
-    case compile $ parse [[]] input of
-           Left  err  -> do hPutStrLn stderr $ "Failure: " ++ err
-                            exitFailure
-           Right prog -> putStr prog
+    case parse [] input of
+        (ops, "") ->
+            case compile ops of
+                Left  err  -> do hPutStrLn stderr $ "Failure: " ++ err
+                                 exitFailure
+                Right prog -> putStr prog
+        (ops, rem) -> do hPutStrLn stderr $ "Failure: Unmatched closing bracket.\nParsed:\n\t" ++ show ops ++ "\nRemaining:\n\t" ++ rem
+                         exitFailure
