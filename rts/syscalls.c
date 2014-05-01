@@ -2,6 +2,8 @@
 
 long syscall();
 
+char write_failed[] = "Write failed\n";
+
 void *brk(void *addr) {
 	return (void *) syscall(0x0c, addr);
 }
@@ -18,6 +20,13 @@ long write(int fd, const char *buf, long size) {
 		return write(fd, buf, size);
 	}
 	return n;
+}
+
+void write_force(int fd, const char *buf, long size) {
+	long res = write(fd, buf, size);
+	if (res != 0) {
+		DIE(write_failed);
+	}
 }
 
 void exit(long err) {

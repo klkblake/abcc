@@ -1,13 +1,11 @@
 #include "syscalls.h"
 #include "rts.h"
 
-const Any Unit = (Any) 1l;
-
-#define DIE(name) do { write(2, name, sizeof(name)); exit(1); } while (0)
 char out_of_mem[] = "Out of memory\n";
 char divide_by_zero[] = "Division by zero\n";
-char assertion_failure[] = ": Assertion failure\n";
-char write_failed[] = "Write failed\n";
+char assertion_failure[] = "Assertion failure\n";
+
+const Any Unit = (Any) 1l;
 
 void *base = 0;
 void *limit = 0;
@@ -187,13 +185,6 @@ OPFUNC(greater) {
 	double y = v1.as_num;
 	int g = y > x;
 	return list1(sum(pair((Any) (g ? x : y), (Any) (g ? y : x)), g ? SUM_RIGHT : SUM_LEFT), vt2);
-}
-
-void write_force(int fd, const char *buf, long size) {
-	long res = write(fd, buf, size);
-	if (res != 0) {
-		DIE(write_failed);
-	}
 }
 
 OPFUNC(debug_print_raw) {
