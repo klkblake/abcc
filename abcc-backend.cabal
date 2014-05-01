@@ -25,3 +25,4 @@ executable abcc-backend
       , llvm-general-pure >=3.4 && <3.5
   hs-source-dirs:      backend
   default-language:    Haskell2010
+  ghc-options:         -Wall
