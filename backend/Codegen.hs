@@ -1,12 +1,15 @@
 module Codegen where
 
 import Control.Monad.State
+import Data.Bits
 import Data.Char
 import Data.Function
 import Data.List
 import qualified Data.Map.Lazy as Map
+import Data.Word
 import Numeric
 
+import Data.ReinterpretCast
 import qualified LLVM.General.AST as LLVM
 import LLVM.General.AST hiding (Add)
 
@@ -59,18 +62,19 @@ emitText t = do
                     -- *ABS*.
                     let ref = quad $ "(text + " ++ show n ++ "*8) + " ++ show sumRight
                     let text = quad $ "_text_nodes + " ++ show n ++ "*16"
-                    insertTextNode n ref text $ line (".double " ++ show (fromIntegral $ ord c :: Double)) ++ tref
+                    -- Remember, all numbers are stored inverted
+                    insertTextNode n ref text $ quad ("0x" ++ showHex (complement $ doubleToWord (fromIntegral $ ord c :: Double)) "") ++ tref
                     return (n, ref)
                 [] -> do
                     let ref = quad $ "Unit + " ++ show sumLeft
-                    let text = quad deadbeef
+                    let text = quad unit
                     insertTextNode n ref text $ text ++ text
                     return (n, ref)
   where
     -- Must match rts.h
     sumLeft = 0 :: Int
     sumRight = 1 :: Int
-    deadbeef = "0x" ++ showHex (0xd34db33f :: Int) ""
+    unit = "0x" ++ showHex (0xdeadf00ddeadf00d :: Word64) ""
     line x = "\"\t " ++ x ++ "\\n\"\n"
     quad x = line $ ".quad " ++ x
     insertTextNode n ref text textNode =

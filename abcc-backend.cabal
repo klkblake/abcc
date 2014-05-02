@@ -23,6 +23,7 @@ executable abcc-backend
       , containers
       , mtl
       , llvm-general-pure >=3.4 && <3.5
+      , reinterpret-cast
   hs-source-dirs:      backend
   default-language:    Haskell2010
   ghc-options:         -Wall

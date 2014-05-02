@@ -24,6 +24,11 @@ union any {
 
 typedef union any Any;
 
+// Doubles are stored inverted, so that pointers correspond to NaNs and Infs,
+// which can't occur in ABC.
+#define TO_N(n) ((Any) ~((Any) (n)).as_tagged)
+#define N(v) (((Any) ~(v).as_tagged).as_num)
+
 struct pair {
 	const Any fst, snd;
 } __attribute__((packed));

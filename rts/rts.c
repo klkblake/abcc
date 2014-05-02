@@ -5,8 +5,8 @@ char out_of_mem[] = "Out of memory\n";
 char divide_by_zero[] = "Division by zero\n";
 char assertion_failure[] = "Assertion failure\n";
 
-const Any Unit = (Any) (double) 'Unit'; // endianness is undefined -- for debugging only
-const Any deadbeef = (Any) (double) 0xdeadbeef;
+const Any Unit = (Any) (long) 0xdeadf00ddeadf00d;
+const Any deadbeef = (Any) (long) 0xdeadbeefdeadbeef;
 
 // The memory manager uses a cons cell memory model. All allocations are
 // exactly 2 words in length, where a word is assumed to be 64 bits.
@@ -106,32 +106,32 @@ OP1(quote, TAG((Any) &v0, BLOCK_QUOTE));
 
 // -- Math --
 
-OP(introNum, list1((Any) 0.0, v));
+OP(introNum, list1(TO_N(0.0), v));
 
 Any digit(int d, Any v) {
-	return list1((Any) (v0.as_num * 10 + d), vt1);
+	return list1(TO_N(N(v0) * 10 + d), vt1);
 }
 
-OP21(add, (Any) (v0.as_num + v1.as_num));
+OP21(add, TO_N(N(v0) + N(v1)));
 
-OP21(multiply, (Any) (v0.as_num * v1.as_num));
+OP21(multiply, TO_N(N(v0) * N(v1)));
 
 OPFUNC(inverse) {
-	if (v0.as_num == 0) {
+	if (N(v0) == 0) {
 		DIE(divide_by_zero);
 	}
-	return list1((Any) (1 / v0.as_num), vt1);
+	return list1(TO_N(1 / N(v0)), vt1);
 }
 
-OP1(negate, (Any) (-v0.as_num));
+OP1(negate, TO_N(-N(v0)));
 
 typedef double v2df __attribute__((vector_size(16)));
 
 OPFUNC(divmod) {
-	double a = v1.as_num, b = v0.as_num;
+	double a = N(v1), b = N(v0);
 	v2df q = {a / b};
 	q = __builtin_ia32_roundsd(q, q, 0x1);
-	return list2((Any) (a - q[0]*b), (Any) q[0], vt2);
+	return list2(TO_N(a - q[0]*b), TO_N(q[0]), vt2);
 }
 
 // -- Basic sum plumbing --
@@ -185,10 +185,10 @@ Any _assert(char *line, int size, Any v) {
 }
 
 OPFUNC(greater) {
-	double x = v0.as_num;
-	double y = v1.as_num;
+	double x = N(v0);
+	double y = N(v1);
 	int g = y > x;
-	return list1(sum(pair((Any) (g ? x : y), (Any) (g ? y : x)), g ? SUM_RIGHT : SUM_LEFT), vt2);
+	return list1(sum(pair(TO_N(g ? x : y), TO_N(g ? y : x)), g ? SUM_RIGHT : SUM_LEFT), vt2);
 }
 
 OPFUNC(debug_print_raw) {
@@ -201,7 +201,7 @@ void debug_print_text2(Any v) {
 	int size = 0;
 	while (GET_TAG(v) == SUM_RIGHT) {
 		v = *CLEAR_TAG(v).as_indirect;
-		buf[size++] = (char) (long) f(v).as_num;
+		buf[size++] = (char) (long) N(f(v));
 		if (size == sizeof(buf)) {
 			write_force(2, buf, size);
 			size = 0;
