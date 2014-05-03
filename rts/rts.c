@@ -15,13 +15,31 @@ const Any deadbeef = (Any) (long) 0xdeadbeefdeadbeef;
 // equal. The only valid float permitted by ABC's numeric model which has the
 // top 12 bits all equal is zero. Hence, care must be taken to not use null
 // pointers in the implementation.
+//
+// Any function that allocates (pair, compBlock, sum, list[1-3]) may trigger a
+// GC, which may invalidate all pointers. Hence, anything being kept around in
+// registers or on the stack which points to the heap must be explicitly stored
+// and then loaded from the GC stack, so that they are modified correctly.
+
+#define CHUNK 8192
 
 Any *base = 0;
 Any *limit = 0;
 
+Any stack[4096];
+Any *sp = stack;
+
 void init_mm(void) {
 	base = brk(0);
 	limit = base;
+}
+
+void push(Any v) {
+	*sp++ = v;
+}
+
+Any pop(void) {
+	return *--sp;
 }
 
 Any *malloc(Any a, Any b) {
@@ -52,6 +70,24 @@ Any sum(Any s, long tag) {
 	return TAG((Any) (const Any *) malloc(s, deadbeef), tag);
 }
 
+#define list1(a, l) pair(a, l)
+
+Any list2(Any a, Any b, Any l) {
+	push(a);
+	Any p = pair(b, l);
+	return pair(pop(), p);
+}
+
+Any list3(Any a, Any b, Any c, Any l) {
+	push(a);
+	Any p = list2(b, c, l);
+	return pair(pop(), p);
+}
+
+#define OP(name, expr) OPFUNC(name) { return (expr); }
+#define OP1(name, expr) OPFUNC(name) { push(vt1); Any val = (expr); return list1(val, pop()); }
+#define OP21(name, expr) OPFUNC(name) { push(vt2); Any val = (expr); return list1(val, pop()); }
+
 Any applyBlock(Any b, Any x) {
 	long type = GET_TAG(b);
 	b = CLEAR_TAG(b);
@@ -63,8 +99,9 @@ Any applyBlock(Any b, Any x) {
 
 		case BLOCK_COMP:
 		cb = b.as_comp_block;
+		push(cb->yz);
 		x = applyBlock(cb->xy, x);
-		x = applyBlock(cb->yz, x);
+		x = applyBlock(pop(), x);
 		break;
 
 		case BLOCK_QUOTE:
@@ -78,7 +115,11 @@ Any applyBlock(Any b, Any x) {
 
 // -- Basic plumbing --
 
-OP(assocl, pair(pair(f(v), f(s(v))), s(s(v))));
+OPFUNC(assocl) {
+	push(s(s(v)));
+	Any p = pair(f(v), f(s(v)));
+	return pair(p, pop());
+}
 
 OP(assocr, list2(f(f(v)), s(f(v)), s(v)));
 
@@ -170,7 +211,13 @@ OP21(condapply, EITHER(v1,
 
 OP21(distrib, sum(pair(v0, deref(v1)), GET_TAG(v1)));
 
-OP(factor, list2(sum(f(s1), GET_TAG(s0)), sum(s(s1), GET_TAG(s0)) , vt1));
+OPFUNC(factor) {
+	push(vt1);
+	push(s(s1));
+	Any a = sum(f(s1), GET_TAG(s0));
+	Any b = sum(pop(), GET_TAG(s0));
+	return list2(a, b, pop());
+}
 
 OP1(merge, s1);
 
@@ -188,7 +235,9 @@ OPFUNC(greater) {
 	double x = N(v0);
 	double y = N(v1);
 	int g = y > x;
-	return list1(sum(pair(TO_N(g ? x : y), TO_N(g ? y : x)), g ? SUM_RIGHT : SUM_LEFT), vt2);
+	push(vt2);
+	Any a = sum(pair(TO_N(g ? x : y), TO_N(g ? y : x)), g ? SUM_RIGHT : SUM_LEFT);
+	return list1(a, pop());
 }
 
 OPFUNC(debug_print_raw) {
@@ -227,6 +276,6 @@ int main(void) {
 	Any power = Unit;
 	Any name = sum(Unit, SUM_LEFT);
 	Any v = pair(Unit, pair(Unit, pair(power, pair(pair(name, Unit), Unit))));
-	v = block_0(v);
+	block_0(v);
 	return 0;
 }

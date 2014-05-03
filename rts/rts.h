@@ -60,10 +60,6 @@ extern const Any Unit;
 #define vt2 s(s(v))
 #define vt3 s(s(s(v)))
 
-#define list1(a, l) pair(a, l)
-#define list2(a, b, l) pair(a, pair(b, l))
-#define list3(a, b, c, l) pair(a, pair(b, pair(c, l)))
-
 #define deref(v) (*(CLEAR_TAG(v).as_indirect))
 
 #define s0 f(v)
@@ -77,10 +73,6 @@ extern const Any Unit;
 Any pair(Any a, Any b);
 
 #define OPFUNC(name) Any name(Any v)
-
-#define OP(name, expr) OPFUNC(name) { return (expr); }
-#define OP1(name, expr) OP(name, list1((expr), vt1))
-#define OP21(name, expr) OP(name, list1((expr), vt2))
 
 #define op(name) OPFUNC(name)
 op(assocl);
