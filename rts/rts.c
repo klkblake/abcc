@@ -24,14 +24,16 @@ const Any deadbeef = (Any) (long) 0xdeadbeefdeadbeef;
 #define CHUNK 8192
 
 Any *base = 0;
+Any *current = 0;
 Any *limit = 0;
 
 Any stack[4096];
 Any *sp = stack;
 
 void init_mm(void) {
-	base = brk(0);
-	limit = base;
+	base = mmap(CHUNK*sizeof(Any));
+	current = base;
+	limit = base + 2;
 }
 
 void push(Any v) {
@@ -42,19 +44,55 @@ Any pop(void) {
 	return *--sp;
 }
 
-Any *malloc(Any a, Any b) {
-	// The cell size better evenly divide the page size, or this won't fire
-	// when it needs to.
-	if (base == limit) {
-		void *old = limit;
-		limit = brk(limit + 16*4096);
-		if (limit == old) {
-			DIE(out_of_mem);
-		}
+Any adjust_value(Any *start, Any *end, Any *dest, Any value) {
+	(void) end;
+	if ((value.as_tagged & 0xfff0000000000000) == 0 && value.as_indirect >= start && value.as_indirect < end) {
+		long tag = GET_TAG(value);
+		value = CLEAR_TAG(value);
+		value.as_indirect += dest - start;
+		value = TAG(value, tag);
 	}
-	Any *result = base;
-	*base++ = a;
-	*base++ = b;
+	return value;
+}
+
+Any *heap_copy(Any *start, Any *end, Any *dest) {
+	Any *src = start;
+	Any *dest_start = dest;
+	while (src != end) {
+		*dest++ = adjust_value(start, end, dest_start, *src++);
+	}
+	return dest;
+}
+
+void stack_fixup(Any *start, Any *end, Any *dest) {
+	Any *p = stack;
+	while (p != sp) {
+		Any v = *p;
+		*p++ = adjust_value(start, end, dest, v);
+	}
+}
+
+Any *malloc(Any a, Any b) {
+	// The cell size better evenly divide the chunk size, or this won't
+	// fire when it needs to.
+	if (current == limit) {
+		long oldsize = limit - base;
+		long newsize = oldsize + CHUNK;
+		Any *new = mmap(newsize * sizeof(Any));
+		current = heap_copy(base, limit, new);
+		stack_fixup(base, limit, new);
+		a = adjust_value(base, limit, new, a);
+		b = adjust_value(base, limit, new, b);
+		for (int i = 0; i < oldsize; i++) {
+			base[i] = (Any) 0l;
+		}
+		munmap(base, oldsize * sizeof(Any));
+		base = new;
+		limit = new + newsize;
+	}
+	Any *result = current;
+	*current++ = a;
+	*current++ = b;
 	return result;
 }
 
@@ -209,13 +247,22 @@ OP21(condapply, EITHER(v1,
 			sum(applyBlock(v0, deref(v1)), SUM_LEFT),
 			v1));
 
-OP21(distrib, sum(pair(v0, deref(v1)), GET_TAG(v1)));
+OPFUNC(distrib) {
+	long tag = GET_TAG(v1);
+	push(vt2);
+	Any val = sum(pair(v0, deref(v1)), tag);
+	return list1(val, pop());
+}
 
 OPFUNC(factor) {
+	long tag = GET_TAG(s0);
 	push(vt1);
 	push(s(s1));
-	Any a = sum(f(s1), GET_TAG(s0));
-	Any b = sum(pop(), GET_TAG(s0));
+	Any a = sum(f(s1), tag);
+	Any top = pop();
+	push(a);
+	Any b = sum(top, tag);
+	a = pop();
 	return list2(a, b, pop());
 }
 

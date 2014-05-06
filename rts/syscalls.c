@@ -11,9 +11,10 @@ void *brk(void *addr) {
 
 #define PROT_READ     0x01
 #define PROT_WRITE    0x02
+#define MAP_PRIVATE   0x02
 #define MAP_ANONYMOUS 0x20
 void *mmap(long length) {
-	long res = syscall(0x09, 0, length, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, -1);
+	long res = syscall(0x09, 0, length, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (res < 0) {
 		DIE(mmap_failed);
 	}
