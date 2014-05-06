@@ -143,7 +143,7 @@ OP(apply_tail, applyBlock(v0, v1));
 
 OP21(compose, compBlock(v1, v0));
 
-OP1(quote, TAG((Any) &v0, BLOCK_QUOTE));
+OP1(quote, sum(v0, BLOCK_QUOTE));
 
 // -- Math --
 
