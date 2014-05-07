@@ -111,6 +111,9 @@ Any _assert(char *line, int size, Any v);
 #define ASSERT(line, v) _assert(line, sizeof(line) - 1, v)
 #define assert(v) ASSERT("Line " STRINGIFY(__LINE__) ": ", (v))
 op(greater);
+Any _assert_eq(char *line, int size, Any v);
+#define ASSERT_EQ(line, v) _assert_eq(line, sizeof(line) - 1, v)
+#define assert_eq(v) ASSERT_EQ("Line " STRINGIFY(__LINE__) ": ", (v))
 op(debug_print_raw);
 op(debug_print_text);
 #undef op

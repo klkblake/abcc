@@ -54,6 +54,7 @@ parseOp op = maybe (fail $ "Unrecognised opcode: " ++ show op) return $ lookup o
 parseCap :: String -> Either String [Op]
 parseCap (':':_) = return []
 parseCap ('.':_) = return []
+parseCap "&≡" = return [AssertEQ]
 parseCap "&debug print raw" = return [DebugPrintRaw]
 parseCap "&debug print text" = return [DebugPrintText]
 parseCap cap = fail $ "Unrecognised capability: " ++ show cap

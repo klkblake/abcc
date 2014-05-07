@@ -4,9 +4,12 @@
 char out_of_mem[] = "Out of memory\n";
 char divide_by_zero[] = "Division by zero\n";
 char assertion_failure[] = "Assertion failure\n";
+char assertion_eq_failure[] = "Equality assertion failure\n";
 
-const Any Unit = (Any) (long) 0xdeadf00ddeadf00d;
-const Any deadbeef = (Any) (long) 0xdeadbeefdeadbeef;
+const Any _Unit = (Any) (long) 0xdeadf00ddeadf00d;
+const Any _deadbeef = (Any) (long) 0xdeadbeefdeadbeef;
+const Any Unit = (Any) &_Unit;
+const Any deadbeef = (Any) &_deadbeef;
 
 // The memory manager uses a cons cell memory model. All allocations are
 // exactly 2 words in length, where a word is assumed to be 64 bits.
@@ -282,6 +285,37 @@ OPFUNC(greater) {
 	push(vt2);
 	Any a = sum(pair(TO_N(g ? x : y), TO_N(g ? y : x)), g ? SUM_RIGHT : SUM_LEFT);
 	return list1(a, pop());
+}
+
+// XXX This is incomplete -- it does not handle blocks correctly.
+long equiv(Any a, Any b) {
+	if (a.as_indirect >= base && a.as_indirect < limit) {
+		if (b.as_indirect >= base && b.as_indirect < limit) {
+			long atag = GET_TAG(a);
+			long btag = GET_TAG(b);
+			struct pair ap = *CLEAR_TAG(a).as_pair;
+			struct pair bp = *CLEAR_TAG(b).as_pair;
+			return atag == btag && equiv(ap.fst, bp.fst) && equiv(ap.snd, bp.snd);
+		} else {
+			return 0;
+		}
+	} else {
+		if (b.as_indirect >= base && b.as_indirect < limit) {
+			return 0;
+		} else {
+			return a.as_tagged == b.as_tagged;
+		}
+	}
+}
+
+Any _assert_eq(char *line, int size, Any v) {
+	Any a = v0;
+	Any b = v1;
+	if (!equiv(a, b)) {
+		write(2, line, size);
+		DIE(assertion_eq_failure);
+	}
+	return v;
 }
 
 OPFUNC(debug_print_raw) {

@@ -1,4 +1,5 @@
-deadbeef = 0xdeadbeefdeadbeef
+unit = gdb.lookup_global_symbol("Unit").value()
+deadbeef = gdb.lookup_global_symbol("deadbeef").value()
 
 abc_any = gdb.lookup_type("union any")
 
@@ -17,7 +18,7 @@ def p(indent, tag, value):
 def print_abc(i, v):
     v = v.cast(abc_any)
     vt = v['as_tagged']
-    if vt == 0xdeadf00ddeadf00d:
+    if vt == unit:
         p(i, "Unit", "Unit")
     elif vt == deadbeef:
         p(i, "Dead", "Beef")

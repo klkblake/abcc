@@ -6,7 +6,6 @@ import Data.Char
 import Data.Function
 import Data.List
 import qualified Data.Map.Lazy as Map
-import Data.Word
 import Numeric
 
 import Data.ReinterpretCast
@@ -60,13 +59,13 @@ emitText t = do
                     -- values, but GAS only permits addition when the
                     -- operands are in different sections, e.g. .rodata and
                     -- *ABS*.
-                    let ref = quad $ "(text + " ++ show n ++ "*8) + " ++ show sumRight
+                    let ref = quad $ "(text + " ++ show n ++ "*8) + " ++ show sumLeft
                     let text = quad $ "_text_nodes + " ++ show n ++ "*16"
                     -- Remember, all numbers are stored inverted
                     insertTextNode n ref text $ quad ("0x" ++ showHex (complement $ doubleToWord (fromIntegral $ ord c :: Double)) "") ++ tref
                     return (n, ref)
                 [] -> do
-                    let ref = quad $ "Unit + " ++ show sumLeft
+                    let ref = quad $ "Unit + " ++ show sumRight
                     let text = quad unit
                     insertTextNode n ref text $ text ++ text
                     return (n, ref)
@@ -74,7 +73,7 @@ emitText t = do
     -- Must match rts.h
     sumLeft = 0 :: Int
     sumRight = 1 :: Int
-    unit = "0x" ++ showHex (0xdeadf00ddeadf00d :: Word64) ""
+    unit = "_Unit"
     line x = "\"\t " ++ x ++ "\\n\"\n"
     quad x = line $ ".quad " ++ x
     insertTextNode n ref text textNode =
@@ -82,7 +81,7 @@ emitText t = do
 
 compileOp :: Op -> Codegen ()
 compileOp (LitBlock b) = emitBlock b >>= \n -> emit $ "\tv = pair((Any) &block_" ++ show n ++ ", v);\n"
-compileOp (LitText  t) = emitText  t >>= \(n, _) -> emit $ "\tv = pair(TAG((Any) &text[" ++ show n ++ "], SUM_RIGHT), v);\n"
+compileOp (LitText  t) = emitText  t >>= \(n, _) -> emit $ "\tv = pair(TAG((Any) &text[" ++ show n ++ "], SUM_LEFT), v);\n"
 compileOp AssocL         = emitOp "assocl"
 compileOp AssocR         = emitOp "assocr"
 compileOp Swap           = emitOp "swap"
@@ -114,6 +113,7 @@ compileOp Factor         = emitOp "factor"
 compileOp Merge          = emitOp "merge"
 compileOp Assert         = emitOp "assert"
 compileOp Greater        = emitOp "greater"
+compileOp AssertEQ       = emitOp "assert_eq"
 compileOp DebugPrintRaw  = emitOp "debug_print_raw"
 compileOp DebugPrintText = emitOp "debug_print_text"
 
