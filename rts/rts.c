@@ -33,7 +33,7 @@ Any *sp = stack;
 void init_mm(void) {
 	base = mmap(CHUNK*sizeof(Any));
 	current = base;
-	limit = base + 2;
+	limit = base + CHUNK;
 }
 
 void push(Any v) {
@@ -44,32 +44,24 @@ Any pop(void) {
 	return *--sp;
 }
 
-Any adjust_value(Any *start, Any *end, Any *dest, Any value) {
-	(void) end;
-	if ((value.as_tagged & 0xfff0000000000000) == 0 && value.as_indirect >= start && value.as_indirect < end) {
+Any copy_value(Any value, Any *start, Any *end) {
+	if (value.as_indirect >= start && value.as_indirect < end) {
 		long tag = GET_TAG(value);
 		value = CLEAR_TAG(value);
-		value.as_indirect += dest - start;
-		value = TAG(value, tag);
+		Any target = *value.as_indirect;
+		if (target.as_indirect >= base && target.as_indirect < current) {
+			value = TAG(target, tag);
+		} else {
+			Any fst = copy_value(value.as_pair->fst, start, end);
+			Any snd = copy_value(value.as_pair->snd, start, end);
+			target.as_indirect = current;
+			*current++ = fst;
+			*current++ = snd;
+			*((Any *) value.as_indirect) = target;
+			value = TAG(target, tag);
+		}
 	}
 	return value;
-}
-
-Any *heap_copy(Any *start, Any *end, Any *dest) {
-	Any *src = start;
-	Any *dest_start = dest;
-	while (src != end) {
-		*dest++ = adjust_value(start, end, dest_start, *src++);
-	}
-	return dest;
-}
-
-void stack_fixup(Any *start, Any *end, Any *dest) {
-	Any *p = stack;
-	while (p != sp) {
-		Any v = *p;
-		*p++ = adjust_value(start, end, dest, v);
-	}
 }
 
 Any *malloc(Any a, Any b) {
@@ -78,17 +70,22 @@ Any *malloc(Any a, Any b) {
 	if (current == limit) {
 		long oldsize = limit - base;
 		long newsize = oldsize + CHUNK;
-		Any *new = mmap(newsize * sizeof(Any));
-		current = heap_copy(base, limit, new);
-		stack_fixup(base, limit, new);
-		a = adjust_value(base, limit, new, a);
-		b = adjust_value(base, limit, new, b);
-		for (int i = 0; i < oldsize; i++) {
-			base[i] = (Any) 0l;
+		Any *old = base;
+		Any *oldlimit = limit;
+		base = mmap(newsize * sizeof(Any));
+		current = base;
+		limit = base + newsize;
+		for (Any *s = stack; s < sp; s++) {
+			*s = copy_value(*s, old, oldlimit);
 		}
-		munmap(base, oldsize * sizeof(Any));
-		base = new;
-		limit = new + newsize;
+		a = copy_value(a, old, oldlimit);
+		b = copy_value(b, old, oldlimit);
+		munmap(old, oldsize * sizeof(Any));
+		long extra = (limit - current) / CHUNK - 1;
+		if (extra > 0) {
+			limit -= extra * CHUNK;
+			munmap(limit, extra * CHUNK * sizeof(Any));
+		}
 	}
 	Any *result = current;
 	*current++ = a;
