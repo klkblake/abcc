@@ -13,6 +13,8 @@ enum sum_side {
 	SUM_RIGHT,
 };
 
+#define FORWARDING_PTR (1 << 2)
+
 union any {
 	const struct pair *as_pair;
 	union any (*as_block)(union any);
@@ -45,9 +47,9 @@ typedef const struct comp_block *CompBlock;
 
 extern const Any Unit;
 
-#define CLEAR_TAG(v) ((Any) ((v).as_tagged &~ 0x3))
+#define CLEAR_TAG(v) ((Any) ((v).as_tagged &~ 0x7))
 #define TAG(v, t) ((Any) (CLEAR_TAG(v).as_tagged | t))
-#define GET_TAG(v) ((v).as_tagged & 0x3)
+#define GET_TAG(v) ((v).as_tagged & 0x7)
 
 #define f(v) (((v).as_pair)->fst)
 #define s(v) (((v).as_pair)->snd)

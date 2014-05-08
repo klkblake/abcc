@@ -18,9 +18,9 @@ def p(indent, tag, value):
 def print_abc(i, v):
     v = v.cast(abc_any)
     vt = v['as_tagged']
-    if vt == unit:
+    if v == unit:
         p(i, "Unit", "Unit")
-    elif vt == deadbeef:
+    elif v == deadbeef:
         p(i, "Dead", "Beef")
     elif vt == 0:
         p(i, red("!!!NULL POINTER!!!"), "This should never happen")
@@ -41,7 +41,7 @@ def print_abc(i, v):
         try:
             if tag == 0:
                 pair = v['as_pair'].dereference()
-                if pair['snd']['as_tagged'] == deadbeef:
+                if pair['snd'] == deadbeef:
                     p(i, "Left", hexptr)
                     print_abc(i+4, pair['fst'])
                 else:
@@ -50,7 +50,7 @@ def print_abc(i, v):
                     print_abc(i+4, pair['snd'])
             elif tag == 1:
                 pair = v['as_comp_block'].dereference()
-                if pair['yz']['as_tagged'] == deadbeef:
+                if pair['yz'] == deadbeef:
                     p(i, "Right", hexptr)
                     print_abc(i+4, pair['xy'])
                 else:
@@ -59,6 +59,9 @@ def print_abc(i, v):
                     print_abc(i+4, pair['yz'])
             elif tag == 2:
                 p(i, "Quoted", hexptr)
+                print_abc(i+4, v['as_indirect'].dereference())
+            elif (tag & 0x4) != 0:
+                p(i, "Forwarding pointer", hexptr)
                 print_abc(i+4, v['as_indirect'].dereference())
             else:
                 p(i, "INVALID TAG", hexptr)

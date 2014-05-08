@@ -52,15 +52,15 @@ Any copy_value(Any value, Any *start, Any *end) {
 		long tag = GET_TAG(value);
 		value = CLEAR_TAG(value);
 		Any target = *value.as_indirect;
-		if (target.as_indirect >= base && target.as_indirect < current) {
-			value = TAG(target, tag);
+		if ((target.as_tagged & (0xfff0000000000000 | FORWARDING_PTR)) == FORWARDING_PTR) {
+			value = TAG(target, tag &~ FORWARDING_PTR);
 		} else {
 			Any fst = copy_value(value.as_pair->fst, start, end);
 			Any snd = copy_value(value.as_pair->snd, start, end);
 			target.as_indirect = current;
 			*current++ = fst;
 			*current++ = snd;
-			*((Any *) value.as_indirect) = target;
+			*((Any *) value.as_indirect) = TAG(target, FORWARDING_PTR);
 			value = TAG(target, tag);
 		}
 	}
