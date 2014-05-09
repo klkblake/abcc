@@ -26,17 +26,21 @@ const Any deadbeef = (Any) &_deadbeef;
 
 #define CHUNK 8192
 
-Any *base = 0;
-Any *current = 0;
-Any *limit = 0;
+struct heap {
+	Any *base;
+	Any *current;
+	Any *limit;
+};
+
+struct heap heap;
 
 Any stack[4096];
 Any *sp = stack;
 
 void init_mm(void) {
-	base = mmap(CHUNK*sizeof(Any));
-	current = base;
-	limit = base + CHUNK;
+	heap.base = mmap(CHUNK*sizeof(Any));
+	heap.current = heap.base;
+	heap.limit = heap.base + CHUNK;
 }
 
 void push(Any v) {
@@ -57,9 +61,9 @@ Any copy_value(Any value, Any *start, Any *end) {
 		} else {
 			Any fst = copy_value(value.as_pair->fst, start, end);
 			Any snd = copy_value(value.as_pair->snd, start, end);
-			target.as_indirect = current;
-			*current++ = fst;
-			*current++ = snd;
+			target.as_indirect = heap.current;
+			*heap.current++ = fst;
+			*heap.current++ = snd;
 			*((Any *) value.as_indirect) = TAG(target, FORWARDING_PTR);
 			value = TAG(target, tag);
 		}
@@ -70,29 +74,29 @@ Any copy_value(Any value, Any *start, Any *end) {
 Any *malloc(Any a, Any b) {
 	// The cell size better evenly divide the chunk size, or this won't
 	// fire when it needs to.
-	if (current == limit) {
-		long oldsize = limit - base;
+	if (heap.current == heap.limit) {
+		long oldsize = heap.limit - heap.base;
 		long newsize = oldsize + CHUNK;
-		Any *old = base;
-		Any *oldlimit = limit;
-		base = mmap(newsize * sizeof(Any));
-		current = base;
-		limit = base + newsize;
+		Any *old = heap.base;
+		Any *oldlimit = heap.limit;
+		heap.base = mmap(newsize * sizeof(Any));
+		heap.current = heap.base;
+		heap.limit = heap.base + newsize;
 		for (Any *s = stack; s < sp; s++) {
 			*s = copy_value(*s, old, oldlimit);
 		}
 		a = copy_value(a, old, oldlimit);
 		b = copy_value(b, old, oldlimit);
 		munmap(old, oldsize * sizeof(Any));
-		long extra = (limit - current) / CHUNK - 1;
+		long extra = (heap.limit - heap.current) / CHUNK - 1;
 		if (extra > 0) {
-			limit -= extra * CHUNK;
-			munmap(limit, extra * CHUNK * sizeof(Any));
+			heap.limit -= extra * CHUNK;
+			munmap(heap.limit, extra * CHUNK * sizeof(Any));
 		}
 	}
-	Any *result = current;
-	*current++ = a;
-	*current++ = b;
+	Any *result = heap.current;
+	*heap.current++ = a;
+	*heap.current++ = b;
 	return result;
 }
 
@@ -289,8 +293,8 @@ OPFUNC(greater) {
 
 // XXX This is incomplete -- it does not handle blocks correctly.
 long equiv(Any a, Any b) {
-	if (a.as_indirect >= base && a.as_indirect < limit) {
-		if (b.as_indirect >= base && b.as_indirect < limit) {
+	if (a.as_indirect >= heap.base && a.as_indirect < heap.limit) {
+		if (b.as_indirect >= heap.base && b.as_indirect < heap.limit) {
 			long atag = GET_TAG(a);
 			long btag = GET_TAG(b);
 			struct pair ap = *CLEAR_TAG(a).as_pair;
@@ -300,7 +304,7 @@ long equiv(Any a, Any b) {
 			return 0;
 		}
 	} else {
-		if (b.as_indirect >= base && b.as_indirect < limit) {
+		if (b.as_indirect >= heap.base && b.as_indirect < heap.limit) {
 			return 0;
 		} else {
 			return a.as_tagged == b.as_tagged;
