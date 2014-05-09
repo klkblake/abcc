@@ -32,6 +32,8 @@ struct heap {
 	Any *limit;
 };
 
+#define in(ptr, heap) ((ptr) >= (heap.base) && (ptr) < (heap.current))
+
 struct heap heap;
 
 Any stack[4096];
@@ -293,8 +295,8 @@ OPFUNC(greater) {
 
 // XXX This is incomplete -- it does not handle blocks correctly.
 long equiv(Any a, Any b) {
-	if (a.as_indirect >= heap.base && a.as_indirect < heap.limit) {
-		if (b.as_indirect >= heap.base && b.as_indirect < heap.limit) {
+	if (in(a.as_indirect, heap)) {
+		if (in(b.as_indirect, heap)) {
 			long atag = GET_TAG(a);
 			long btag = GET_TAG(b);
 			struct pair ap = *CLEAR_TAG(a).as_pair;
@@ -304,7 +306,7 @@ long equiv(Any a, Any b) {
 			return 0;
 		}
 	} else {
-		if (b.as_indirect >= heap.base && b.as_indirect < heap.limit) {
+		if (in(b.as_indirect, heap)) {
 			return 0;
 		} else {
 			return a.as_tagged == b.as_tagged;
