@@ -33,16 +33,34 @@ struct heap {
 };
 
 #define in(ptr, heap) ((ptr) >= (heap.base) && (ptr) < (heap.current))
+#define heap_size(heap) ((heap).limit - (heap).base)
 
 struct heap heap;
 
 Any stack[4096];
 Any *sp = stack;
 
-void init_mm(void) {
-	heap.base = mmap(CHUNK*sizeof(Any));
+struct heap heap_new(long size) {
+	struct heap heap;
+	heap.base = mmap(size*sizeof(Any));
 	heap.current = heap.base;
-	heap.limit = heap.base + CHUNK;
+	heap.limit = heap.base + size;
+	return heap;
+}
+
+void heap_free(struct heap heap) {
+	munmap(heap.base, heap_size(heap)*sizeof(Any));
+}
+
+Any *heap_put(struct heap *heap, Any a, Any b) {
+	Any *result = heap->current;
+	*heap->current++ = a;
+	*heap->current++ = b;
+	return result;
+}
+
+void init_mm(void) {
+	heap = heap_new(CHUNK);
 }
 
 void push(Any v) {
@@ -63,9 +81,7 @@ Any copy_value(Any value, struct heap src, struct heap *dest) {
 		} else {
 			Any fst = copy_value(value.as_pair->fst, src, dest);
 			Any snd = copy_value(value.as_pair->snd, src, dest);
-			target.as_indirect = dest->current;
-			*dest->current++ = fst;
-			*dest->current++ = snd;
+			target.as_indirect = heap_put(dest, fst, snd);
 			*((Any *) value.as_indirect) = TAG(target, FORWARDING_PTR);
 			value = TAG(target, tag);
 		}
@@ -73,32 +89,31 @@ Any copy_value(Any value, struct heap src, struct heap *dest) {
 	return value;
 }
 
+void perform_major_gc(struct heap *heap) {
+	const struct heap old = *heap;
+	*heap = heap_new(heap_size(old) + CHUNK);
+	for (Any *s = stack; s < sp; s++) {
+		*s = copy_value(*s, old, heap);
+	}
+	heap_free(old);
+	long extra = (heap->limit - heap->current) / CHUNK - 1;
+	if (extra > 0) {
+		heap->limit -= extra * CHUNK;
+		munmap(heap->limit, extra * CHUNK * sizeof(Any));
+	}
+}
+
 Any *malloc(Any a, Any b) {
 	// The cell size better evenly divide the chunk size, or this won't
 	// fire when it needs to.
 	if (heap.current == heap.limit) {
-		const struct heap old = heap;
-		long oldsize = old.limit - old.base;
-		long newsize = oldsize + CHUNK;
-		heap.base = mmap(newsize * sizeof(Any));
-		heap.current = heap.base;
-		heap.limit = heap.base + newsize;
-		for (Any *s = stack; s < sp; s++) {
-			*s = copy_value(*s, old, &heap);
-		}
-		a = copy_value(a, old, &heap);
-		b = copy_value(b, old, &heap);
-		munmap(old.base, oldsize * sizeof(Any));
-		long extra = (heap.limit - heap.current) / CHUNK - 1;
-		if (extra > 0) {
-			heap.limit -= extra * CHUNK;
-			munmap(heap.limit, extra * CHUNK * sizeof(Any));
-		}
+		push(a);
+		push(b);
+		perform_major_gc(&heap);
+		b = pop();
+		a = pop();
 	}
-	Any *result = heap.current;
-	*heap.current++ = a;
-	*heap.current++ = b;
-	return result;
+	return heap_put(&heap, a, b);
 }
 
 Any pair(Any a, Any b) {
