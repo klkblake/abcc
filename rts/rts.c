@@ -53,19 +53,19 @@ Any pop(void) {
 	return *--sp;
 }
 
-Any copy_value(Any value, Any *start, Any *end) {
-	if (value.as_indirect >= start && value.as_indirect < end) {
+Any copy_value(Any value, struct heap src, struct heap *dest) {
+	if (in(value.as_indirect, src)) {
 		long tag = GET_TAG(value);
 		value = CLEAR_TAG(value);
 		Any target = *value.as_indirect;
 		if ((target.as_tagged & (0xfff0000000000000 | FORWARDING_PTR)) == FORWARDING_PTR) {
 			value = TAG(target, tag &~ FORWARDING_PTR);
 		} else {
-			Any fst = copy_value(value.as_pair->fst, start, end);
-			Any snd = copy_value(value.as_pair->snd, start, end);
-			target.as_indirect = heap.current;
-			*heap.current++ = fst;
-			*heap.current++ = snd;
+			Any fst = copy_value(value.as_pair->fst, src, dest);
+			Any snd = copy_value(value.as_pair->snd, src, dest);
+			target.as_indirect = dest->current;
+			*dest->current++ = fst;
+			*dest->current++ = snd;
 			*((Any *) value.as_indirect) = TAG(target, FORWARDING_PTR);
 			value = TAG(target, tag);
 		}
@@ -77,19 +77,18 @@ Any *malloc(Any a, Any b) {
 	// The cell size better evenly divide the chunk size, or this won't
 	// fire when it needs to.
 	if (heap.current == heap.limit) {
-		long oldsize = heap.limit - heap.base;
+		const struct heap old = heap;
+		long oldsize = old.limit - old.base;
 		long newsize = oldsize + CHUNK;
-		Any *old = heap.base;
-		Any *oldlimit = heap.limit;
 		heap.base = mmap(newsize * sizeof(Any));
 		heap.current = heap.base;
 		heap.limit = heap.base + newsize;
 		for (Any *s = stack; s < sp; s++) {
-			*s = copy_value(*s, old, oldlimit);
+			*s = copy_value(*s, old, &heap);
 		}
-		a = copy_value(a, old, oldlimit);
-		b = copy_value(b, old, oldlimit);
-		munmap(old, oldsize * sizeof(Any));
+		a = copy_value(a, old, &heap);
+		b = copy_value(b, old, &heap);
+		munmap(old.base, oldsize * sizeof(Any));
 		long extra = (heap.limit - heap.current) / CHUNK - 1;
 		if (extra > 0) {
 			heap.limit -= extra * CHUNK;
