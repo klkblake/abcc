@@ -1,5 +1,6 @@
 unit = gdb.lookup_global_symbol("Unit").value()
 deadbeef = gdb.lookup_global_symbol("deadbeef").value()
+nursery = gdb.lookup_global_symbol("nursery").value()
 
 abc_any = gdb.lookup_type("union any")
 
@@ -26,7 +27,7 @@ def print_abc(i, v):
         p(i, red("!!!NULL POINTER!!!"), "This should never happen")
     elif (vt & 0xfff0000000000000) != 0:
         p(i, "Number", (~vt).cast(abc_any)['as_num'])
-    elif vt < 0x00007f0000000000: # FIXME should get actual mappings -- don't know how to.
+    elif v['as_indirect'] < nursery['base']:
         block = gdb.block_for_pc(int(vt))
         if block == None:
             name = str(v['as_indirect'])
@@ -34,8 +35,8 @@ def print_abc(i, v):
             name = str(block.function)
         p(i, "Block", name)
     else:
-        tag = vt &  0x3
-        ptr = vt & ~0x3
+        tag = vt &  0x7
+        ptr = vt & ~0x7
         hexptr = gray(hex(int(ptr)))
         v = ptr.cast(abc_any)
         try:

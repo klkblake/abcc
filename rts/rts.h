@@ -26,6 +26,8 @@ union any {
 
 typedef union any Any;
 
+#define eq(a, b) ((a).as_indirect == (b).as_indirect)
+
 // Doubles are stored inverted, so that pointers correspond to NaNs and Infs,
 // which can't occur in ABC.
 #define TO_N(n) ((Any) ~((Any) (n)).as_tagged)

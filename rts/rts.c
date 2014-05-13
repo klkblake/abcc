@@ -1,6 +1,8 @@
 #include "syscalls.h"
 #include "rts.h"
 
+#define PARANOIA 0
+
 char out_of_mem[] = "Out of memory\n";
 char divide_by_zero[] = "Division by zero\n";
 char assertion_failure[] = "Assertion failure\n";
@@ -8,8 +10,10 @@ char assertion_eq_failure[] = "Equality assertion failure\n";
 
 const Any _Unit = (Any) (long) 0xdeadf00ddeadf00d;
 const Any _deadbeef = (Any) (long) 0xdeadbeefdeadbeef;
-const Any Unit = (Any) &_Unit;
-const Any deadbeef = (Any) &_deadbeef;
+//const Any Unit = (Any) &_Unit;
+const Any Unit = (Any) 1l;
+//const Any deadbeef = (Any) &_deadbeef;
+const Any deadbeef = (Any) 2l;
 
 // The memory manager uses a cons cell memory model. All allocations are
 // exactly 2 words in length, where a word is assumed to be 64 bits.
@@ -32,10 +36,13 @@ struct heap {
 	Any *limit;
 };
 
-#define in(ptr, heap) ((ptr) >= (heap.base) && (ptr) < (heap.current))
+#define in(ptr, heap) ((ptr) >= (heap).base && (ptr) < (heap).current)
 #define heap_size(heap) ((heap).limit - (heap).base)
 
 struct heap heap;
+
+Any _nursery[CHUNK];
+struct heap nursery = {_nursery, _nursery, _nursery + sizeof(_nursery)/sizeof(Any)};
 
 Any stack[4096];
 Any *sp = stack;
@@ -53,6 +60,9 @@ void heap_free(struct heap heap) {
 }
 
 Any *heap_put(struct heap *heap, Any a, Any b) {
+	if (heap->current == heap->limit) {
+		DIE("Illegal heap_put()");
+	}
 	Any *result = heap->current;
 	*heap->current++ = a;
 	*heap->current++ = b;
@@ -71,17 +81,57 @@ Any pop(void) {
 	return *--sp;
 }
 
-Any copy_value(Any value, struct heap src, struct heap *dest) {
-	if (in(value.as_indirect, src)) {
+struct heap perform_major_gc(struct heap, struct heap);
+
+void copy_value_major(Any value, struct heap nursery, struct heap old, struct heap *heap, Any *result) {
+	if (in(value.as_indirect, nursery) || in(value.as_indirect, old)) {
+		long tag = GET_TAG(value);
+		value = CLEAR_TAG(value);
+		Any target = *value.as_indirect;
+		if ((target.as_tagged & (0xfff0000000000000 | FORWARDING_PTR)) == FORWARDING_PTR) {
+			if (!in(target.as_indirect, *heap)) {
+				copy_value_major(target, nursery, old, heap, &target);
+			}
+			*result = TAG(target, tag &~ FORWARDING_PTR);
+		} else {
+			if (heap->current == heap->limit) {
+				DIE("Ran out of space while performing major GC");
+			}
+			Any *cell = heap->current;
+			heap->current += 2;
+			cell[0] = value.as_pair->fst;
+			cell[1] = value.as_pair->snd;
+			target.as_indirect = cell;
+			*((Any *) value.as_indirect) = TAG(target, FORWARDING_PTR);
+			*result = TAG(target, tag);
+			copy_value_major(cell[0], nursery, old, heap, (Any *) &cell[0]);
+			copy_value_major(cell[1], nursery, old, heap, (Any *) &cell[1]);
+		}
+	} else {
+		*result = value;
+	}
+}
+
+const Any _trigger_major_gc = (Any) 0l;
+const Any trigger_major_gc = (Any) &_trigger_major_gc;
+
+Any copy_value_minor(Any value, struct heap nursery, struct heap *heap) {
+	if (in(value.as_indirect, nursery)) {
 		long tag = GET_TAG(value);
 		value = CLEAR_TAG(value);
 		Any target = *value.as_indirect;
 		if ((target.as_tagged & (0xfff0000000000000 | FORWARDING_PTR)) == FORWARDING_PTR) {
 			value = TAG(target, tag &~ FORWARDING_PTR);
 		} else {
-			Any fst = copy_value(value.as_pair->fst, src, dest);
-			Any snd = copy_value(value.as_pair->snd, src, dest);
-			target.as_indirect = heap_put(dest, fst, snd);
+			Any fst = copy_value_minor(value.as_pair->fst, nursery, heap);
+			if (eq(fst, trigger_major_gc)) {
+				return fst;
+			}
+			Any snd = copy_value_minor(value.as_pair->snd, nursery, heap);
+			if (eq(snd, trigger_major_gc) || heap->current == heap->limit) {
+				return trigger_major_gc;
+			}
+			target.as_indirect = heap_put(heap, fst, snd);
 			*((Any *) value.as_indirect) = TAG(target, FORWARDING_PTR);
 			value = TAG(target, tag);
 		}
@@ -89,31 +139,71 @@ Any copy_value(Any value, struct heap src, struct heap *dest) {
 	return value;
 }
 
-void perform_major_gc(struct heap *heap) {
-	const struct heap old = *heap;
-	*heap = heap_new(heap_size(old) + CHUNK);
+struct heap perform_major_gc(struct heap nursery, struct heap heap) {
+	const struct heap old = heap;
+	heap = heap_new(heap_size(old) + CHUNK);
 	for (Any *s = stack; s < sp; s++) {
-		*s = copy_value(*s, old, heap);
+		copy_value_major(*s, nursery, old, &heap, s);
 	}
 	heap_free(old);
-	long extra = (heap->limit - heap->current) / CHUNK - 1;
+	long extra = (heap.limit - heap.current) / CHUNK - 1;
 	if (extra > 0) {
-		heap->limit -= extra * CHUNK;
-		munmap(heap->limit, extra * CHUNK * sizeof(Any));
+		heap.limit -= extra * CHUNK;
+		munmap(heap.limit, extra * CHUNK * sizeof(Any));
+	}
+	return heap;
+}
+
+struct heap perform_minor_gc(struct heap *nursery, struct heap heap) {
+	for (Any *s = stack; s < sp; s++) {
+		Any res = copy_value_minor(*s, *nursery, &heap);
+		if (eq(res, trigger_major_gc)) {
+			heap = perform_major_gc(*nursery, heap);
+			break;
+		}
+		*s = res;
+	}
+	nursery->current = nursery->base;
+	return heap;
+}
+
+long hashcode(Any v) {
+	if (in(v.as_indirect, nursery) || in(v.as_indirect, heap)) {
+		struct pair p = *CLEAR_TAG(v).as_pair;
+		long hash = GET_TAG(v);
+		hash = (hash << 13) | (hash >> (64 - 13));
+		hash ^= hashcode(p.fst);
+		hash = (hash << 13) | (hash >> (64 - 13));
+		hash ^= hashcode(p.snd);
+		return hash;
+	} else {
+		return v.as_tagged;
 	}
 }
+
 
 Any *malloc(Any a, Any b) {
 	// The cell size better evenly divide the chunk size, or this won't
 	// fire when it needs to.
-	if (heap.current == heap.limit) {
+	if (nursery.current == nursery.limit) {
+#if PARANOIA >= 2
+		long ha1 = hashcode(a);
+		long hb1 = hashcode(b);
+#endif
 		push(a);
 		push(b);
-		perform_major_gc(&heap);
+		heap = perform_minor_gc(&nursery, heap);
 		b = pop();
 		a = pop();
+#if PARANOIA >= 2
+		long ha2 = hashcode(a);
+		long hb2 = hashcode(b);
+		if (ha1 != ha2 || hb1 != hb2) {
+			DIE("Heap corruption");
+		}
+#endif
 	}
-	return heap_put(&heap, a, b);
+	return heap_put(&nursery, a, b);
 }
 
 Any pair(Any a, Any b) {
@@ -309,8 +399,8 @@ OPFUNC(greater) {
 
 // XXX This is incomplete -- it does not handle blocks correctly.
 long equiv(Any a, Any b) {
-	if (in(a.as_indirect, heap)) {
-		if (in(b.as_indirect, heap)) {
+	if (in(a.as_indirect, nursery) || in(a.as_indirect, heap)) {
+		if (in(b.as_indirect, nursery) || in(b.as_indirect, heap)) {
 			long atag = GET_TAG(a);
 			long btag = GET_TAG(b);
 			struct pair ap = *CLEAR_TAG(a).as_pair;
@@ -320,10 +410,10 @@ long equiv(Any a, Any b) {
 			return 0;
 		}
 	} else {
-		if (in(b.as_indirect, heap)) {
+		if (in(b.as_indirect, nursery) || in(b.as_indirect, heap)) {
 			return 0;
 		} else {
-			return a.as_tagged == b.as_tagged;
+			return eq(a, b);
 		}
 	}
 }
@@ -373,7 +463,11 @@ int main(void) {
 	init_mm();
 	Any power = Unit;
 	Any name = sum(Unit, SUM_LEFT);
-	Any v = pair(Unit, pair(Unit, pair(power, pair(pair(name, Unit), Unit))));
+	Any a = pair(name, Unit);
+	Any b = pair(a, Unit);
+	Any c = pair(power, b);
+	Any d = pair(Unit, c);
+	Any v = pair(Unit, d);
 	block_0(v);
 	return 0;
 }
