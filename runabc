@@ -9,12 +9,20 @@ RTSFILES="
 	rts/rts.c
 "
 
-(cd backend && ghc --make Test)
-AO_DICT=abcc AO_PATH="./ao:$AO_PATH" ao abc "$@" | ./backend/Test > $TMPSRC
-# With gcc, pass -falign-functions=3 so that we have free bits in the function pointers.
-clang -std=c99 -march=native -msse4.1 -ffreestanding -nostdlib -O4 -static -Wall -g -o abc.out -Irts $RTSFILES $TMPSRC
+cabal build
+AO_DICT=abcc AO_PATH="./ao:$AO_PATH" ao abc "$@" | ./dist/build/abcc-backend/abcc-backend > $TMPSRC
+# With gcc, pass -falign-functions=4 so that we have free bits in the function pointers.
+clang -std=c99 -march=native -msse4.1 -ffreestanding -nostdlib -O3 -static -Wall -Wextra -g -o abc.out -Irts $RTSFILES $TMPSRC
 echo Running
-./abc.out # | hexdump -e '8/8 "%f\t" "\n"'
+gdb -batch -x /dev/stdin ./abc.out 1>&2 <<"SCRIPT"
+set confirm off
+source gdb.py
+run
+if $_isvoid($_exitcode)
+    print-abc-value v
+    quit 1
+end
+SCRIPT
 echo Done
 rm $TMPSRC
 rm abc.out

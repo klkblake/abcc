@@ -13,6 +13,8 @@ enum sum_side {
 	SUM_RIGHT,
 };
 
+#define FORWARDING_PTR (1 << 2)
+
 union any {
 	const struct pair *as_pair;
 	union any (*as_block)(union any);
@@ -24,9 +26,16 @@ union any {
 
 typedef union any Any;
 
+#define eq(a, b) ((a).as_indirect == (b).as_indirect)
+
+// Doubles are stored inverted, so that pointers correspond to NaNs and Infs,
+// which can't occur in ABC.
+#define TO_N(n) ((Any) ~((Any) (n)).as_tagged)
+#define N(v) (((Any) ~(v).as_tagged).as_num)
+
 struct pair {
 	const Any fst, snd;
-};
+} __attribute__((packed));
 
 typedef const struct pair *Pair;
 
@@ -34,46 +43,26 @@ typedef Any (*Block)(Any);
 
 struct comp_block {
 	const Any xy, yz;
-};
+} __attribute__((packed));
 
 typedef const struct comp_block *CompBlock;
 
 extern const Any Unit;
 
-#define CLEAR_TAG(v) ((Any) ((v).as_tagged &~ 0x3))
+#define CLEAR_TAG(v) ((Any) ((v).as_tagged &~ 0x7))
 #define TAG(v, t) ((Any) (CLEAR_TAG(v).as_tagged | t))
-#define GET_TAG(v) ((v).as_tagged & 0x3)
+#define GET_TAG(v) ((v).as_tagged & 0x7)
 
 #define f(v) (((v).as_pair)->fst)
 #define s(v) (((v).as_pair)->snd)
 
-#define ff(v) f(f(v))
-#define fs(v) s(f(v))
-#define sf(v) f(s(v))
-#define ss(v) s(s(v))
+#define v0 f(v)
+#define v1 f(s(v))
+#define v2 f(s(s(v)))
 
-#define ssf(v) f(s(s(v)))
-#define sss(v) s(s(s(v)))
-
-#define l0(v) f(v)
-#define l1(v) sf(v)
-#define l2(v) ssf(v)
-
-#define t1(v) s(v)
-#define t2(v) ss(v)
-#define t3(v) sss(v)
-
-#define v0 l0(v)
-#define v1 l1(v)
-#define v2 l2(v)
-
-#define vt1 t1(v)
-#define vt2 t2(v)
-#define vt3 t3(v)
-
-#define list1(a, l) pair(a, l)
-#define list2(a, b, l) pair(a, pair(b, l))
-#define list3(a, b, c, l) pair(a, pair(b, pair(c, l)))
+#define vt1 s(v)
+#define vt2 s(s(v))
+#define vt3 s(s(s(v)))
 
 #define deref(v) (*(CLEAR_TAG(v).as_indirect))
 
@@ -87,43 +76,48 @@ extern const Any Unit;
 
 Any pair(Any a, Any b);
 
-#define OP(name) Any name(Any v)
+#define OPFUNC(name) Any name(Any v)
 
-OP(assocl);
-OP(assocr);
-OP(swap);
-OP(swapd);
-OP(intro1);
-OP(elim1);
-OP(copy);
-OP(drop);
+#define op(name) OPFUNC(name)
+op(assocl);
+op(assocr);
+op(swap);
+op(swapd);
+op(intro1);
+op(elim1);
+op(copy);
+op(drop);
 Any applyBlock(Any b, Any x);
-OP(apply);
-OP(apply_tail);
-OP(compose);
-OP(quote);
-OP(introNum);
+op(apply);
+op(apply_tail);
+op(compose);
+op(quote);
+op(introNum);
 Any digit(int d, Any v);
-OP(add);
-OP(multiply);
-OP(inverse);
-OP(negate);
-OP(divmod);
-OP(assocls);
-OP(assocrs);
-OP(swaps);
-OP(swapds);
-OP(intro0);
-OP(elim0);
-OP(condapply);
-OP(distrib);
-OP(factor);
-OP(merge);
+op(add);
+op(multiply);
+op(inverse);
+op(negate);
+op(divmod);
+op(assocls);
+op(assocrs);
+op(swaps);
+op(swapds);
+op(intro0);
+op(elim0);
+op(condapply);
+op(distrib);
+op(factor);
+op(merge);
 Any _assert(char *line, int size, Any v);
-#define __stringify(line) #line
-#define __str(line) __stringify(line)
-#define _assert2(line, v) _assert(line, sizeof(line), v)
-#define assert(v) _assert2("Line " __str(__LINE__), (v))
-OP(greater);
-OP(debug_print_raw);
-OP(debug_print_text);
+#define _STRINGIFY(line) #line
+#define STRINGIFY(line) _STRINGIFY(line)
+#define ASSERT(line, v) _assert(line, sizeof(line) - 1, v)
+#define assert(v) ASSERT("Line " STRINGIFY(__LINE__) ": ", (v))
+op(greater);
+Any _assert_eq(char *line, int size, Any v);
+#define ASSERT_EQ(line, v) _assert_eq(line, sizeof(line) - 1, v)
+#define assert_eq(v) ASSERT_EQ("Line " STRINGIFY(__LINE__) ": ", (v))
+op(debug_print_raw);
+op(debug_print_text);
+#undef op
