@@ -5,3 +5,9 @@ std
 @debugPrintText %r {&debug print text}
 
 @sample1000 0 [inc dup pick apply debugPrintRaw] 1000 repeat drop
+
+@bench.listRight 0 [42 p] 1000000 repeat
+
+@bench.listLeft 0 [42 swap p] 1000000 repeat
+
+@bench.listZigzag 0 [42 p 42 swap p] 500000 repeat
