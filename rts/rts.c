@@ -104,8 +104,13 @@ void copy_value_major(Any value, struct heap nursery, struct heap old, struct he
 			target.as_indirect = cell;
 			*((Any *) value.as_indirect) = TAG(target, FORWARDING_PTR);
 			*result = TAG(target, tag);
-			copy_value_major(cell[0], nursery, old, heap, (Any *) &cell[0]);
-			copy_value_major(cell[1], nursery, old, heap, (Any *) &cell[1]);
+			if (in(cell[1].as_indirect, nursery) || in(cell[1].as_indirect, old)) {
+				copy_value_major(cell[0], nursery, old, heap, (Any *) &cell[0]);
+				copy_value_major(cell[1], nursery, old, heap, (Any *) &cell[1]);
+			} else {
+				copy_value_major(cell[1], nursery, old, heap, (Any *) &cell[1]);
+				copy_value_major(cell[0], nursery, old, heap, (Any *) &cell[0]);
+			}
 		}
 	} else {
 		*result = value;
