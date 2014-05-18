@@ -39,7 +39,10 @@ emitBlock b = do
     CodegenState bs ts c <- get
     let n = Map.size bs
     put $ CodegenState (Map.insert n [] bs) ts n
-    mapM_ compileOp b
+    -- Detect tail calls
+    case reverse b of
+        (Elim1:Apply:b') -> mapM_ compileOp . reverse $ ApplyTail:b'
+        _ -> mapM_ compileOp b
     modify $ \(CodegenState bs' ts' _) -> CodegenState bs' ts' c
     return n
 
@@ -94,6 +97,8 @@ compileOp Apply          = emitOp "apply"
 compileOp ApplyTail      = emitOp "apply_tail"
 compileOp Compose        = emitOp "compose"
 compileOp Quote          = emitOp "quote"
+compileOp Relevant       = return ()
+compileOp Affine         = return ()
 compileOp IntroNum       = emitOp "introNum"
 compileOp (Digit d)      = emit $ "\tv = digit(" ++ show d ++ ", v);\n"
 compileOp Add            = emitOp "add"
@@ -113,6 +118,8 @@ compileOp Factor         = emitOp "factor"
 compileOp Merge          = emitOp "merge"
 compileOp Assert         = emitOp "assert"
 compileOp Greater        = emitOp "greater"
+compileOp (Sealer   _)   = return ()
+compileOp (Unsealer _)   = return ()
 compileOp AssertEQ       = emitOp "assert_eq"
 compileOp DebugPrintRaw  = emitOp "debug_print_raw"
 compileOp DebugPrintText = emitOp "debug_print_text"

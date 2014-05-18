@@ -14,6 +14,8 @@ data Op = LitBlock [Op]
         | ApplyTail
         | Compose
         | Quote
+        | Relevant
+        | Affine
         | IntroNum
         | Digit Int
         | Add
@@ -33,6 +35,8 @@ data Op = LitBlock [Op]
         | Merge
         | Assert
         | Greater
+        | Sealer String
+        | Unsealer String
         | AssertEQ
         | DebugPrintRaw
         | DebugPrintText

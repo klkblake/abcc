@@ -1,7 +1,15 @@
 module Main where
 
+import Control.Applicative
+import Data.List
+import Data.Maybe
+import Data.Monoid
 import System.IO
 import System.Exit
+
+import qualified Text.PrettyPrint.ANSI.Leijen as Pretty
+import Text.Trifecta
+import Text.Trifecta.Delta
 
 import Op
 import Codegen
@@ -18,6 +26,8 @@ opcodes = [ ('l', AssocL)
           , ('$', Apply)
           , ('o', Compose)
           , ('\'', Quote)
+          , ('k', Relevant)
+          , ('f', Affine)
           , ('#', IntroNum)
           , ('0', Digit 0)
           , ('1', Digit 1)
@@ -48,59 +58,54 @@ opcodes = [ ('l', AssocL)
           , ('>', Greater)
           ]
 
-parseOp :: Char -> Either String Op
-parseOp op = maybe (fail $ "Unrecognised opcode: " ++ show op) return $ lookup op opcodes
+parseOp :: Parser Op
+parseOp = do
+    op <- anyChar
+    maybe (unexpected $ show op) return $ lookup op opcodes
 
-parseCap :: String -> Either String [Op]
-parseCap (':':_) = return []
-parseCap ('.':_) = return []
-parseCap "&≡" = return [AssertEQ]
-parseCap "&debug print raw" = return [DebugPrintRaw]
-parseCap "&debug print text" = return [DebugPrintText]
-parseCap cap = fail $ "Unrecognised capability: " ++ show cap
+parseCap :: Parser Op
+parseCap = between (char '{') (char '}') $ char ':' *> parseSealer
+                                       <|> char '.' *> parseUnsealer
+                                       <|> char '&' *> parseAnnotation 
+  where
+    parseSealer = Sealer <$> parseCapText
+    parseUnsealer = Unsealer <$> parseCapText
+    parseAnnotation = do
+        cap <- parseCapText
+        case cap of
+            "≡"                -> return AssertEQ
+            "debug print raw"  -> return DebugPrintRaw
+            "debug print text" -> return DebugPrintText
+            _                  -> fail $ "Unrecognised capability: " ++ show cap
+    parseCapText = many $ noneOf "{}\n"
 
-parseText :: String -> Either String (String, String)
-parseText ('\n':' ':cs) = do (text, cs') <- parseText cs
-                             return ('\n':text, cs')
-parseText ('\n':'~':cs) = return ("", cs)
-parseText ('\n':c:_) = fail $ "Invalid character " ++ show c ++ " after newline in text literal"
-parseText (c:cs) = do (text, cs') <- parseText cs
-                      return (c:text, cs')
-parseText "" = fail "Unterminated text"
+parseText :: Parser String
+parseText = between (char '"') (string "\n~") $ intercalate "\n" <$> parseLines
+  where
+    parseLines = sepBy (many $ notChar '\n') $ string "\n "
 
--- parse code or block, accumulating in reverse on left
---   return properly ordered result and remaining text
+parseBlock :: Parser [Op]
+parseBlock = between (char '[') (char ']') $ parse'
 
-parse' :: [Op] -> String -> Either String ([Op],String)
-parse' ps ('k':cs) = parse' ps cs
-parse' ps ('f':cs) = parse' ps cs
-parse' ps (' ':cs) = parse' ps cs
-parse' ps ('\n':cs) = parse' ps cs
-parse' ps ('$':'c':']':cs) = return (reverse (ApplyTail:ps), cs)
-parse' ps (']':cs) = return (reverse ps, cs)
+parse' :: Parser [Op]
+parse' = catMaybes <$> many ( oneOf " \n" *> return Nothing
+                          <|> Just <$> (LitBlock <$> parseBlock <|> parseCap <|> LitText <$> parseText <|> try parseOp)
+                            )
 
-parse' ps ('[':cs) = do (bops, cs') <- parse' [] cs
-                        parse' (LitBlock bops : ps) cs'
-
-parse' ps ('{':cs) = do cap <- parseCap $ takeWhile (/= '}') cs
-                        parse' (cap ++ ps) . tail $ dropWhile (/= '}') cs
-parse' ps ('"':cs) = do (text, cs') <- parseText cs
-                        parse' (LitText text : ps) cs'
-parse' ps (c:cs) = do op <- parseOp c
-                      parse' (op : ps) cs
-parse' ps [] = return (reverse ps,[])
-
-parse :: [Op] -> String -> Either String [Op]
-parse ps cs = do
-    (ps', cs') <- parse' ps cs
-    case cs' of
-        "" -> return ps'
-        _  -> fail $ "Unmatched closing bracket. Remaining:\n" ++ cs'
+parse :: String -> IO (Maybe [Op])
+parse input =
+    case parseString parse' (Lines 0 0 0 0) input of
+        Success a  -> return (Just a)
+        Failure xs -> do
+            Pretty.displayIO stderr $ Pretty.renderPretty 0.8 80 $ xs <> Pretty.linebreak
+            return Nothing
 
 main :: IO ()
 main = do
     input <- getContents
-    case parse [] input >>= compile of
-        Right prog -> putStr prog
-        Left  err  -> do hPutStrLn stderr $ "Failure: " ++ err
-                         exitFailure
+    ops <- parse input
+    case compile <$> ops of
+        Just (Right prog)   -> putStr prog
+        Just (Left  errmsg) -> do hPutStrLn stderr $ "Failure: " ++ errmsg
+                                  exitFailure
+        Nothing -> exitFailure
