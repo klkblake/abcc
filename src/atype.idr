@@ -3,12 +3,22 @@ module atype
 import Data.Floats
 import Data.Vect
 
---replace' : DecEq a => a -> a -> Vect n a -> Vect n a
-replace' : String -> String -> Vect n String -> Vect n String
+{-
+replace' : DecEq a => a -> a -> Vect n a -> Vect n a
+--total
+--replace' : String -> String -> Vect n String -> Vect n String
 replace' x y (z :: xs) with (decEq x z)
   replace' x y (x :: xs) | Yes refl = y :: xs
   replace' x y (_ :: xs) | No  _    = x :: replace' x y xs
 replace' x y [] = []
+-}
+
+total
+replace' : DecEq a => (x : a) -> a -> (xs : Vect (S n) a) -> Dec (x = head xs) -> Vect (S n) a
+replace' x y [x]            (Yes refl) = [y]
+replace' x y [z]            (No  _)    = [z]
+replace' x y (x :: w :: xs) (Yes refl) = y :: replace' x y (w :: xs) (decEq x w)
+replace' x y (z :: w :: xs) (No  _)    = z :: replace' x y (w :: xs) (decEq x w)
 
 data Constraint : {a : Type} -> (k : a) -> Type where
   MkConstraint : k -> Bool -> Constraint k
@@ -91,23 +101,29 @@ using (vs : Vect n String)
   weaken Void = Void
   weaken (Var v {prf}) = Var v {prf=weakenElem prf}
 
+  replaced : String -> String -> Vect n String -> Vect n String
+  replaced x y (z :: xs) = replace' x y (z :: xs) (decEq x z)
+  replaced x y [] = []
+
   mutual
-    %logging 5
-    renameElem : (a : String) -> (b : String) -> Elem a vs -> Elem b (replace' {n=n} a b vs)
-    renameElem a b Here = ?renameElem_rhs_1
-    renameElem a b (There x) = ?renameElem_rhs_2
-    %logging 0
+    postulate strEqPostulate : (a : String) -> (True = intToBool (prim__eqString a a))
 
-    renameElem' : (a : String) -> (b : String) -> Elem v vs -> Elem v (replace' a b vs)
+    renameElem : {vs : Vect (S n) String} -> (a : String) -> (b : String) -> Elem a vs -> Elem b (replace' a b vs (decEq a (head vs)))
+    renameElem a b Here      = ?renameElem_base
+    renameElem a b (There x) = ?renameElem_inductive
 
-  renameVar : (a : String) -> (b : String) -> OType vs -> OType (replace' a b vs)
+    renameElem' : (a : String) -> (b : String) -> Elem v vs -> Elem v (replaced a b vs)
+    renameElem' a b Here = ?renameElem2_base
+    renameElem' a b (There x) = ?renameElem2_inductive
+
+  renameVar : (a : String) -> (b : String) -> OType vs -> OType (replaced a b vs)
   renameVar a b (x .* y) = renameVar a b x .* renameVar a b y
   renameVar a b (x .+ y) = renameVar a b x .+ renameVar a b y
   renameVar a b (Block t x y) = Block t (renameVar a b x) (renameVar a b y)
   renameVar a b (Number x) = Number x
   renameVar a b Unit = Unit
   renameVar a b Void = Void
-  renameVar a b (Var v {prf}) with (decEq a v)
+  renameVar {vs=_::_} a b (Var v {prf}) with (decEq a v)
     renameVar a b (Var a {prf}) | Yes refl = Var b {prf=renameElem a b prf}
     renameVar a b (Var v {prf}) | No _ = Var v {prf=renameElem' a b prf}
 
@@ -221,6 +237,3 @@ using (vs : Vect n String)
 
   class Nonzero (x : Float) where
     ignoreme5 : Int
-
-  class Comparable (x : OType vs) (y : OType vs) where
-    ignoreme6 : Int
