@@ -57,8 +57,8 @@ opType AssocLS = (a :+ b :+ c) :* e ~> ((a :+ b) :+ c) :* e
 opType AssocRS = ((a :+ b) :+ c) :* e ~> (a :+ b :+ c) :* e
 opType SwapS   = (a :+ b :+ c) :* e ~> (b :+ a :+ c) :* e
 opType SwapDS  = (a :+ b :+ c :+ d) :* e ~> (a :+ c :+ b :+ d) :* e
-opType Intro0 = a :* e ~> (a :+ Unit) :* e
-opType Elim0  = (a :+ Unit) :* e ~> a :* e
+opType Intro0 = a :* e ~> (a :+ Void x) :* e
+opType Elim0  = (a :+ Void x) :* e ~> a :* e
 
 opType CondApply = bxx' :* (x :+ y) :* e ~> (x' :+ y) :* e
   where
