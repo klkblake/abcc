@@ -4,6 +4,7 @@ import Control.Monad.State
 import Data.Bits
 import Data.Char
 import Data.Function
+import Data.Functor.Identity
 import Data.List
 import qualified Data.Map.Lazy as Map
 import Numeric
@@ -34,7 +35,7 @@ emit op = modify $ \(CodegenState bs ts c) -> CodegenState (Map.adjust (++ op) c
 emitOp :: String -> Codegen ()
 emitOp op = emit $ "\tv = " ++ op ++ "(v);\n"
 
-emitBlock :: [Op] -> Codegen Int
+emitBlock :: [UntypedOp] -> Codegen Int
 emitBlock b = do
     CodegenState bs ts c <- get
     let n = Map.size bs
@@ -82,8 +83,8 @@ emitText t = do
     insertTextNode n ref text textNode =
         modify $ \(CodegenState bs ts c) -> CodegenState bs (Map.insert t (n, (ref, (text, textNode))) ts) c
 
-compileOp :: Op -> Codegen ()
-compileOp (LitBlock b) = emitBlock b >>= \n -> emit $ "\tv = pair((Any) &block_" ++ show n ++ ", v);\n"
+compileOp :: UntypedOp -> Codegen ()
+compileOp (LitBlock b) = emitBlock (map runIdentity b) >>= \n -> emit $ "\tv = pair((Any) &block_" ++ show n ++ ", v);\n"
 compileOp (LitText  t) = emitText  t >>= \(n, _) -> emit $ "\tv = pair(TAG((Any) &text[" ++ show n ++ "], SUM_LEFT), v);\n"
 compileOp AssocL         = emitOp "assocl"
 compileOp AssocR         = emitOp "assocr"
@@ -133,7 +134,7 @@ genC bs ts = let ts' = map (snd . snd) . sortFst . map snd . Map.toList $ ts
     genTextNodes ts' = "\"_text_nodes:\\n\"\n" ++ concat ts' ++ "\".popsection\\n\"\n);\n"
     genBlocks n b = "\nAny block_" ++ show n ++ "(Any v) {\n" ++ b ++ "\treturn v;\n}\n"
 
-compile :: [Op] -> Either String String
+compile :: [UntypedOp] -> Either String String
 compile ops = case runStateT (emitBlock ops) $ CodegenState Map.empty Map.empty 0  of
                   Right (_, cgs) -> Right $ genC (blocks cgs) (textNodes cgs)
                   Left err -> Left err

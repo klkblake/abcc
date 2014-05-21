@@ -1,6 +1,7 @@
 module Parser where
 
 import Control.Applicative
+import Data.Functor.Identity
 import Data.List
 import Data.Maybe
 import Data.Monoid
@@ -12,7 +13,7 @@ import Text.Trifecta.Delta
 
 import Op
 
-opcodes :: [(Char, Op)]
+opcodes :: [(Char, UntypedOp)]
 opcodes = [ ('l', AssocL)
           , ('r', AssocR)
           , ('w', Swap)
@@ -56,12 +57,12 @@ opcodes = [ ('l', AssocL)
           , ('>', Greater)
           ]
 
-parseOp :: Parser Op
+parseOp :: Parser UntypedOp
 parseOp = do
     op <- anyChar
     maybe (unexpected $ show op) return $ lookup op opcodes
 
-parseCap :: Parser Op
+parseCap :: Parser UntypedOp
 parseCap = between (char '{') (char '}') $ char ':' *> parseSealer
                                        <|> char '.' *> parseUnsealer
                                        <|> char '&' *> parseAnnotation 
@@ -82,15 +83,15 @@ parseText = between (char '"') (string "\n~") $ intercalate "\n" <$> parseLines
   where
     parseLines = sepBy (many $ notChar '\n') $ string "\n "
 
-parseBlock :: Parser [Op]
+parseBlock :: Parser [UntypedOp]
 parseBlock = between (char '[') (char ']') parse'
 
-parse' :: Parser [Op]
+parse' :: Parser [UntypedOp]
 parse' = catMaybes <$> many ( oneOf " \n" *> return Nothing
-                          <|> Just <$> (LitBlock <$> parseBlock <|> parseCap <|> LitText <$> parseText <|> try parseOp)
+                          <|> Just <$> ((LitBlock . map Identity) <$> parseBlock <|> parseCap <|> LitText <$> parseText <|> try parseOp)
                             )
 
-parse :: String -> IO (Maybe [Op])
+parse :: String -> IO (Maybe [UntypedOp])
 parse input =
     case parseString parse' (Lines 0 0 0 0) input of
         Success a  -> return (Just a)

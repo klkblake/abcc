@@ -1,6 +1,12 @@
+{-# LANGUAGE StandaloneDeriving, FlexibleInstances, FlexibleContexts,
+ UndecidableInstances #-}
 module Op where
 
-data Op = LitBlock [Op]
+import Data.Functor.Identity
+
+import Type
+
+data Op f = LitBlock [f (Op f)]
         | LitText String
         | AssocL
         | AssocR
@@ -40,4 +46,12 @@ data Op = LitBlock [Op]
         | AssertEQ
         | DebugPrintRaw
         | DebugPrintText
-        deriving Show
+
+deriving instance Show (f (Op f)) => Show (Op f)
+deriving instance Show (Identity (Op Identity))
+
+data Typed a = Typed Type a
+             deriving Show
+
+type UntypedOp = Op Identity
+type TypedOp = Typed (Op Typed)

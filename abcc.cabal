@@ -22,6 +22,7 @@ executable abcc
   build-depends:       base >=4.6 && <4.7
       , containers
       , mtl
+      , transformers
       , trifecta
       , ansi-wl-pprint
       , llvm-general-pure >=3.4 && <3.5
