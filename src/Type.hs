@@ -1,5 +1,11 @@
 module Type where
 
+import Control.Applicative
+import Control.Monad.State.Strict
+import Data.List (dropWhileEnd)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+
 data Constraint = Droppable | Copyable | Quotable
                 deriving Show
 
@@ -49,3 +55,17 @@ instance Show Type where
 infixr 7 :*
 infixr 6 :+
 infixr 1 ~>
+
+data TypeContext = TypeContext { tcx_used        :: Map String Int
+                               , tcx_constraints :: Map String [Constraint]
+                               }
+
+emptyTCX :: TypeContext
+emptyTCX = TypeContext Map.empty Map.empty
+
+fresh :: String -> State TypeContext String
+fresh var = do
+    let var' = dropWhileEnd (`elem` ['0'..'9']) var
+    n <- Map.findWithDefault 0 var <$> gets tcx_used
+    modify $ \tcx -> tcx { tcx_used = Map.insert var (n + 1) $ tcx_used tcx }
+    return $ var' ++ show n

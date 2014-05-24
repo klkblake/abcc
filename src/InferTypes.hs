@@ -2,10 +2,8 @@
 module InferTypes where
 
 import Control.Applicative
-import Control.Monad.State hiding (ap)
+import Control.Monad.State.Strict hiding (ap)
 import Data.Functor.Identity
-import Data.List
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 
 import Type
@@ -24,14 +22,7 @@ xp = Var []"x'"
 y = Var [] "y"
 z = Var [] "z"
 
-gensym :: String -> State (Map String Int) String
-gensym var = do
-    let var' = dropWhileEnd (`elem` ['0'..'9']) var
-    n <- Map.findWithDefault 0 var <$> get
-    modify $ Map.insert var $ n + 1
-    return $ var' ++ show n
-
-renameType :: Type -> State (Map String Int) Type
+renameType :: Type -> State TypeContext Type
 renameType ty = evalStateT (renameType' ty) Map.empty
   where
     renameType' (l :* r)         = (:*)     <$> renameType' l <*> renameType' r
@@ -43,7 +34,7 @@ renameType ty = evalStateT (renameType' ty) Map.empty
     renameType' (Sealed seal ty') = Sealed seal <$> renameType' ty'
     renameType' (Fix var ty') = do
         used <- get
-        var' <- lift $ gensym var
+        var' <- lift $ fresh var
         modify $ Map.insert var var'
         ty'' <- renameType' ty'
         put used
@@ -53,7 +44,7 @@ renameType ty = evalStateT (renameType' ty) Map.empty
         case Map.lookup var used of
             Just var' -> return $ Var cs var'
             Nothing -> do
-                var' <- lift $ gensym var
+                var' <- lift $ fresh var
                 modify $ Map.insert var var'
                 return $ Var cs var'
     renameType' (Merged l r) = Merged <$> renameType' l <*> renameType' r
@@ -68,7 +59,7 @@ addE _ = error "called addE on non-block type"
 #define OP(op, ty) typedOp (op) = (flip Typed (op)) <$> (renameType $ ty)
 #define OPe(op, ty) typedOp (op) = (flip Typed (op)) <$> (renameType . addE $ ty)
 
-typedOp :: UntypedOp -> State (Map String Int) TypedOp
+typedOp :: UntypedOp -> State TypeContext TypedOp
 typedOp (LitBlock block) = Typed (s ~> (a ~> b) :* s) . LitBlock <$> mapM (typedOp . runIdentity) block
 OP(LitText text, s ~> Fix "L" (x :* Var [] "L" :+ Unit) :* s)
 
@@ -128,4 +119,4 @@ OP(DebugPrintText, error "DebugPrintText not supported. I need to implement the 
 #undef OP
 
 inferTypes :: [UntypedOp] -> [TypedOp]
-inferTypes ops = evalState (mapM typedOp ops) Map.empty
+inferTypes ops = evalState (mapM typedOp ops) emptyTCX
