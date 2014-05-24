@@ -58,7 +58,15 @@ renameType ty = evalStateT (renameType' ty) Map.empty
                 return $ Var cs var'
     renameType' (Merged l r) = Merged <$> renameType' l <*> renameType' r
 
+addE :: Type -> Type
+addE (Block bt l r) = Block bt (addE' l) (addE' r)
+  where
+    addE' (l' :* r') = l' :* (addE' r')
+    addE' ty = ty :* e
+addE _ = error "called addE on non-block type"
+
 #define OP(op, ty) typedOp (op) = (flip Typed (op)) <$> (renameType $ ty)
+#define OPe(op, ty) typedOp (op) = (flip Typed (op)) <$> (renameType . addE $ ty)
 
 typedOp :: UntypedOp -> State (Map String Int) TypedOp
 typedOp (LitBlock block) = Typed (s ~> (a ~> b) :* s) . LitBlock <$> mapM (typedOp . runIdentity) block
@@ -72,48 +80,48 @@ OP(Intro1, a ~> a :* Unit)
 OP(Elim1, a :* Unit ~> a)
 OP(Drop, dx :* e ~> e)
   where dx = Var [Droppable] "x"
-OP(Copy, cx :* e ~> cx :* cx :* e)
+OPe(Copy, cx ~> cx :* cx)
   where cx = Var [Copyable] "x"
 
-OP(Apply, (x ~> xp) :* x :* e ~> xp :* e)
+OPe(Apply, (x ~> xp) :* x ~> xp)
 -- XXX This probably should only appear later in the pipeline
 OP(ApplyTail, (x ~> xp) :* x :* Unit ~> xp)
-OP(Compose, (y ~> z) :* (x ~> y) :* e ~> (x ~> z) :* e)
-OP(Quote, qx :* e ~> (s ~> qx :* s) :* e)
+OPe(Compose, (y ~> z) :* (x ~> y) ~> (x ~> z))
+OPe(Quote, qx ~> (s ~> qx :* s))
   where qx = Var [Quotable] "x"
-OP(Relevant, (x ~> y) :* e ~> (Block btRelevant x y) :* e)
-OP(Affine, (x ~> y) :* e ~> (Block btAffine x y) :* e)
+OPe(Relevant, (x ~> y) ~> Block btRelevant x y)
+OPe(Affine, (x ~> y) ~> Block btAffine x y)
 
 OP(IntroNum, e ~> Num :* e)
-OP(Digit digit, Num :* e ~> Num :* e)
+OPe(Digit digit, Num ~> Num)
 
-OP(Add, Num :* Num :* e ~> Num :* e)
-OP(Multiply, Num :* Num :* e ~> Num :* e)
-OP(Inverse, Num :* e ~> Num :* e)
-OP(Negate, Num :* e ~> Num :* e)
-OP(Divmod, Num :* Num :* e ~> Num :* Num :* e)
+OPe(Add, Num :* Num ~> Num)
+OPe(Multiply, Num :* Num ~> Num)
+OPe(Inverse, Num ~> Num)
+OPe(Negate, Num ~> Num)
+OPe(Divmod, Num :* Num ~> Num :* Num)
 
-OP(AssocLS, (a :+ b :+ c) :* e ~> ((a :+ b) :+ c) :* e)
-OP(AssocRS, ((a :+ b) :+ c) :* e ~> (a :+ b :+ c) :* e)
-OP(SwapS, (a :+ b :+ c) :* e ~> (b :+ a :+ c) :* e)
-OP(SwapDS, (a :+ b :+ c :+ d) :* e ~> (a :+ c :+ b :+ d) :* e)
-OP(Intro0, a :* e ~> (a :+ Void x) :* e)
-OP(Elim0, (a :+ Void x) :* e ~> a :* e)
+OPe(AssocLS, a :+ b :+ c ~> (a :+ b) :+ c)
+OPe(AssocRS, (a :+ b) :+ c ~> a :+ b :+ c)
+OPe(SwapS, a :+ b :+ c ~> b :+ a :+ c)
+OPe(SwapDS, a :+ b :+ c :+ d ~> a :+ c :+ b :+ d)
+OPe(Intro0, a ~> a :+ Void x)
+OPe(Elim0, a :+ Void x ~> a)
 
-OP(CondApply, bxxp :* (x :+ y) :* e ~> (xp :+ y) :* e)
+OPe(CondApply, bxxp :* (x :+ y) ~> xp :+ y)
   where
     bxxp = Merged (Var [Droppable] "b") $ x ~> xp
-OP(Distrib, a :* (b :+ c) :* e ~> (a :* b :+ a :* c) :* e)
-OP(Factor, (a :* b :+ c :* d) :* e ~> (a :+ c) :* (b :+ d) :* e)
-OP(Merge, (a :+ ap) :* e ~> (Merged a ap) :* e)
-OP(Assert, (a :+ b) :* e ~> b :* e)
+OPe(Distrib, a :* (b :+ c) ~> a :* b :+ a :* c)
+OPe(Factor, a :* b :+ c :* d ~> (a :+ c) :* (b :+ d))
+OPe(Merge, a :+ ap ~> Merged a ap)
+OPe(Assert, a :+ b ~> b)
 
-OP(Greater, Num :* Num :* e ~> (Num :* Num :+ Num :* Num) :* e)
+OPe(Greater, Num :* Num ~> Num :* Num :+ Num :* Num)
 
 OP(Sealer seal, a ~> Sealed seal a)
 OP(Unsealer seal, Sealed seal a ~> a)
 
-OP(AssertEQ, a :* b :* e ~> a :* b :* e)
+OPe(AssertEQ, a :* b ~> a :* b)
 OP(DebugPrintRaw, error "DebugPrintRaw not supported. I need to implement the standard debug print system")
 OP(DebugPrintText, error "DebugPrintText not supported. I need to implement the standard debug print system")
 
