@@ -28,7 +28,7 @@ doTypeCheck = do
     input <- getContents
     ops <- parse input
     case ops of
-        Just ops' -> print $ evalState (addTypes ops' >>= unifyTypes) emptyTCX
+        Just ops' -> print $ runState (addTypes ops' >>= unifyTypes) emptyTCX
         Nothing -> exitFailure
 
 main :: IO ()
