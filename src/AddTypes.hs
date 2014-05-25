@@ -2,7 +2,7 @@
 module AddTypes where
 
 import Control.Applicative
-import Control.Monad.State.Strict hiding (ap)
+import Control.Monad.State hiding (ap)
 import Data.Functor.Identity
 import qualified Data.Map.Strict as Map
 

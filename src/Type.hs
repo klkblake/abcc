@@ -1,7 +1,7 @@
 module Type where
 
 import Control.Applicative
-import Control.Monad.State.Strict
+import Control.Monad.State
 import Data.List (dropWhileEnd)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
