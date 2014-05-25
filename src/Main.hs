@@ -5,7 +5,7 @@ import System.IO
 import System.Exit
 
 import Parser
-import InferTypes
+import AddTypes
 import Codegen
 
 doCompile :: IO ()
@@ -23,7 +23,7 @@ doTypeCheck = do
     input <- getContents
     ops <- parse input
     case ops of
-        Just ops' -> print $ inferTypes ops'
+        Just ops' -> print $ addTypes ops'
         Nothing -> exitFailure
 
 main :: IO ()

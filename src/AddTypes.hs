@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP #-}
-module InferTypes where
+module AddTypes where
 
 import Control.Applicative
 import Control.Monad.State.Strict hiding (ap)
@@ -118,5 +118,5 @@ OP(DebugPrintText, error "DebugPrintText not supported. I need to implement the 
 
 #undef OP
 
-inferTypes :: [UntypedOp] -> [TypedOp]
-inferTypes ops = evalState (mapM typedOp ops) emptyTCX
+addTypes :: [UntypedOp] -> [TypedOp]
+addTypes ops = evalState (mapM typedOp ops) emptyTCX
