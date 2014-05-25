@@ -1,11 +1,16 @@
 module Main where
 
+import Control.Monad.State
+
 import System.Environment
 import System.IO
 import System.Exit
 
+import Type
+
 import Parser
 import AddTypes
+import UnifyTypes
 import Codegen
 
 doCompile :: IO ()
@@ -23,7 +28,7 @@ doTypeCheck = do
     input <- getContents
     ops <- parse input
     case ops of
-        Just ops' -> print $ addTypes ops'
+        Just ops' -> print $ evalState (addTypes ops' >>= unifyTypes) emptyTCX
         Nothing -> exitFailure
 
 main :: IO ()

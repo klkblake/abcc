@@ -118,5 +118,5 @@ OP(DebugPrintText, error "DebugPrintText not supported. I need to implement the 
 
 #undef OP
 
-addTypes :: [UntypedOp] -> [TypedOp]
-addTypes ops = evalState (mapM typedOp ops) emptyTCX
+addTypes :: [UntypedOp] -> State TypeContext [TypedOp]
+addTypes ops = mapM typedOp ops
