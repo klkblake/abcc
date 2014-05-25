@@ -31,11 +31,11 @@ renameType cs ty = do
     return ty'
   where
     renameType' :: Type -> StateT (Map.Map String String, Maybe (String, Constraint)) (State TypeContext) Type
-    renameType' (l :* r)         = (:*)     <$> renameType' l <*> renameType' r
-    renameType' (l :+ r)         = (:+)     <$> renameType' l <*> renameType' r
-    renameType' (Block bt l r)   = Block bt <$> renameType' l <*> renameType' r
-    renameType' Num              = return Num
-    renameType' Unit             = return Unit
+    renameType' (l :* r)          = (:*) <$> renameType' l <*> renameType' r
+    renameType' (l :+ r)          = (:+) <$> renameType' l <*> renameType' r
+    renameType' (l :~> r)         = (~>) <$> renameType' l <*> renameType' r
+    renameType' Num               = return Num
+    renameType' Unit              = return Unit
     renameType' (Void ty')        = Void        <$> renameType' ty'
     renameType' (Sealed seal ty') = Sealed seal <$> renameType' ty'
     renameType' (Fix var ty') = do
@@ -59,7 +59,7 @@ renameType cs ty = do
     renameType' (Merged l r) = Merged <$> renameType' l <*> renameType' r
 
 addE :: Type -> Type
-addE (Block bt l r) = Block bt (addE' l) (addE' r)
+addE (l :~> r) = (addE' l) ~> (addE' r)
   where
     addE' (l' :* r') = l' :* (addE' r')
     addE' ty = ty :* e
@@ -88,8 +88,8 @@ OPe(Apply, (x ~> xp) :* x ~> xp)
 OP(ApplyTail, (x ~> xp) :* x :* Unit ~> xp)
 OPe(Compose, (y ~> z) :* (x ~> y) ~> (x ~> z))
 OPce(Quote, x ~> (s ~> x :* s), "x", Quotable)
-OPe(Relevant, (x ~> y) ~> Block btRelevant x y)
-OPe(Affine, (x ~> y) ~> Block btAffine x y)
+OPe(Relevant, (x ~> y) ~> (x ~> y))
+OPe(Affine, (x ~> y) ~> (x ~> y))
 
 OP(IntroNum, e ~> Num :* e)
 OPe(Digit digit, Num ~> Num)

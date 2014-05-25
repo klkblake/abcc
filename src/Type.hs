@@ -10,17 +10,9 @@ import Data.Maybe (fromMaybe)
 data Constraint = Droppable | Copyable | Quotable
                 deriving (Eq, Show)
 
-data BlockType = BT Bool Bool
-               deriving Show
-
-btNormal, btRelevant, btAffine :: BlockType
-btNormal = BT False False
-btRelevant = BT True False
-btAffine = BT False True
-
 data Type = (:*) Type Type
           | (:+) Type Type
-          | Block BlockType Type Type
+          | (:~>) Type Type
           | Num
           | Unit
           | Void Type
@@ -32,14 +24,10 @@ data Type = (:*) Type Type
 instance Show Type where
     showsPrec prec (a :* b) = showParen   (prec > 7) $ showsPrec 8 a . showString " * " . showsPrec 7 b
     showsPrec prec (a :+ b) = showParen   (prec > 6) $ showsPrec 7 a . showString " + " . showsPrec 6 b
-    showsPrec prec (Block bt a b) =
-        showBracket (prec > 0) (showsPrec 1 a . showString " -> " . showsPrec 1 b) . showBT bt
+    showsPrec prec (a :~> b) =
+        showBracket (prec > 0) (showsPrec 1 a . showString " -> " . showsPrec 1 b)
       where
         showBracket c s = if c then showChar '[' . s . showChar ']' else s
-        showBT (BT False False) = id
-        showBT (BT True False)  = showChar 'k'
-        showBT (BT False True)  = showChar 'f'
-        showBT (BT True True)   = showString "kf"
     showsPrec _    Num = showChar 'N'
     showsPrec _    Unit = showChar '1'
     showsPrec _    (Void ty) = showString "0<" . showsPrec 1 ty . showChar '>'
@@ -50,10 +38,11 @@ instance Show Type where
     showsPrec _    (Merged a b) = showChar '{' . showsPrec 1 a . showString " ∧ " . showsPrec 1 b . showChar '}'
 
 (~>) :: Type -> Type -> Type
-(~>) = Block btNormal
+(~>) = (:~>)
 
 infixr 7 :*
 infixr 6 :+
+infixr 1 :~>
 infixr 1 ~>
 
 data TypeContext = TypeContext { tcx_used        :: Map String Int
