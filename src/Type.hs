@@ -19,6 +19,7 @@ data Type = (:*) Type Type
           | Sealed String Type
           | Var String
           | Merged Type Type
+          deriving Eq
 
 instance Show Type where
     showsPrec prec (a :* b) = showParen   (prec > 7) $ showsPrec 8 a . showString " * " . showsPrec 7 b
@@ -50,14 +51,17 @@ data TypeContext = TypeContext { tcx_used        :: Map String Int
 emptyTCX :: TypeContext
 emptyTCX = TypeContext Map.empty Map.empty
 
-fresh :: String -> State TypeContext String
+fresh :: (Functor m, Monad m) => String -> StateT TypeContext m String
 fresh var = do
     let var' = dropWhileEnd (`elem` ['0'..'9']) var
     n <- Map.findWithDefault 0 var <$> gets tcx_used
     modify $ \tcx -> tcx { tcx_used = Map.insert var (n + 1) $ tcx_used tcx }
     return $ var' ++ show n
 
-constrain :: String -> Constraint -> State TypeContext ()
-constrain var c = modify $ \tcx -> tcx { tcx_constraints = Map.alter putSet var $ tcx_constraints tcx }
+modifyConstraints :: Monad m => (Map String [Constraint] -> Map String [Constraint]) -> StateT TypeContext m ()
+modifyConstraints f = modify $ \tcx -> tcx { tcx_constraints = f $ tcx_constraints tcx }
+
+constrain :: Monad m => String -> Constraint -> StateT TypeContext m ()
+constrain var c = modifyConstraints $ Map.alter putSet var
   where
     putSet = Just . nub . (c:) . fromMaybe []

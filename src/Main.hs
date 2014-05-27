@@ -13,6 +13,9 @@ import AddTypes
 import UnifyTypes
 import Codegen
 
+raise :: Monad m => State s a -> StateT s m a
+raise = state . runState
+
 doCompile :: IO ()
 doCompile = do
     input <- getContents
@@ -28,7 +31,7 @@ doTypeCheck = do
     input <- getContents
     ops <- parse input
     case ops of
-        Just ops' -> print $ runState (addTypes ops' >>= unifyTypes) emptyTCX
+        Just ops' -> print $ runStateT (raise (addTypes ops') >>= unifyTypes) emptyTCX
         Nothing -> exitFailure
 
 main :: IO ()
