@@ -12,41 +12,35 @@ fixed :: Eq a => (a -> a) -> a -> a
 fixed f x = let x' = f x
             in if x == x' then x else fixed f x'
 
+mapTy :: (Type -> Maybe Type) -> Type -> Type
+mapTy f ty | Just ty' <- f ty = ty'
+mapTy f (a :*  b)       = mapTy f a :*  mapTy f b
+mapTy f (a :+  b)       = mapTy f a :+  mapTy f b
+mapTy f (a :~> b)       = mapTy f a :~> mapTy f b
+mapTy _ Num             = Num
+mapTy _ Unit            = Unit
+mapTy f (Void a)        = Void $ mapTy f a
+mapTy f (Sealed seal a) = Sealed seal $ mapTy f a
+mapTy _ (Var a)         = Var a
+mapTy f (Merged a b)    = Merged (mapTy f a) (mapTy f b)
+
 rewrite :: String -> Type -> Type -> Type
-rewrite v ty (a :*  b)           = rewrite v ty a :*  rewrite v ty b
-rewrite v ty (a :+  b)           = rewrite v ty a :+  rewrite v ty b
-rewrite v ty (a :~> b)           = rewrite v ty a :~> rewrite v ty b
-rewrite _ _  Num                 = Num
-rewrite _ _  Unit                = Unit
-rewrite v ty (Void a)            = Void $ rewrite v ty a
-rewrite v ty (Sealed seal a)     = Sealed seal $ rewrite v ty a
-rewrite v ty (Var a) | v == a    = ty
-                     | otherwise = Var a
-rewrite v ty (Merged a b)        = Merged (rewrite v ty a) (rewrite v ty b)
+rewrite v ty = mapTy rewrite'
+  where
+    rewrite' (Var a) | v == a = Just ty
+    rewrite' _ = Nothing
 
 roll :: Type -> String -> Type -> Type
-roll ty v ty' | ty == ty' = Var v
-roll ty v (a :*  b)       = roll ty v a :*  roll ty v b
-roll ty v (a :+  b)       = roll ty v a :+  roll ty v b
-roll ty v (a :~> b)       = roll ty v a :~> roll ty v b
-roll _  _ Num             = Num
-roll _  _ Unit            = Unit
-roll ty v (Void a)        = Void $ roll ty v a
-roll ty v (Sealed seal a) = Sealed seal $ roll ty v a
-roll _  _ (Var a)         = Var a
-roll ty v (Merged a b)    = Merged (roll ty v a) (roll ty v b)
+roll ty v = mapTy roll'
+  where
+    roll' ty' | ty == ty' = Just $ Var v
+    roll' _ = Nothing
 
 merged :: String -> Type -> Type -> Type
-merged v ty (a :*  b)           = merged v ty a :*  merged v ty b
-merged v ty (a :+  b)           = merged v ty a :+  merged v ty b
-merged v ty (a :~> b)           = merged v ty a :~> merged v ty b
-merged _ _  Num                 = Num
-merged _ _  Unit                = Unit
-merged v ty (Void a)            = Void $ merged v ty a
-merged v ty (Sealed seal a)     = Sealed seal $ merged v ty a
-merged v ty (Var a) | v == a    = Merged (Var v) ty
-                    | otherwise = Var a
-merged v ty (Merged a b)        = Merged (merged v ty a) (merged v ty b)
+merged v ty = mapTy merged'
+  where
+    merged' (Var a) | v == a = Just $ Merged (Var v) ty
+    merged' _ = Nothing
 
 unify :: Type -> Type -> [TypedOp] -> StateT TypeContext (Either String) [TypedOp]
 unify l r ops = do
@@ -90,7 +84,7 @@ unify l r ops = do
     -- XXX identify recursion
     unify' (Var a) b =
         if referenced a b
-            then return . Just $ merged a b . fixed (roll b a)
+            then trace ("merge " ++ show a ++ " " ++ show b) $ return . Just $ merged a b . fixed (roll b a)
             else do
                 modifyConstraints $ Map.delete a
                 trace ("rewrite " ++ show a ++ " " ++ show b) $ return . Just $ rewrite a b
