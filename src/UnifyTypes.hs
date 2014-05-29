@@ -3,6 +3,7 @@ module UnifyTypes where
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.Map.Strict as Map
+import Data.List (intercalate)
 import Debug.Trace
 
 import Type
@@ -92,9 +93,17 @@ unify l r ops = do
 
 unifyOps :: [TypedOp] -> TypedOp -> StateT TypeContext (Either String) [TypedOp]
 unifyOps [] op = return [op]
--- TODO handle blocks
+unifyOps (Typed tyl@(_ :~> tylr) opl:ops) (Typed (s :~> (a :~> b) :* s') (LitBlock ops')) = do
+    ops'' <- unifyTypes ops'
+    case ops'' of
+        [] -> unify tylr s $ Typed (s ~> (a ~> b) :* s') (LitBlock []):Typed tyl opl:ops
+        _  -> do
+            let Typed (a' :~> _)  _ = head ops''
+            let Typed (_  :~> b') _ = last ops''
+            x <- unify tylr s $ Typed (s ~> (a' ~> b') :* s') (LitBlock ops''):Typed tyl opl:ops
+            return $ trace ("Current type:\n" ++ intercalate "\n" (map show x)) x
 unifyOps (Typed tyl@(_ :~> tylr) opl:ops) (Typed tyr@(tyrl :~> _) opr) = do x <- unify tylr tyrl $ Typed tyr opr:Typed tyl opl:ops
-                                                                            return $ trace ("Current type: " ++ show x) x
+                                                                            return $ trace ("Current type:\n" ++ intercalate "\n" (map show x)) x
 unifyOps _ _ = error "called unifyOps on list containing op with non-block type"
 
 unifyTypes :: [TypedOp] -> StateT TypeContext (Either String) [TypedOp]
