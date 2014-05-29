@@ -64,7 +64,14 @@ addE _ = error "called addE on non-block type"
 #define OPce(op, ty, v, c) typedOp (op) = (flip Typed (op)) <$> (renameType (Just (v, c)) . addE $ ty)
 
 typedOp :: UntypedOp -> State TypeContext TypedOp
-typedOp (LitBlock block) = Typed (s ~> (a ~> b) :* s) . LitBlock <$> mapM (typedOp . runIdentity) block
+typedOp (LitBlock block) = do
+    ops <- mapM (typedOp . runIdentity) block
+    case ops of
+        [] -> flip Typed (LitBlock []) <$> renameType Nothing (s ~> (a ~> a) :* s)
+        _  -> do
+            let Typed (a' :~> _)  _ = head ops
+            let Typed (_  :~> b') _ = last ops
+            flip Typed (LitBlock ops) <$> renameType Nothing (s ~> (a' ~> b') :* s)
 OP(LitText text, s ~> Merged (Var "L") (x :* Var "L" :+ Unit) :* s)
 
 OP(AssocL, a :* b :* c ~> (a :* b) :* c)
