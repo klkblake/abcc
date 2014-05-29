@@ -13,6 +13,24 @@ fixed :: Eq a => (a -> a) -> a -> a
 fixed f x = let x' = f x
             in if x == x' then x else fixed f x'
 
+normalise :: Type -> Type -> Type
+normalise (a :*  b) (c :*  d) = normalise a c :* normalise b d
+normalise (a :+  b) (c :+  d) = normalise a c :+ normalise b d
+normalise (a :~> b) (c :~> d) = normalise a c ~> normalise b d
+normalise Num Num = Num
+normalise Unit Unit = Unit
+normalise (Void a) (Void b) = Void $ normalise a b
+normalise (Sealed sealA a) (Sealed sealB b) | sealA == sealB = Sealed sealA $ normalise a b
+normalise (Fix a b) (Fix c d) | a == c = Fix a $ normalise b d
+normalise (Var a) (Var b) | a == b = Var a
+normalise (Merged a b) (Merged c d) = let x = normalise a b
+                                          y = normalise c d
+                                      in case (x, y) of
+                                             (Merged _ _, _) -> Merged x y
+                                             (_, Merged _ _) -> Merged x y
+                                             _ -> normalise x y
+normalise a b = Merged a b
+
 mapTy :: (Type -> Maybe Type) -> Type -> Type
 mapTy f ty | Just ty' <- f ty = ty'
 mapTy f (a :*  b)       = mapTy f a :*  mapTy f b
@@ -24,7 +42,7 @@ mapTy f (Void a)        = Void $ mapTy f a
 mapTy f (Sealed seal a) = Sealed seal $ mapTy f a
 mapTy f (Fix v a)       = Fix v $ mapTy f a
 mapTy _ (Var a)         = Var a
-mapTy f (Merged a b)    = Merged (mapTy f a) (mapTy f b)
+mapTy f (Merged a b)    = normalise (mapTy f a) (mapTy f b)
 
 rewrite :: String -> Type -> Type -> Type
 rewrite v ty = mapTy rewrite'
@@ -88,7 +106,8 @@ unify l r ops = do
                 modifyConstraints $ Map.delete a
                 trace ("rewrite " ++ show a ++ " " ++ show b) $ return . Just $ rewrite a b
     unify' a (Var b) = unify' (Var b) a
-    unify' (Merged a b) (Merged c d) = unify' a c <||> unify' b d
+    unify' (Merged a b) c = unify' a c <||> unify' b c
+    unify' a (Merged b c) = unify' a b <||> unify' a c
     unify' a b = fail $ "Could not unify " ++ show a ++ " with " ++ show b
 
 unifyOps :: [TypedOp] -> TypedOp -> StateT TypeContext (Either String) [TypedOp]
