@@ -21,6 +21,7 @@ mapTy _ Num             = Num
 mapTy _ Unit            = Unit
 mapTy f (Void a)        = Void $ mapTy f a
 mapTy f (Sealed seal a) = Sealed seal $ mapTy f a
+mapTy f (Fix v a)       = Fix v $ mapTy f a
 mapTy _ (Var a)         = Var a
 mapTy f (Merged a b)    = Merged (mapTy f a) (mapTy f b)
 
@@ -64,6 +65,7 @@ unify l r ops = do
     referenced _ Unit = False
     referenced v (Void a) = referenced v a
     referenced v (Sealed _ a) = referenced v a
+    referenced v (Fix _ a) = referenced v a
     referenced v (Var a) = v == a
     referenced v (Merged a b) = referenced v a || referenced v b
 
@@ -75,6 +77,7 @@ unify l r ops = do
     unify' (Void a)  (Void b)  = unify' a b
     unify' (Sealed sealA a) (Sealed sealB b) | sealA == sealB = unify' a b
                                              | otherwise = fail $ "Mismatched seals: " ++ show sealA ++ " /= " ++ show sealB
+    unify' (Fix a b) (Fix c d) = unify' (Var a) (Var c) <||> unify' b d
     unify' (Var a) (Var b) | a == b    = return Nothing
                            | otherwise = do
         cs <- Map.findWithDefault [] b <$> gets tcx_constraints

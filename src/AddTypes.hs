@@ -39,12 +39,8 @@ renameType cs ty = do
     renameType' (Void ty')        = Void        <$> renameType' ty'
     renameType' (Sealed seal ty') = Sealed seal <$> renameType' ty'
     renameType' (Fix var ty') = do
-        (used, cs') <- get
-        var' <- lift $ fresh var
-        put $ (Map.insert var var' used, cs')
-        ty'' <- renameType' ty'
-        put (used, cs')
-        return $ Fix var' ty''
+        Var var' <- renameType' $ Var var
+        Fix var' <$> renameType' ty'
     renameType' (Var var) = do
         (used, cs') <- get
         case Map.lookup var used of
