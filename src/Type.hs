@@ -17,6 +17,7 @@ data Type = (:*) Type Type
           | Unit
           | Void Type
           | Sealed String Type
+          | Fix String Type
           | Var String
           | Merged Type Type
           deriving Eq
@@ -32,6 +33,8 @@ instance Show Type where
     showsPrec _    Unit = showChar '1'
     showsPrec _    (Void ty) = showString "0<" . showsPrec 1 ty . showChar '>'
     showsPrec prec (Sealed seal ty) = showParen (prec > 8) $ showString "Sealed " . shows seal . showsPrec 9 ty
+    showsPrec prec (Fix var ty) =
+        showParen (prec > 5) $ showString "μ" . showString var . showString ". " . showsPrec 6 ty
     showsPrec _    (Var var) = showString var
     showsPrec _    (Merged a b) = showChar '{' . showsPrec 1 a . showString " ∧ " . showsPrec 1 b . showChar '}'
 

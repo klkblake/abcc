@@ -38,6 +38,13 @@ renameType cs ty = do
     renameType' Unit              = return Unit
     renameType' (Void ty')        = Void        <$> renameType' ty'
     renameType' (Sealed seal ty') = Sealed seal <$> renameType' ty'
+    renameType' (Fix var ty') = do
+        (used, cs') <- get
+        var' <- lift $ fresh var
+        put $ (Map.insert var var' used, cs')
+        ty'' <- renameType' ty'
+        put (used, cs')
+        return $ Fix var' ty''
     renameType' (Var var) = do
         (used, cs') <- get
         case Map.lookup var used of
@@ -72,7 +79,7 @@ typedOp (LitBlock block) = do
             let Typed (a' :~> _)  _ = head ops
             let Typed (_  :~> b') _ = last ops
             flip Typed (LitBlock ops) <$> renameType Nothing (s ~> (a' ~> b') :* s)
-OP(LitText text, s ~> Merged (Var "L") (x :* Var "L" :+ Unit) :* s)
+OP(LitText text, s ~> Fix "L" (x :* Var "L" :+ Unit) :* s)
 
 OP(AssocL, a :* b :* c ~> (a :* b) :* c)
 OP(AssocR, (a :* b) :* c ~> a :* b :* c)
