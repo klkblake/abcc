@@ -28,6 +28,8 @@ mapTy f (Merged a b)    = Merged (mapTy f a) (mapTy f b)
 rewrite :: String -> Type -> Type -> Type
 rewrite v ty = mapTy rewrite'
   where
+    rewrite' (Fix v' a) | v == v', Var b <- ty = Just . Fix b $ rewrite v ty a
+    rewrite' (Fix v' _) | v == v' = error "Attempted to rewrite var in Fix"
     rewrite' (Var a) | v == a = Just ty
     rewrite' _ = Nothing
 
@@ -36,12 +38,6 @@ roll ty v = mapTy roll'
   where
     roll' ty' | ty == ty' = Just $ Var v
     roll' _ = Nothing
-
-merged :: String -> Type -> Type -> Type
-merged v ty = mapTy merged'
-  where
-    merged' (Var a) | v == a = Just $ Merged (Var v) ty
-    merged' _ = Nothing
 
 unify :: Type -> Type -> [TypedOp] -> StateT TypeContext (Either String) [TypedOp]
 unify l r ops = do
@@ -84,10 +80,9 @@ unify l r ops = do
         modifyConstraints $ Map.delete b
         mapM_ (constrain a) $ trace ("rewrite " ++ show b ++ " " ++ show a) cs
         return . Just $ rewrite b (Var a)
-    -- XXX identify recursion
     unify' (Var a) b =
         if referenced a b
-            then trace ("merge " ++ show a ++ " " ++ show b) $ return . Just $ merged a b . fixed (roll b a)
+            then trace ("fix " ++ show a ++ " " ++ show b) $ return . Just $ rewrite a (Fix a b) . fixed (roll b a)
             else do
                 modifyConstraints $ Map.delete a
                 trace ("rewrite " ++ show a ++ " " ++ show b) $ return . Just $ rewrite a b
