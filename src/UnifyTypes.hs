@@ -110,17 +110,23 @@ unify l r ops = do
     unify' a (Merged b c) = unify' a b <||> unify' a c
     unify' a b = fail $ "Could not unify " ++ show a ++ " with " ++ show b
 
+unifyBlock :: Type -> [TypedOp] -> StateT TypeContext (Either String) TypedOp
+unifyBlock (s :~> (a :~> b) :* s') ops = do
+    ops' <- unifyTypes ops
+    case ops' of
+        [] -> return . Typed (s ~> (a ~> b) :* s') $ LitBlock []
+        _  -> let Typed (a' :~> _)  _ = head ops'
+                  Typed (_  :~> b') _ = last ops'
+              in return . Typed (s ~> (a' ~> b') :* s') $ LitBlock ops'
+unifyBlock _ _ = error "called unifyBlock with non-block type"
+
 unifyOps :: [TypedOp] -> TypedOp -> StateT TypeContext (Either String) [TypedOp]
+unifyOps [] (Typed ty (LitBlock ops')) = (:[]) <$> unifyBlock ty ops'
 unifyOps [] op = return [op]
-unifyOps (Typed tyl@(_ :~> tylr) opl:ops) (Typed (s :~> (a :~> b) :* s') (LitBlock ops')) = do
-    ops'' <- unifyTypes ops'
-    case ops'' of
-        [] -> unify tylr s $ Typed (s ~> (a ~> b) :* s') (LitBlock []):Typed tyl opl:ops
-        _  -> do
-            let Typed (a' :~> _)  _ = head ops''
-            let Typed (_  :~> b') _ = last ops''
-            x <- unify tylr s $ Typed (s ~> (a' ~> b') :* s') (LitBlock ops''):Typed tyl opl:ops
-            return $ trace ("Current type:\n" ++ intercalate "\n" (map show x)) x
+unifyOps (Typed tyl@(_ :~> tylr) opl:ops) (Typed ty (LitBlock ops')) = do
+        op@(Typed (l :~> _) _) <- unifyBlock ty ops'
+        x <- unify tylr l $ op:Typed tyl opl:ops
+        return $ trace ("Current type:\n" ++ intercalate "\n" (map show x)) x
 unifyOps (Typed tyl@(_ :~> tylr) opl:ops) (Typed tyr@(tyrl :~> _) opr) = do x <- unify tylr tyrl $ Typed tyr opr:Typed tyl opl:ops
                                                                             return $ trace ("Current type:\n" ++ intercalate "\n" (map show x)) x
 unifyOps _ _ = error "called unifyOps on list containing op with non-block type"
