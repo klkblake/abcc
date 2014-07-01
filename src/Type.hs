@@ -10,9 +10,16 @@ import Data.Maybe (fromMaybe)
 data Constraint = Droppable | Copyable | Quotable
                 deriving (Eq, Show)
 
+data FlagExpr = FVar String
+              | FLit Bool
+              | FOr FlagExpr FlagExpr
+              | FAffine Type
+              | FRelevant Type
+              deriving (Eq, Show)
+
 data Type = (:*) Type Type
           | (:+) Type Type
-          | (:~>) Type Type
+          | Block FlagExpr FlagExpr Type Type
           | Num
           | Unit
           | Void Type
@@ -25,10 +32,16 @@ data Type = (:*) Type Type
 instance Show Type where
     showsPrec prec (a :* b) = showParen   (prec > 7) $ showsPrec 8 a . showString " * " . showsPrec 7 b
     showsPrec prec (a :+ b) = showParen   (prec > 6) $ showsPrec 7 a . showString " + " . showsPrec 6 b
-    showsPrec prec (a :~> b) =
-        showBracket (prec > 0) (showsPrec 1 a . showString " -> " . showsPrec 1 b)
+    showsPrec prec (Block aff rel a b) =
+        showBracket (prec > 0) (showsPrec 1 a . showString " -> " . showsPrec 1 b) . showAff aff . showRel rel
       where
         showBracket c s = if c then showChar '[' . s . showChar ']' else s
+        showAff (FLit True) = showChar 'f'
+        showAff (FLit False) = id
+        showAff _ = showsPrec prec aff
+        showRel (FLit True) = showChar 'r'
+        showRel (FLit False) = id
+        showRel _ = showsPrec prec rel
     showsPrec _    Num = showChar 'N'
     showsPrec _    Unit = showChar '1'
     showsPrec _    (Void ty) = showString "0<" . showsPrec 1 ty . showChar '>'
@@ -38,13 +51,8 @@ instance Show Type where
     showsPrec _    (Var var) = showString var
     showsPrec _    (Merged a b) = showChar '{' . showsPrec 1 a . showString " ∧ " . showsPrec 1 b . showChar '}'
 
-(~>) :: Type -> Type -> Type
-(~>) = (:~>)
-
 infixr 7 :*
 infixr 6 :+
-infixr 1 :~>
-infixr 1 ~>
 
 data TypeContext = TypeContext { tcx_used        :: Map String Int
                                , tcx_constraints :: Map String [Constraint]

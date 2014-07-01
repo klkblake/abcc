@@ -48,9 +48,8 @@ data Op f = LitBlock [f (Op f)]
         | DebugPrintText
 
 deriving instance Show (f (Op f)) => Show (Op f)
-deriving instance Show (Identity (Op Identity))
 
-data Typed a = Typed Type a
+data Typed a = Typed Type Type a
              deriving Show
 
 type UntypedOp = Op Identity
