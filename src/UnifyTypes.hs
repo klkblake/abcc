@@ -87,6 +87,31 @@ roll ty v = mapTy roll' $ const Nothing
     roll' ty' | ty == ty' = Just $ Var v
     roll' _ = Nothing
 
+referenced :: String -> Type -> Bool
+referenced v (a :*  b) = referenced v a || referenced v b
+referenced v (a :+  b) = referenced v a || referenced v b
+referenced v (Block aff rel a b) = referencedFE v aff || referencedFE v rel || referenced v a || referenced v b
+referenced _ Num = False
+referenced _ Unit = False
+referenced v (Void a) = referenced v a
+referenced v (Sealed _ a) = referenced v a
+referenced v (Fix _ a) = referenced v a
+referenced v (Var a) = v == a
+referenced v (Merged a b) = referenced v a || referenced v b
+
+referencedFE :: String -> FlagExpr -> Bool
+referencedFE v (FVar var) = v == var
+referencedFE _ (FLit _)   = False
+referencedFE v (FOr  a b) = referencedFE v a || referencedFE v b
+referencedFE v (FAffine   ty) = referenced v ty
+referencedFE v (FRelevant ty) = referenced v ty
+
+(<||>) :: Monad m => m (Maybe a) -> m (Maybe a) -> m (Maybe a)
+a <||> b = do
+    a' <- a
+    b' <- b
+    return $ a' <|> b'
+
 unify :: Type -> Type -> [TypedOp] -> StateT TypeContext (Either String) [TypedOp]
 unify l r ops = do
     result <- unify' l r
@@ -97,28 +122,6 @@ unify l r ops = do
         Nothing | l == r -> return ops
                 | otherwise -> fail $ "INTERNAL ERROR: Failed to unify " ++ show l ++ " and " ++ show r
   where
-    a <||> b = do
-        a' <- a
-        b' <- b
-        return $ a' <|> b'
-
-    referenced v (a :*  b) = referenced v a || referenced v b
-    referenced v (a :+  b) = referenced v a || referenced v b
-    referenced v (Block aff rel a b) = referencedFE v aff || referencedFE v rel || referenced v a || referenced v b
-    referenced _ Num = False
-    referenced _ Unit = False
-    referenced v (Void a) = referenced v a
-    referenced v (Sealed _ a) = referenced v a
-    referenced v (Fix _ a) = referenced v a
-    referenced v (Var a) = v == a
-    referenced v (Merged a b) = referenced v a || referenced v b
-
-    referencedFE v (FVar var) = v == var
-    referencedFE _ (FLit _)   = False
-    referencedFE v (FOr  a b) = referencedFE v a || referencedFE v b
-    referencedFE v (FAffine   ty) = referenced v ty
-    referencedFE v (FRelevant ty) = referenced v ty
-
     unify' (a :*  b) (c :*  d) = unify' a c <||> unify' b d
     unify' (a :+  b) (c :+  d) = unify' a c <||> unify' b d
     unify' (Block aff rel a b) (Block aff' rel' c d) = unifyFE aff aff' <||> unifyFE rel rel' <||> unify' a c <||> unify' b d
@@ -141,8 +144,9 @@ unify l r ops = do
                 modifyConstraints $ Map.delete a
                 trace ("rewrite " ++ show a ++ " " ++ show b) $ return . Just $ rewrite a b
     unify' a (Var b) = unify' (Var b) a
-    unify' (Merged a b) c = unify' a c <||> unify' b c -- XXX these two don't seem right
-    unify' a (Merged b c) = unify' a b <||> unify' a c
+    unify' (Merged a b) (Merged c d) | a == c && b == d = return Nothing
+    unify' a@(Merged _ _) b = error $ "Don't know how to unify " ++ show a ++ " with " ++ show b
+    unify' a b@(Merged _ _) = error $ "Don't know how to unify " ++ show a ++ " with " ++ show b
     unify' a b = fail $ "Could not unify " ++ show a ++ " with " ++ show b
 
     unifyFE (FVar a) (FVar b) | a == b    = return Nothing
