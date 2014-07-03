@@ -32,16 +32,15 @@ data Type = (:*) Type Type
 instance Show Type where
     showsPrec prec (a :* b) = showParen   (prec > 7) $ showsPrec 8 a . showString " * " . showsPrec 7 b
     showsPrec prec (a :+ b) = showParen   (prec > 6) $ showsPrec 7 a . showString " + " . showsPrec 6 b
-    showsPrec prec (Block aff rel a b) =
-        showBracket (prec > 0) (showsPrec 1 a . showString " -> " . showsPrec 1 b) . showAff aff . showRel rel
+    showsPrec _ (Block aff rel a b) =
+        showChar '[' . showsPrec 1 a . showString " -> " . showsPrec 1 b . showChar ']' . showAff aff . showRel rel
       where
-        showBracket c s = if c then showChar '[' . s . showChar ']' else s
         showAff (FLit True) = showChar 'f'
         showAff (FLit False) = id
-        showAff _ = showsPrec prec aff
+        showAff _ = showChar '{' . showsPrec 0 aff . showChar '}'
         showRel (FLit True) = showChar 'r'
         showRel (FLit False) = id
-        showRel _ = showsPrec prec rel
+        showRel _ = showChar '{' . showsPrec 0 rel . showChar '}'
     showsPrec _    Num = showChar 'N'
     showsPrec _    Unit = showChar '1'
     showsPrec _    (Void ty) = showString "0<" . showsPrec 1 ty . showChar '>'
