@@ -53,13 +53,15 @@ instance Show Type where
 infixr 7 :*
 infixr 6 :+
 
-data TypeContext = TypeContext { tcx_used        :: Map String Int
-                               , tcx_constraints :: Map String [Constraint]
+data TypeContext = TypeContext { tcx_used         :: Map String Int
+                               , tcx_constraints  :: Map String [Constraint]
+                               , tcx_subgraphs    :: Map String Type
+                               , tcx_subgraphs_fe :: Map String FlagExpr
                                }
                  deriving Show
 
 emptyTCX :: TypeContext
-emptyTCX = TypeContext Map.empty Map.empty
+emptyTCX = TypeContext Map.empty Map.empty Map.empty Map.empty
 
 fresh :: (Functor m, Monad m) => String -> StateT TypeContext m String
 fresh var = do
@@ -75,3 +77,60 @@ constrain :: Monad m => String -> Constraint -> StateT TypeContext m ()
 constrain var c = modifyConstraints $ Map.alter putSet var
   where
     putSet = Just . nub . (c:) . fromMaybe []
+
+deref :: (Functor m, Monad m) => String -> StateT TypeContext m (Maybe Type)
+deref var = Map.lookup var <$> gets tcx_subgraphs
+
+derefFE :: (Functor m, Monad m) => String -> StateT TypeContext m (Maybe FlagExpr)
+derefFE var = Map.lookup var <$> gets tcx_subgraphs_fe
+
+modifySubgraphs :: Monad m => (Map String Type -> Map String Type) -> StateT TypeContext m ()
+modifySubgraphs f = modify $ \tcx -> tcx { tcx_subgraphs = f $ tcx_subgraphs tcx }
+
+modifySubgraphsFE :: Monad m => (Map String FlagExpr -> Map String FlagExpr) -> StateT TypeContext m ()
+modifySubgraphsFE f = modify $ \tcx -> tcx { tcx_subgraphs_fe = f $ tcx_subgraphs_fe tcx }
+
+-- TODO implement
+propagateConstraints :: Monad m => String -> Type -> StateT TypeContext m ()
+propagateConstraints _ _ = return ()
+
+-- TODO should propagate constraints
+link :: Monad m => String -> Type -> StateT TypeContext m ()
+link var ty = modifySubgraphs $ Map.insertWith insertOnce var ty
+  where
+    insertOnce new old = error $ "Called link twice on the same var. Var: " ++ var ++ ", new: " ++ show new ++ ", old: " ++ show old
+
+linkFE :: Monad m => String -> FlagExpr -> StateT TypeContext m ()
+linkFE var fe = modifySubgraphsFE $ Map.insertWith insertOnce var fe
+  where
+    insertOnce new old = error $ "Called link twice on the same var. New: " ++ show new ++ ", old: " ++ show old
+
+reify :: (Functor m, Monad m) => Type -> StateT TypeContext m Type
+reify (a :* b) = (:*) <$> reify a <*> reify b
+reify (a :+ b) = (:+) <$> reify a <*> reify b
+reify (Block aff rel a b) = Block <$> reifyFE aff <*> reifyFE rel <*> reify a <*> reify b
+reify Num = return Num
+reify Unit = return Unit
+reify (Void a) = Void <$> reify a
+reify (Sealed seal a) = Sealed seal <$> reify a
+reify (Fix var a) = Fix var <$> reify a
+reify (Var a) = do
+    a' <- deref a
+    case a' of
+        Just a'' -> reify a''
+        Nothing -> return $ Var a
+reify (Merged a b) = Merged <$> reify a <*> reify b
+
+reifyFE :: (Functor m, Monad m) => FlagExpr -> StateT TypeContext m FlagExpr
+reifyFE (FVar a) = do
+    a' <- derefFE a
+    case a' of
+        Just a'' -> reifyFE a''
+        Nothing -> return $ FVar a
+reifyFE (FLit a) = return $ FLit a
+reifyFE (FOr a b) = FOr <$> reifyFE a <*> reifyFE b
+reifyFE (FAffine a) = FAffine <$> reify a
+reifyFE (FRelevant a) = FRelevant <$> reify a
+
+showType :: (Monad m, Functor m) => Type -> StateT TypeContext m String
+showType ty = show <$> reify ty
