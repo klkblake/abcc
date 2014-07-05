@@ -66,8 +66,6 @@ normalise = derefTypes normalise'
     normalise' (Sealed sealA a) (Sealed sealB b) | sealA == sealB = Sealed sealA <$> normalise a b
     normalise' (Fix a b) (Fix c d) | a == c = Fix a <$> normalise b d
     normalise' (Var a) (Var b) | a == b = return (Var a)
-    normalise' (Var a) b = return $ Merged (Var a) b
-    normalise' a (Var b) = return $ Merged a (Var b)
     normalise' (Merged a b) (Merged c d) = do
         x <- normalise a b
         y <- normalise c d
@@ -75,6 +73,14 @@ normalise = derefTypes normalise'
             (Merged _ _, _) -> return $ Merged x y
             (_, Merged _ _) -> return $ Merged x y
             _ -> normalise x y
+    normalise' (Merged a b) c = do
+        x <- normalise a b
+        case x of
+            Merged _ _ -> return $ Merged x c
+            _ -> normalise x c
+    normalise' a (Merged b c) = normalise (Merged b c) a
+    normalise' (Var a) b = return $ Merged (Var a) b
+    normalise' a (Var b) = return $ Merged a (Var b)
     normalise' a b = return $ Merged a b
 
 normaliseFE :: (Functor m, Monad m) => FlagExpr -> FlagExpr -> StateT TypeContext m FlagExpr
@@ -199,7 +205,11 @@ impose = derefTypes impose'
         return $ Var b
     impose' (Fix _ _) (Var _) = error "Don't know how to impose Fix"
     impose' (Merged _ _) (Var _) = error "Don't know how to impose Merged"
-    impose' _ _ = error "Imposed invalid strucutre"
+    impose' a (Merged b c) = Merged <$> impose a b <*> impose a c
+    impose' a b = do
+        strA <- showType a
+        strB <- showType b
+        error $ "Imposed invalid structure: " ++ strA ++ " on " ++ strB
 
 imposeFE :: FlagExpr -> FlagExpr -> StateT TypeContext (Either String) FlagExpr
 imposeFE = derefTypesFE imposeFE'
