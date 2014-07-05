@@ -101,7 +101,10 @@ link var ty = modifySubgraphs $ Map.insertWith insertOnce var ty
     insertOnce new old = error $ "Called link twice on the same var. Var: " ++ var ++ ", new: " ++ show new ++ ", old: " ++ show old
 
 linkFE :: Monad m => String -> FlagExpr -> StateT TypeContext m ()
-linkFE var fe = modifySubgraphsFE $ Map.insertWith insertOnce var fe
+linkFE var fe = do
+    case fe of
+        FVar v | var == "ga4" || var == "gr4" -> error $ "WTF: " ++ show var ++ ", " ++ show v
+        _ -> modifySubgraphsFE $ Map.insertWith insertOnce var fe
   where
     insertOnce new old = error $ "Called link twice on the same var. New: " ++ show new ++ ", old: " ++ show old
 

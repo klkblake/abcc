@@ -13,38 +13,69 @@ fixed :: Eq a => (a -> a) -> a -> a
 fixed f x = let x' = f x
             in if x == x' then x else fixed f x'
 
-normalise :: (Functor m, Monad m) => Type -> Type -> StateT TypeContext m Type
-normalise a b | trace ("Normalise: " ++ show a ++ " <+> " ++ show b) False = undefined
-normalise (a :*  b) (c :*  d) = (:*) <$> normalise a c <*> normalise b d
-normalise (a :+  b) (c :+  d) = (:+) <$> normalise a c <*> normalise b d
-normalise (Block aff rel a b) (Block aff' rel' c d) = Block <$> normaliseFE aff aff' <*> normaliseFE rel rel' <*> normalise a c <*> normalise b d
-normalise Num Num = return Num
-normalise Unit Unit = return Unit
-normalise (Void a) (Void b) = Void <$> normalise a b
-normalise (Sealed sealA a) (Sealed sealB b) | sealA == sealB = Sealed sealA <$> normalise a b
-normalise (Fix a b) (Fix c d) | a == c = Fix a <$> normalise b d
-normalise (Var a) b = do
+derefTypes :: (Functor m, Monad m) => (Type -> Type -> StateT TypeContext m a) -> Type -> Type -> StateT TypeContext m a
+derefTypes f (Var a) b = do
     a' <- deref a
     case a' of
-        Just a'' -> normalise a'' b
+        Just a'' -> derefTypes f a'' b
         Nothing ->
             case b of
                 Var b' -> do
                     b'' <- deref b'
                     case b'' of
-                        Just b''' -> normalise (Var a) b'''
-                        Nothing | a == b'   -> return $ Var a
-                                | otherwise -> return $ Merged (Var a) b
-                _ -> return $ Merged (Var a) b
-normalise a (Var b) = normalise (Var b) a
-normalise (Merged a b) (Merged c d) = do
-    x <- normalise a b
-    y <- normalise c d
-    case (x, y) of
-        (Merged _ _, _) -> return $ Merged x y
-        (_, Merged _ _) -> return $ Merged x y
-        _ -> normalise x y
-normalise a b = return $ Merged a b
+                        Just b''' -> derefTypes f (Var a) b'''
+                        Nothing -> f (Var a) b
+                _ -> f (Var a) b
+derefTypes f a (Var b) = do
+    b' <- deref b
+    case b' of
+        Just b'' -> derefTypes f a b''
+        Nothing -> f a (Var b)
+derefTypes f a b = f a b
+
+derefTypesFE :: (Functor m, Monad m) => (FlagExpr -> FlagExpr -> StateT TypeContext m a) -> FlagExpr -> FlagExpr -> StateT TypeContext m a
+derefTypesFE f (FVar a) b = do
+    a' <- derefFE a
+    case a' of
+        Just a'' -> derefTypesFE f a'' b
+        Nothing ->
+            case b of
+                FVar b' -> do
+                    b'' <- derefFE b'
+                    case b'' of
+                        Just b''' -> derefTypesFE f (FVar a) b'''
+                        Nothing -> f (FVar a) b
+                _ -> f (FVar a) b
+derefTypesFE f a (FVar b) = do
+    b' <- derefFE b
+    case b' of
+        Just b'' -> derefTypesFE f a b''
+        Nothing -> f a (FVar b)
+derefTypesFE f a b = f a b
+
+normalise :: (Functor m, Monad m) => Type -> Type -> StateT TypeContext m Type
+normalise = derefTypes normalise'
+  where
+    normalise' a b | trace ("Normalise: " ++ show a ++ " <+> " ++ show b) False = undefined
+    normalise' (a :*  b) (c :*  d) = (:*) <$> normalise a c <*> normalise b d
+    normalise' (a :+  b) (c :+  d) = (:+) <$> normalise a c <*> normalise b d
+    normalise' (Block aff rel a b) (Block aff' rel' c d) = Block <$> normaliseFE aff aff' <*> normaliseFE rel rel' <*> normalise a c <*> normalise b d
+    normalise' Num Num = return Num
+    normalise' Unit Unit = return Unit
+    normalise' (Void a) (Void b) = Void <$> normalise a b
+    normalise' (Sealed sealA a) (Sealed sealB b) | sealA == sealB = Sealed sealA <$> normalise a b
+    normalise' (Fix a b) (Fix c d) | a == c = Fix a <$> normalise b d
+    normalise' (Var a) (Var b) | a == b = return (Var a)
+    normalise' (Var a) b = return $ Merged (Var a) b
+    normalise' a (Var b) = return $ Merged a (Var b)
+    normalise' (Merged a b) (Merged c d) = do
+        x <- normalise a b
+        y <- normalise c d
+        case (x, y) of
+            (Merged _ _, _) -> return $ Merged x y
+            (_, Merged _ _) -> return $ Merged x y
+            _ -> normalise x y
+    normalise' a b = return $ Merged a b
 
 normaliseFE :: (Functor m, Monad m) => FlagExpr -> FlagExpr -> StateT TypeContext m FlagExpr
 normaliseFE (FVar a) b = do
@@ -72,65 +103,30 @@ normaliseFE (FAffine   ty) (FAffine   ty') = FAffine   <$> normalise ty ty'
 normaliseFE (FRelevant ty) (FRelevant ty') = FRelevant <$> normalise ty ty'
 normaliseFE a b = return $ FOr a b
 
-{-
-mapTy :: (Type -> Maybe Type) -> (FlagExpr -> Maybe FlagExpr) -> Type -> Type
-mapTy f _ ty | Just ty' <- f ty = ty'
-mapTy f g (a :*  b)           = mapTy f g a :*  mapTy f g b
-mapTy f g (a :+  b)           = mapTy f g a :+  mapTy f g b
-mapTy f g (Block aff rel a b) = Block (mapTyFE f g aff) (mapTyFE f g rel) (mapTy f g a) (mapTy f g b)
-mapTy _ _ Num                 = Num
-mapTy _ _ Unit                = Unit
-mapTy f g (Void a)            = Void $ mapTy f g a
-mapTy f g (Sealed seal a)     = Sealed seal $ mapTy f g a
-mapTy f g (Fix v a)           = Fix v $ mapTy f g a
-mapTy _ _ (Var a)             = Var a
-mapTy f g (Merged a b)        = normalise (mapTy f g a) (mapTy f g b)
-
-mapTyFE :: (Type -> Maybe Type) -> (FlagExpr -> Maybe FlagExpr) -> FlagExpr -> FlagExpr
-mapTyFE _ g fe | Just fe' <- g fe = fe'
-mapTyFE _ _ (FVar var) = FVar var
-mapTyFE _ _ (FLit v)   = FLit v
-mapTyFE f g (FOr  a b) = FOr (mapTyFE f g a) (mapTyFE f g b)
-mapTyFE f g (FAffine   ty) = FAffine   $ mapTy f g ty
-mapTyFE f g (FRelevant ty) = FRelevant $ mapTy f g ty
-
-rewrite :: String -> Type -> Type -> Type
-rewrite v ty = mapTy rewrite' $ const Nothing
-  where
-    rewrite' (Fix v' a) | v == v', Var b <- ty = Just . Fix b $ rewrite v ty a
-    rewrite' (Fix v' _) | v == v' = error "Attempted to rewrite var in Fix"
-    rewrite' (Var a) | v == a = Just ty
-    rewrite' _ = Nothing
-
-rewriteFE :: String -> FlagExpr -> Type -> Type
-rewriteFE v fe = mapTy (const Nothing) rewriteFE'
-  where
-    rewriteFE' (FVar a) | v == a = Just fe
-    rewriteFE' _ = Nothing
-
-roll :: Type -> String -> Type -> Type
-roll ty v = mapTy roll' $ const Nothing
-  where
-    roll' ty' | ty == ty' = Just $ Var v
-    roll' _ = Nothing
--}
-
-referenced :: String -> Type -> Bool
-referenced v (a :*  b) = referenced v a || referenced v b
-referenced v (a :+  b) = referenced v a || referenced v b
-referenced v (Block aff rel a b) = referencedFE v aff || referencedFE v rel || referenced v a || referenced v b
-referenced _ Num = False
-referenced _ Unit = False
+referenced :: (Functor m, Monad m) => String -> Type -> StateT TypeContext m Bool
+referenced v (a :*  b) = (||) <$> referenced v a <*> referenced v b
+referenced v (a :+  b) = (||) <$> referenced v a <*> referenced v b
+referenced v (Block aff rel a b) = or <$> sequence [referencedFE v aff, referencedFE v rel, referenced v a, referenced v b]
+referenced _ Num = return False
+referenced _ Unit = return False
 referenced v (Void a) = referenced v a
 referenced v (Sealed _ a) = referenced v a
 referenced v (Fix _ a) = referenced v a
-referenced v (Var a) = v == a
-referenced v (Merged a b) = referenced v a || referenced v b
+referenced v (Var a) = do
+    a' <- deref a
+    case a' of
+        Just a'' -> referenced v a''
+        Nothing -> return $ v == a
+referenced v (Merged a b) = (||) <$> referenced v a <*> referenced v b
 
-referencedFE :: String -> FlagExpr -> Bool
-referencedFE v (FVar var) = v == var
-referencedFE _ (FLit _)   = False
-referencedFE v (FOr  a b) = referencedFE v a || referencedFE v b
+referencedFE :: (Functor m, Monad m) => String -> FlagExpr -> StateT TypeContext m Bool
+referencedFE v (FVar var) = do
+    var' <- derefFE var
+    case var' of
+        Just var'' -> referencedFE v var''
+        Nothing -> return $ v == var
+referencedFE _ (FLit _)   = return False
+referencedFE v (FOr  a b) = (||) <$> referencedFE v a <*> referencedFE v b
 referencedFE v (FAffine   ty) = referenced v ty
 referencedFE v (FRelevant ty) = referenced v ty
 
@@ -146,6 +142,70 @@ canonical var = do
     case val of
         Just (Var var') -> canonical var'
         _ -> return var
+
+canonicalFE :: String -> StateT TypeContext (Either String) String
+canonicalFE var = do
+    val <- derefFE var
+    case val of
+        Just (FVar var') -> canonicalFE var'
+        _ -> return var
+
+impose :: Type -> Type -> StateT TypeContext (Either String) Type
+impose = derefTypes impose'
+  where
+    impose' (a :* b) (c :* d) = (:*) <$> impose a c <*> impose b d
+    impose' (a :+ b) (c :+ d) = (:+) <$> impose a c <*> impose b d
+    impose' (Block aff rel a b) (Block aff' rel' c d) = Block <$> imposeFE aff aff' <*> imposeFE rel rel' <*> impose a c <*> impose b d
+    impose' Num Num = return Num
+    impose' Unit Unit = return Unit
+    impose' (Void a) (Void b) = Void <$> unify a b
+    impose' (Sealed sealA a) (Sealed sealB b) | sealA == sealB = Sealed sealA <$> impose a b
+                                              | otherwise = fail $ "Mismatched seals: " ++ show sealA ++ " /= " ++ show sealB
+    impose' (Fix a b) (Fix c d) | a == c = Fix a <$> impose b d
+    impose' (Var _) b = return b
+    impose' (Merged _ _) (Merged _ _) = error "Don't know how to impose Merged"
+    impose' (a :* b) (Var c) = do
+        [a', b'] <- map Var <$> mapM fresh ["a", "b"]
+        a'' <- impose a a'
+        b'' <- impose b b'
+        link c $ a'' :* b''
+        return $ Var c
+    impose' (a :+ b) (Var c) = do
+        [a', b'] <- map Var <$> mapM fresh ["a", "b"]
+        a'' <- impose a a'
+        b'' <- impose b b'
+        link c $ a'' :+ b''
+        return $ Var c
+    impose' (Block aff rel a b) (Var c) = do
+        [aff', rel'] <- map FVar <$> mapM fresh ["aff", "rel"]
+        [a', b'] <- map Var <$> mapM fresh ["a", "b"]
+        aff'' <- imposeFE aff aff'
+        rel'' <- imposeFE rel rel'
+        a'' <- impose a a'
+        b'' <- impose b b'
+        link c $ Block aff'' rel'' a'' b''
+        return $ Var c
+    impose' Num (Var a) = link a Num >> return Num
+    impose' Unit (Var a) = link a Unit >> return Unit
+    impose' (Void a) (Var b) = do
+        a' <- Var <$> fresh "a"
+        a'' <- impose a a'
+        link b $ Void a''
+        return $ Var b
+    impose' (Sealed sealA a) (Var b) = do
+        a' <- Var <$> fresh "a"
+        a'' <- impose a a'
+        link b $ Sealed sealA a''
+        return $ Var b
+    impose' (Fix _ _) (Var _) = error "Don't know how to impose Fix"
+    impose' (Merged _ _) (Var _) = error "Don't know how to impose Merged"
+    impose' _ _ = error "Imposed invalid strucutre"
+
+imposeFE :: FlagExpr -> FlagExpr -> StateT TypeContext (Either String) FlagExpr
+imposeFE = derefTypesFE imposeFE'
+  where
+    imposeFE' (FLit a) (FLit b) | a /= b = fail $ "Could not unify flag " ++ show a ++ " with " ++ show b
+    imposeFE' _ b = return b
 
 unify :: Type -> Type -> StateT TypeContext (Either String) Type
 unify (a :*  b) (c :*  d) = (:*) <$> unify a c <*> unify b d
@@ -178,7 +238,8 @@ unify (Var a) b = do
         Just a'' -> unify a'' b
         Nothing -> do
             strB <- showType b
-            if referenced a b -- XXX We actually need to check the entire chain.
+            refed <- referenced a b
+            if refed -- XXX We actually need to check the entire chain.
                 --then trace ("fix " ++ show a ++ " " ++ show b) $ return . Just $ rewrite a (Fix a b) . fixed (roll b a)
                 then trace ("fix " ++ show a ++ " " ++ strB) $ do
                     propagateConstraints a b
@@ -197,15 +258,26 @@ unify a@(Merged b c) d = do
     strA <- showType a
     strA' <- showType a'
     case trace (strA ++ " normalised to " ++ strA') a' of
-        Merged _ _ -> do
-            strA <- showType a
-            strB <- showType d
-            error $ "Don't know how to unify " ++ strA ++ " with " ++ strB
+        Merged l r -> do
+            oldL <- reify l
+            oldR <- reify r
+            l' <- impose d l
+            r' <- impose d r
+            newL <- reify l'
+            newR <- reify r'
+            strAI <- showType $ Merged l' r'
+            if trace (strA' ++ " imposed to " ++ strAI) $ oldL /= newL || oldR /= newR
+                then unify (Merged l' r') d
+                else do
+                    strA'' <- showType (Merged l' r')
+                    strB <- showType d
+                    error $ "Don't know how to unify " ++ strA'' ++ " with " ++ strB
         _ -> unify a' d
 unify a b@(Merged _ _) = do
-    strA <- showType a
-    strB <- showType b
-    error $ "Don't know how to unify " ++ strA ++ " with " ++ strB
+    unify b a
+    --strA <- showType a
+    --strB <- showType b
+    --error $ "Don't know how to unify " ++ strA ++ " with " ++ strB
 unify a b = do
     strA <- showType a
     strB <- showType b
@@ -214,7 +286,7 @@ unify a b = do
 unifyFE :: FlagExpr -> FlagExpr -> StateT TypeContext (Either String) FlagExpr
 unifyFE (FVar a) (FVar b) | a == b    = return $ FVar a
                           | otherwise = do
-                              a' <- canonical a
+                              a' <- canonicalFE a
                               linkFE b $ FVar a'
                               return $ FVar a'
 unifyFE (FVar a) b = linkFE a b >> return (FVar a)
@@ -242,11 +314,13 @@ unifyOps (Typed tyll tylr opl:ops) (Typed tyrl tyrr (LitBlock ops')) = do
     (Typed tyrl' tyrr' opr) <- unifyBlock tyrl tyrr ops'
     ty <- unify tylr tyrl'
     let x = Typed ty tyrr' opr:Typed tyll ty opl:ops
-    return $ trace ("Current type:\n" ++ intercalate "\n" (map show x)) x
+    --return $ trace ("Current type:\n" ++ intercalate "\n" (map show x)) x
+    return x
 unifyOps (Typed tyll tylr opl:ops) (Typed tyrl tyrr opr) = do
     ty <- unify tylr tyrl
     let x = Typed ty tyrr opr:Typed tyll ty opl:ops
-    return $ trace ("Current type:\n" ++ intercalate "\n" (map show x)) x
+    --return $ trace ("Current type:\n" ++ intercalate "\n" (map show x)) x
+    return x
 
 unifyTypes :: [TypedOp] -> StateT TypeContext (Either String) [TypedOp]
 unifyTypes ops = reverse <$> foldM unifyOps [] ops
