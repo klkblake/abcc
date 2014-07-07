@@ -103,11 +103,11 @@ typedOp :: UntypedOp -> State TypeContext TypedOp
 typedOp (LitBlock block) = do
     ops <- mapM (typedOp . runIdentity) block
     case ops of
-        [] -> typed (LitBlock []) <$> renameType Nothing (s ~> (Block aff rel a a) :* s)
+        [] -> typed (LitBlock []) <$> renameType Nothing (s ~> (Block (FLit False) (FLit False) a a) :* s)
         _  -> do
             let Typed a' _  _ = head ops
             let Typed _  b' _ = last ops
-            typed (LitBlock ops) <$> renameType Nothing (s ~> (Block aff rel a' b') :* s)
+            typed (LitBlock ops) <$> renameType Nothing (s ~> (Block (FLit False) (FLit False) a' b') :* s)
 OP(LitText text, s ~> Fix "L" (x :* Var "L" :+ Unit) :* s)
 
 OP(AssocL, a :* b :* c ~> (a :* b) :* c)
