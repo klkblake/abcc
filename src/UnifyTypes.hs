@@ -84,30 +84,29 @@ normalise = derefTypes normalise'
     normalise' a b = return $ Merged a b
 
 normaliseFE :: (Functor m, Monad m) => FlagExpr -> FlagExpr -> StateT TypeContext m FlagExpr
-normaliseFE (FVar a) b = do
-    a' <- derefFE a
-    case a' of
-        Just a'' -> normaliseFE a'' b
-        Nothing ->
-            case b of
-                FVar b' -> do
-                     b'' <- derefFE b'
-                     case b'' of
-                         Just b''' -> normaliseFE (FVar a) b'''
-                         Nothing | a == b'   -> return $ FVar a
-                                 | otherwise -> return $ FOr (FVar a) b
-                _ -> return $ FOr (FVar a) b
-normaliseFE (FLit a) (FLit b) = return . FLit $ a || b
-normaliseFE (FOr a b) (FOr c d) = do
-    x <- normaliseFE a b
-    y <- normaliseFE c d
-    case (x, y) of
-        (FOr _ _, _) -> return $ FOr x y
-        (_, FOr _ _) -> return $ FOr x y
-        _ -> normaliseFE x y
-normaliseFE (FAffine   ty) (FAffine   ty') = FAffine   <$> normalise ty ty'
-normaliseFE (FRelevant ty) (FRelevant ty') = FRelevant <$> normalise ty ty'
-normaliseFE a b = return $ FOr a b
+normaliseFE = derefTypesFE normaliseFE'
+  where
+    normaliseFE' (FVar a) (FVar b) | a == b = return $ FVar a
+    normaliseFE' (FLit True) _ = return $ FLit True
+    normaliseFE' _ (FLit True) = return $ FLit True
+    normaliseFE' (FLit False) b = return b
+    normaliseFE' a (FLit False) = return a
+    normaliseFE' (FOr a b) (FOr c d) = do
+        x <- normaliseFE a b
+        y <- normaliseFE c d
+        case (x, y) of
+            (FOr _ _, _) -> return $ FOr x y
+            (_, FOr _ _) -> return $ FOr x y
+            _ -> normaliseFE x y
+    normaliseFE' (FOr a b) c = do
+        x <- normaliseFE a b
+        case x of
+            FOr _ _ -> return $ FOr x c
+            _ -> normaliseFE x c
+    normaliseFE' a (FOr b c) = normaliseFE (FOr b c) a
+    normaliseFE' (FAffine   ty) (FAffine   ty') = FAffine   <$> normalise ty ty'
+    normaliseFE' (FRelevant ty) (FRelevant ty') = FRelevant <$> normalise ty ty'
+    normaliseFE' a b = return $ FOr a b
 
 referenced :: (Functor m, Monad m) => String -> Type -> StateT TypeContext m Bool
 referenced v (a :*  b) = (||) <$> referenced v a <*> referenced v b
