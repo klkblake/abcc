@@ -3,15 +3,10 @@ module UnifyTypes where
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.Map.Strict as Map
-import Data.List (intercalate)
 import Debug.Trace
 
 import Type
 import Op
-
-fixed :: Eq a => (a -> a) -> a -> a
-fixed f x = let x' = f x
-            in if x == x' then x else fixed f x'
 
 derefTypes :: (Functor m, Monad m) => (Type -> Type -> StateT TypeContext m a) -> Type -> Type -> StateT TypeContext m a
 derefTypes f (Var a) b = do
