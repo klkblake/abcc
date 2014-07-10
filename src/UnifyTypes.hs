@@ -3,7 +3,6 @@ module UnifyTypes where
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.Map.Strict as Map
-import Debug.Trace
 
 import Type
 import Op
@@ -240,7 +239,6 @@ unify (Var a) b = do
     case a' of
         Just a'' -> unify a'' b
         Nothing -> do
-            strB <- showType b
             refed <- referenced a b
             if refed -- XXX We actually need to check the entire chain.
                 --then trace ("fix " ++ show a ++ " " ++ show b) $ return . Just $ rewrite a (Fix a b) . fixed (roll b a)
@@ -256,10 +254,8 @@ unify a (Var b) = do
         Just b'' -> unify a b''
         Nothing -> unify (Var b) a
 unify (Merged a b) (Merged c d) | a == c && b == d = return $ Merged a c
-unify a@(Merged b c) d = do
+unify (Merged b c) d = do
     a' <- normalise b c
-    strA <- showType a
-    strA' <- showType a'
     case a' of
         Merged l r -> do
             oldL <- reify l
@@ -268,13 +264,12 @@ unify a@(Merged b c) d = do
             r' <- impose d r
             newL <- reify l'
             newR <- reify r'
-            strAI <- showType $ Merged l' r'
             if oldL /= newL || oldR /= newR
                 then unify (Merged l' r') d
                 else do
-                    strA'' <- showType (Merged l' r')
+                    strA <- showType (Merged l' r')
                     strB <- showType d
-                    error $ "Don't know how to unify " ++ strA'' ++ " with " ++ strB
+                    error $ "Don't know how to unify " ++ strA ++ " with " ++ strB
         _ -> unify a' d
 unify a b@(Merged _ _) = do
     unify b a
