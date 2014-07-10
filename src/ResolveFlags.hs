@@ -28,7 +28,7 @@ resolve Unit = return Unit
 resolve (Void a) = Void <$> resolve a
 resolve (Sealed s a) = Sealed s <$> resolve a
 resolve (Fix a b) = Fix a <$> resolve b
-resolve (Var a) = deref' a resolve . return $ Var a
+resolve (Var a) = return $ Var a
 resolve (Merged a b) = Merged <$> resolve a <*> resolve b
 
 resolveFE :: (Monad m, Functor m) => FlagExpr -> StateT TypeContext m FlagExpr
@@ -59,7 +59,12 @@ resolveFlags :: (Monad m, Functor m) => [TypedOp] -> StateT TypeContext m [Typed
 resolveFlags ops = do
     fes <- gets tcx_subgraphs_fe
     _ <- fixedM resolveFlags' fes
-    mapM resolveTyped ops
+    tys <- gets tcx_subgraphs
+    tys' <- mapM (onSnd resolve) $ Map.toList tys
+    modifySubgraphs . const $ Map.fromList tys'
+    ops' <- mapM resolveTyped ops
+    modifySubgraphsFE $ const Map.empty
+    return ops'
   where
     resolveFlags' fes = do
         fes' <- mapM (onSnd resolveFE) $ Map.toList fes
