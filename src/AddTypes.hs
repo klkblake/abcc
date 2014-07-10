@@ -1,5 +1,7 @@
 {-# LANGUAGE CPP #-}
-module AddTypes where
+module AddTypes
+    ( addTypes
+    ) where
 
 import Control.Applicative
 import Control.Monad.State hiding (ap)
