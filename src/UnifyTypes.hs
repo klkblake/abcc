@@ -51,7 +51,6 @@ derefTypesFE f a b = f a b
 normalise :: (Functor m, Monad m) => Type -> Type -> StateT TypeContext m Type
 normalise = derefTypes normalise'
   where
-    normalise' a b | trace ("Normalise: " ++ show a ++ " <+> " ++ show b) False = undefined
     normalise' (a :*  b) (c :*  d) = (:*) <$> normalise a c <*> normalise b d
     normalise' (a :+  b) (c :+  d) = (:+) <$> normalise a c <*> normalise b d
     normalise' (Block aff rel a b) (Block aff' rel' c d) = Block <$> normaliseFE aff aff' <*> normaliseFE rel rel' <*> normalise a c <*> normalise b d
@@ -233,7 +232,7 @@ unify (Var a) (Var b) | a == b    = return $ Var a
                 Nothing -> do
                     cs <- Map.findWithDefault [] b <$> gets tcx_constraints
                     modifyConstraints $ Map.delete b
-                    mapM_ (constrain a) $ trace ("rewrite " ++ show a ++ " " ++ show b) cs
+                    mapM_ (constrain a) cs
                     link b (Var a)
                     return $ Var a
 unify (Var a) b = do
@@ -245,12 +244,12 @@ unify (Var a) b = do
             refed <- referenced a b
             if refed -- XXX We actually need to check the entire chain.
                 --then trace ("fix " ++ show a ++ " " ++ show b) $ return . Just $ rewrite a (Fix a b) . fixed (roll b a)
-                then trace ("fix " ++ show a ++ " " ++ strB) $ do
+                then do
                     propagateConstraints a b
                     return $ Fix a b -- Can't use a' here without changing references
                 else do
                     link a b
-                    trace ("rewrite " ++ show a ++ " " ++ strB) . return $ Var a
+                    return $ Var a
 unify a (Var b) = do
     b' <- deref b
     case b' of
@@ -261,7 +260,7 @@ unify a@(Merged b c) d = do
     a' <- normalise b c
     strA <- showType a
     strA' <- showType a'
-    case trace (strA ++ " normalised to " ++ strA') a' of
+    case a' of
         Merged l r -> do
             oldL <- reify l
             oldR <- reify r
@@ -270,7 +269,7 @@ unify a@(Merged b c) d = do
             newL <- reify l'
             newR <- reify r'
             strAI <- showType $ Merged l' r'
-            if trace (strA' ++ " imposed to " ++ strAI) $ oldL /= newL || oldR /= newR
+            if oldL /= newL || oldR /= newR
                 then unify (Merged l' r') d
                 else do
                     strA'' <- showType (Merged l' r')
@@ -279,9 +278,6 @@ unify a@(Merged b c) d = do
         _ -> unify a' d
 unify a b@(Merged _ _) = do
     unify b a
-    --strA <- showType a
-    --strB <- showType b
-    --error $ "Don't know how to unify " ++ strA ++ " with " ++ strB
 unify a b = do
     strA <- showType a
     strB <- showType b
@@ -318,12 +314,10 @@ unifyOps (Typed tyll tylr opl:ops) (Typed tyrl tyrr (LitBlock ops')) = do
     (Typed tyrl' tyrr' opr) <- unifyBlock tyrl tyrr ops'
     ty <- unify tylr tyrl'
     let x = Typed ty tyrr' opr:Typed tyll ty opl:ops
-    --return $ trace ("Current type:\n" ++ intercalate "\n" (map show x)) x
     return x
 unifyOps (Typed tyll tylr opl:ops) (Typed tyrl tyrr opr) = do
     ty <- unify tylr tyrl
     let x = Typed ty tyrr opr:Typed tyll ty opl:ops
-    --return $ trace ("Current type:\n" ++ intercalate "\n" (map show x)) x
     return x
 
 unifyTypes :: [TypedOp] -> StateT TypeContext (Either String) [TypedOp]
