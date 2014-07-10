@@ -14,6 +14,7 @@ import Parser
 import AddTypes
 import UnifyTypes
 import ResolveFlags
+import ResolveTypes
 import Codegen
 
 raise :: Monad m => State s a -> StateT s m a
@@ -34,7 +35,7 @@ doTypeCheck = do
     input <- getContents
     ops <- parse input
     case ops of
-        Just ops' -> case runStateT (raise (addTypes ops') >>= unifyTypes >>= resolveFlags >>= mapM reifyTyped) emptyTCX of
+        Just ops' -> case runStateT (raise (addTypes ops') >>= unifyTypes >>= resolveFlags >>= resolveTypes >>= mapM reifyTyped) emptyTCX of
                          Left err -> print err >> exitFailure
                          Right (ops'', tcx) -> printOps 0 ops'' >> print tcx
         Nothing -> exitFailure
