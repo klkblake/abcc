@@ -196,8 +196,12 @@ impose = derefTypes impose'
         link b $ Sealed sealA a''
         return $ Var b
     impose' (Fix _ _) (Var _) = error "Don't know how to impose Fix"
-    impose' (Merged _ _) (Var _) = error "Don't know how to impose Merged"
     impose' a (Merged b c) = Merged <$> impose a b <*> impose a c
+    impose' a@(Merged b c) d = do
+        a' <- normalise b c
+        if a /= a'
+            then impose a' d
+            else error $ "Don't know how to impose " ++ show a ++ " on " ++ show d
     impose' a b = do
         strA <- showType a
         strB <- showType b
