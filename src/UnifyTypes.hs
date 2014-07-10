@@ -279,18 +279,19 @@ unify a b = do
     fail $ "Could not unify " ++ strA ++ " with " ++ strB
 
 unifyFE :: FlagExpr -> FlagExpr -> StateT TypeContext (Either String) FlagExpr
-unifyFE (FVar a) (FVar b) | a == b    = return $ FVar a
-                          | otherwise = do
-                              a' <- canonicalFE a
-                              linkFE b $ FVar a'
-                              return $ FVar a'
-unifyFE (FVar a) b = linkFE a b >> return (FVar a)
-unifyFE a (FVar b) = unifyFE (FVar b) a
-unifyFE (FLit a) (FLit b) | a == b = return $ FLit a
-unifyFE (FOr a b) (FOr c d) = FOr <$> unifyFE a c <*> unifyFE b d
-unifyFE (FAffine   ty) (FAffine   ty') | ty == ty' = return $ FAffine ty     -- XXX what do I do here?
-unifyFE (FRelevant ty) (FRelevant ty') | ty == ty' = return $ FRelevant ty
-unifyFE a b = fail $ "Could not unify " ++ show a ++ " with " ++ show b
+unifyFE = derefTypesFE unifyFE'
+  where
+    unifyFE' (FVar a) (FVar b) | a == b    = return $ FVar a
+                              | otherwise = do
+                                  linkFE b $ FVar a
+                                  return $ FVar a
+    unifyFE' (FVar a) b = linkFE a b >> return (FVar a)
+    unifyFE' a (FVar b) = unifyFE (FVar b) a
+    unifyFE' (FLit a) (FLit b) | a == b = return $ FLit a
+    unifyFE' (FOr a b) (FOr c d) = FOr <$> unifyFE a c <*> unifyFE b d
+    unifyFE' (FAffine   ty) (FAffine   ty') | ty == ty' = return $ FAffine ty     -- XXX what do I do here?
+    unifyFE' (FRelevant ty) (FRelevant ty') | ty == ty' = return $ FRelevant ty
+    unifyFE' a b = fail $ "Could not unify " ++ show a ++ " with " ++ show b
 
 unifyBlock :: Type -> Type -> [TypedOp] -> StateT TypeContext (Either String) TypedOp
 unifyBlock s (Block aff rel a b :* s') ops = do
