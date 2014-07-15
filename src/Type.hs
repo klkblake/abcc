@@ -66,8 +66,8 @@ emptyTCX = TypeContext Map.empty Map.empty Map.empty Map.empty
 fresh :: (Functor m, Monad m) => String -> StateT TypeContext m String
 fresh var = do
     let var' = dropWhileEnd (`elem` ['0'..'9']) var
-    n <- Map.findWithDefault 0 var <$> gets tcx_used
-    modify $ \tcx -> tcx { tcx_used = Map.insert var (n + 1) $ tcx_used tcx }
+    n <- Map.findWithDefault 0 var' <$> gets tcx_used
+    modify $ \tcx -> tcx { tcx_used = Map.insert var' (n + 1) $ tcx_used tcx }
     return $ var' ++ show n
 
 modifyConstraints :: Monad m => (Map String [Constraint] -> Map String [Constraint]) -> StateT TypeContext m ()
