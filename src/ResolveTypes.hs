@@ -55,19 +55,16 @@ resolve (Merged a b) = do
         _ -> resolve ty
 
 
-resolveTypes :: (Monad m, Functor m) => [TypedOp] -> StateT TypeContext m [TypedOp]
+resolveTypes :: (Monad m, Functor m) => [PTypedOp] -> StateT TypeContext m [PTypedOp]
 resolveTypes ops = do
     tys <- gets tcx_subgraphs
     _ <- fixedM resolveTypes' tys
     return ops
-    --mapM resolveTyped ops
   where
     resolveTypes' tys = do
         tys' <- mapM (onSnd resolve) $ Map.toList tys
         modifySubgraphs . const $ Map.fromList tys'
         gets tcx_subgraphs
-    resolveTyped (Typed a b (LitBlock ops')) = Typed <$> resolve a <*> resolve b <*> (LitBlock <$> mapM resolveTyped ops')
-    resolveTyped (Typed a b op) = Typed <$> resolve a <*> resolve b <*> return op
     onSnd f (a, b) = do
         b' <- f b
         return (a, b')

@@ -6,6 +6,8 @@ import Data.List (dropWhileEnd, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
+import Data.Set (Set)
+import qualified Data.Set as Set
 
 data Constraint = Droppable | Copyable | Quotable
                 deriving (Eq, Show)
@@ -57,11 +59,12 @@ data TypeContext = TypeContext { tcx_used         :: Map String Int
                                , tcx_constraints  :: Map String [Constraint]
                                , tcx_subgraphs    :: Map String Type
                                , tcx_subgraphs_fe :: Map String FlagExpr
+                               , tcx_roots        :: Set String
                                }
                  deriving Show
 
 emptyTCX :: TypeContext
-emptyTCX = TypeContext Map.empty Map.empty Map.empty Map.empty
+emptyTCX = TypeContext Map.empty Map.empty Map.empty Map.empty Set.empty
 
 fresh :: (Functor m, Monad m) => String -> StateT TypeContext m String
 fresh var = do
@@ -104,6 +107,9 @@ linkFE :: Monad m => String -> FlagExpr -> StateT TypeContext m ()
 linkFE var fe = modifySubgraphsFE $ Map.insertWith insertOnce var fe
   where
     insertOnce new old = error $ "Called link twice on the same var. Var: " ++ var ++ ", new: " ++ show new ++ ", old: " ++ show old
+
+addRoot :: Monad m => String -> StateT TypeContext m ()
+addRoot r = modify $ \tcx -> tcx { tcx_roots = Set.insert r $ tcx_roots tcx }
 
 reify :: (Functor m, Monad m) => Type -> StateT TypeContext m Type
 reify (a :* b) = (:*) <$> reify a <*> reify b

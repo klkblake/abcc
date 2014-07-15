@@ -55,23 +55,20 @@ resolveFE (FAffine   ty) = FAffine   <$> resolve ty
 resolveFE (FRelevant ty) = FRelevant <$> resolve ty
 resolveFE fe = return fe
 
-resolveFlags :: (Monad m, Functor m) => [TypedOp] -> StateT TypeContext m [TypedOp]
+resolveFlags :: (Monad m, Functor m) => [PTypedOp] -> StateT TypeContext m [PTypedOp]
 resolveFlags ops = do
     fes <- gets tcx_subgraphs_fe
     _ <- fixedM resolveFlags' fes
     tys <- gets tcx_subgraphs
     tys' <- mapM (onSnd resolve) $ Map.toList tys
     modifySubgraphs . const $ Map.fromList tys'
-    ops' <- mapM resolveTyped ops
     modifySubgraphsFE $ const Map.empty
-    return ops'
+    return ops
   where
     resolveFlags' fes = do
         fes' <- mapM (onSnd resolveFE) $ Map.toList fes
         modifySubgraphsFE . const $ Map.fromList fes'
         gets tcx_subgraphs_fe
-    resolveTyped (Typed a b (LitBlock ops')) = Typed <$> resolve a <*> resolve b <*> (LitBlock <$> mapM resolveTyped ops')
-    resolveTyped (Typed a b op) = Typed <$> resolve a <*> resolve b <*> return op
     onSnd f (a, b) = do
         b' <- f b
         return (a, b')

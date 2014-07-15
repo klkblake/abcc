@@ -3,6 +3,7 @@ module UnifyTypes where
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.Map.Strict as Map
+import Debug.Trace
 
 import Type
 import Op
@@ -160,7 +161,7 @@ impose = derefTypes impose'
     impose' (Sealed sealA a) (Sealed sealB b) | sealA == sealB = Sealed sealA <$> impose a b
                                               | otherwise = fail $ "Mismatched seals: " ++ show sealA ++ " /= " ++ show sealB
     impose' (Fix a b) (Fix c d) | a == c = Fix a <$> impose b d
-    impose' (Var _) b = return b
+    impose' (Var a) b = trace ("impose " ++ show a ++ " on " ++ show b) $ return b -- XXX this is wrong!
     impose' (Merged _ _) (Merged _ _) = error "Don't know how to impose Merged"
     impose' (a :* b) (Var c) = do
         [a', b'] <- map Var <$> mapM fresh ["a", "b"]
@@ -297,28 +298,35 @@ unifyFE = derefTypesFE unifyFE'
     unifyFE' (FRelevant ty) (FRelevant ty') | ty == ty' = return $ FRelevant ty
     unifyFE' a b = fail $ "Could not unify " ++ show a ++ " with " ++ show b
 
-unifyBlock :: Type -> Type -> [TypedOp] -> StateT TypeContext (Either String) TypedOp
-unifyBlock s (Block aff rel a b :* s') ops = do
+unifyBlock :: String -> String -> [PTypedOp] -> StateT TypeContext (Either String) PTypedOp
+unifyBlock s bl ops = do
     ops' <- unifyTypes ops
+    Just (Block aff rel _ _ :* s') <- deref bl
     case ops' of
-        [] -> return . Typed s (Block aff rel a b :* s') $ LitBlock []
-        _  -> let Typed a' _  _ = head ops'
-                  Typed _  b' _ = last ops'
-              in return . Typed s (Block aff rel a' b' :* s') $ LitBlock ops'
-unifyBlock _ _ _ = error "called unifyBlock with non-block type"
+        [] -> return . PartiallyTyped s bl $ LitBlock []
+        _  -> do
+            let PartiallyTyped a' _  _ = head ops'
+                PartiallyTyped _  b' _ = last ops'
+            bl' <- fresh bl
+            link bl' $ Block aff rel (Var a') (Var b') :* s'
+            return . PartiallyTyped s bl' $ LitBlock ops'
 
-unifyOps :: [TypedOp] -> TypedOp -> StateT TypeContext (Either String) [TypedOp]
-unifyOps [] (Typed l r (LitBlock ops')) = (:[]) <$> unifyBlock l r ops'
+unifyOps :: [PTypedOp] -> PTypedOp -> StateT TypeContext (Either String) [PTypedOp]
+unifyOps [] (PartiallyTyped l r (LitBlock ops')) = (:[]) <$> unifyBlock l r ops'
 unifyOps [] op = return [op]
-unifyOps (Typed tyll tylr opl:ops) (Typed tyrl tyrr (LitBlock ops')) = do
-    (Typed tyrl' tyrr' opr) <- unifyBlock tyrl tyrr ops'
-    ty <- unify tylr tyrl'
-    let x = Typed ty tyrr' opr:Typed tyll ty opl:ops
-    return x
-unifyOps (Typed tyll tylr opl:ops) (Typed tyrl tyrr opr) = do
-    ty <- unify tylr tyrl
-    let x = Typed ty tyrr opr:Typed tyll ty opl:ops
-    return x
+unifyOps (PartiallyTyped tyll tylr opl:ops) (PartiallyTyped tyrl tyrr (LitBlock ops')) = do
+    PartiallyTyped tyrl' tyrr' opr <- unifyBlock tyrl tyrr ops'
+    ty <- unify (Var tylr) (Var tyrl')
+    v <- fresh "op"
+    addRoot v
+    link v ty
+    return $ PartiallyTyped v tyrr' opr:PartiallyTyped tyll v opl:ops
+unifyOps (PartiallyTyped tyll tylr opl:ops) (PartiallyTyped tyrl tyrr opr) = do
+    ty <- unify (Var tylr) (Var tyrl)
+    v <- fresh "op"
+    addRoot v
+    link v ty
+    return $ PartiallyTyped v tyrr opr:PartiallyTyped tyll v opl:ops
 
-unifyTypes :: [TypedOp] -> StateT TypeContext (Either String) [TypedOp]
+unifyTypes :: [PTypedOp] -> StateT TypeContext (Either String) [PTypedOp]
 unifyTypes ops = reverse <$> foldM unifyOps [] ops

@@ -92,24 +92,31 @@ addE (Block aff' rel' l r) = Block aff' rel' (addE' l) (addE' r)
     addE' ty = ty :* e
 addE _ = error "called addE on non-block type"
 
-typed :: Op Typed -> Type -> TypedOp
-typed op ty = let Block _ _ l r = ty
-              in Typed l r op
+typed :: Op PartiallyTyped -> Type -> State TypeContext PTypedOp
+typed op ty = do
+    opl <- fresh "opl"
+    opr <- fresh "opr"
+    addRoot opl
+    addRoot opr
+    let Block _ _ l r = ty
+    link opl l
+    link opr r
+    return $ PartiallyTyped opl opr op
 
-#define OP(op, ty)         typedOp (op) = typed (op) <$> (renameType Nothing $ ty)
-#define OPe(op, ty)        typedOp (op) = typed (op) <$> (renameType Nothing . addE $ ty)
-#define OPc(op, ty, v, c)  typedOp (op) = typed (op) <$> (renameType (Just (v, c)) $ ty)
-#define OPce(op, ty, v, c) typedOp (op) = typed (op) <$> (renameType (Just (v, c)) . addE $ ty)
+#define OP(op, ty)         typedOp (op) = typed (op) =<< (renameType Nothing $ ty)
+#define OPe(op, ty)        typedOp (op) = typed (op) =<< (renameType Nothing . addE $ ty)
+#define OPc(op, ty, v, c)  typedOp (op) = typed (op) =<< (renameType (Just (v, c)) $ ty)
+#define OPce(op, ty, v, c) typedOp (op) = typed (op) =<< (renameType (Just (v, c)) . addE $ ty)
 
-typedOp :: UntypedOp -> State TypeContext TypedOp
+typedOp :: UntypedOp -> State TypeContext PTypedOp
 typedOp (LitBlock block) = do
     ops <- mapM (typedOp . runIdentity) block
     case ops of
-        [] -> typed (LitBlock []) <$> renameType Nothing (s ~> (Block (FLit False) (FLit False) a a) :* s)
+        [] -> typed (LitBlock []) =<< renameType Nothing (s ~> (Block (FLit False) (FLit False) a a) :* s)
         _  -> do
-            let Typed a' _  _ = head ops
-            let Typed _  b' _ = last ops
-            typed (LitBlock ops) <$> renameType Nothing (s ~> (Block (FLit False) (FLit False) a' b') :* s)
+            let PartiallyTyped a' _  _ = head ops
+            let PartiallyTyped _  b' _ = last ops
+            typed (LitBlock ops) =<< renameType Nothing (s ~> (Block (FLit False) (FLit False) (Var a') (Var b')) :* s)
 OP(LitText text, s ~> Fix "L" (x :* Var "L" :+ Unit) :* s)
 
 OP(AssocL, a :* b :* c ~> (a :* b) :* c)
@@ -161,6 +168,9 @@ OP(DebugPrintRaw, error "DebugPrintRaw not supported. I need to implement the st
 OP(DebugPrintText, error "DebugPrintText not supported. I need to implement the standard debug print system")
 
 #undef OP
+#undef OPe
+#undef OPc
+#undef OPce
 
-addTypes :: [UntypedOp] -> State TypeContext [TypedOp]
+addTypes :: [UntypedOp] -> State TypeContext [PTypedOp]
 addTypes ops = mapM typedOp ops
