@@ -42,7 +42,7 @@ doTypeCheck = do
   where
     reifyPTyped (PartiallyTyped a b (LitBlock ops)) = Typed <$> reify (Var a) <*> reify (Var b) <*> (LitBlock <$> mapM reifyPTyped ops)
     reifyPTyped (PartiallyTyped a b op) = Typed <$> reify (Var a) <*> reify (Var b) <*> return (castOp op)
-    printOps i ops = mapM_ (printTyped i) ops
+    printOps i = mapM_ (printTyped i)
     printTyped i (Typed _ b (LitBlock ops)) = putStrLn  (replicate i ' ' ++ "LitBlock: "    ++ show b) >> printOps (i+4) ops
     printTyped i (Typed _ b op)             = putStrLn $ replicate i ' ' ++ show op ++ ":\t" ++ show b
 

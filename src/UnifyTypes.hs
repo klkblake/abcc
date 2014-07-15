@@ -163,27 +163,13 @@ impose = derefTypes impose'
     impose' (Fix a b) (Fix c d) | a == c = Fix a <$> impose b d
     impose' (Var a) b = trace ("impose " ++ show a ++ " on " ++ show b) $ return b -- XXX this is wrong!
     impose' (Merged _ _) (Merged _ _) = error "Don't know how to impose Merged"
-    impose' (a :* b) (Var c) = do
-        [a', b'] <- map Var <$> mapM fresh ["a", "b"]
-        a'' <- impose a a'
-        b'' <- impose b b'
-        link c $ a'' :* b''
-        return $ Var c
-    impose' (a :+ b) (Var c) = do
-        [a', b'] <- map Var <$> mapM fresh ["a", "b"]
-        a'' <- impose a a'
-        b'' <- impose b b'
-        link c $ a'' :+ b''
-        return $ Var c
+    impose' (a :* b) (Var c) = imposeAB a b c (:*)
+    impose' (a :+ b) (Var c) = imposeAB a b c (:+)
     impose' (Block aff rel a b) (Var c) = do
         [aff', rel'] <- map FVar <$> mapM fresh ["aff", "rel"]
-        [a', b'] <- map Var <$> mapM fresh ["a", "b"]
         aff'' <- imposeFE aff aff'
         rel'' <- imposeFE rel rel'
-        a'' <- impose a a'
-        b'' <- impose b b'
-        link c $ Block aff'' rel'' a'' b''
-        return $ Var c
+        imposeAB a b c $ Block aff'' rel''
     impose' Num (Var a) = link a Num >> return Num
     impose' Unit (Var a) = link a Unit >> return Unit
     impose' (Void a) (Var b) = do
@@ -207,6 +193,12 @@ impose = derefTypes impose'
         strA <- showType a
         strB <- showType b
         error $ "Imposed invalid structure: " ++ strA ++ " on " ++ strB
+    imposeAB a b c f = do
+        [a', b'] <- map Var <$> mapM fresh ["a", "b"]
+        a'' <- impose a a'
+        b'' <- impose b b'
+        link c $ f a'' b''
+        return $ Var c
 
 imposeFE :: FlagExpr -> FlagExpr -> StateT TypeContext (Either String) FlagExpr
 imposeFE = derefTypesFE imposeFE'
@@ -276,8 +268,7 @@ unify (Merged b c) d = do
                     strB <- showType d
                     error $ "Don't know how to unify " ++ strA ++ " with " ++ strB
         _ -> unify a' d
-unify a b@(Merged _ _) = do
-    unify b a
+unify a b@(Merged _ _) = unify b a
 unify a b = do
     strA <- showType a
     strB <- showType b
@@ -311,22 +302,21 @@ unifyBlock s bl ops = do
             link bl' $ Block aff rel (Var a') (Var b') :* s'
             return . PartiallyTyped s bl' $ LitBlock ops'
 
-unifyOps :: [PTypedOp] -> PTypedOp -> StateT TypeContext (Either String) [PTypedOp]
-unifyOps [] (PartiallyTyped l r (LitBlock ops')) = (:[]) <$> unifyBlock l r ops'
-unifyOps [] op = return [op]
-unifyOps (PartiallyTyped tyll tylr opl:ops) (PartiallyTyped tyrl tyrr (LitBlock ops')) = do
-    PartiallyTyped tyrl' tyrr' opr <- unifyBlock tyrl tyrr ops'
-    ty <- unify (Var tylr) (Var tyrl')
-    v <- fresh "op"
-    addRoot v
-    link v ty
-    return $ PartiallyTyped v tyrr' opr:PartiallyTyped tyll v opl:ops
-unifyOps (PartiallyTyped tyll tylr opl:ops) (PartiallyTyped tyrl tyrr opr) = do
+unifyOps' :: [PTypedOp] -> PTypedOp -> StateT TypeContext (Either String) [PTypedOp]
+unifyOps' (PartiallyTyped tyll tylr opl:ops) (PartiallyTyped tyrl tyrr opr) = do
     ty <- unify (Var tylr) (Var tyrl)
     v <- fresh "op"
     addRoot v
     link v ty
     return $ PartiallyTyped v tyrr opr:PartiallyTyped tyll v opl:ops
+unifyOps' [] op = return [op]
+
+unifyOps :: [PTypedOp] -> PTypedOp -> StateT TypeContext (Either String) [PTypedOp]
+unifyOps [] (PartiallyTyped l r (LitBlock ops')) = (:[]) <$> unifyBlock l r ops'
+unifyOps (PartiallyTyped tyll tylr opl:ops) (PartiallyTyped tyrl tyrr (LitBlock ops')) = do
+    PartiallyTyped tyrl' tyrr' opr <- unifyBlock tyrl tyrr ops'
+    unifyOps' (PartiallyTyped tyll tylr opl:ops) (PartiallyTyped tyrl' tyrr' opr)
+unifyOps ops opr = unifyOps' ops opr
 
 unifyTypes :: [PTypedOp] -> StateT TypeContext (Either String) [PTypedOp]
 unifyTypes ops = reverse <$> foldM unifyOps [] ops

@@ -67,7 +67,7 @@ renameType cs (Block _ _ tyl tyr) = do
                 let cs'' = case cs' of
                                Just (v, c') | v == var -> Just (var', c')
                                _ -> cs'
-                put $ (Map.insert var var' used, cs'')
+                put (Map.insert var var' used, cs'')
                 return $ Var var'
     renameType' (Merged l r) = Merged <$> renameType' l <*> renameType' r
 
@@ -77,7 +77,7 @@ renameType cs (Block _ _ tyl tyr) = do
             Just var' -> return $ FVar var'
             Nothing -> do
                 var' <- lift $ fresh var
-                put $ (Map.insert var var' used, cs')
+                put (Map.insert var var' used, cs')
                 return $ FVar var'
     renameFE (FLit v) = return $ FLit v
     renameFE (FOr l r)  = FOr <$> renameFE l <*> renameFE r
@@ -88,7 +88,7 @@ renameType _ _ = error "called renameType on non-block type"
 addE :: Type -> Type
 addE (Block aff' rel' l r) = Block aff' rel' (addE' l) (addE' r)
   where
-    addE' (l' :* r') = l' :* (addE' r')
+    addE' (l' :* r') = l' :* addE' r'
     addE' ty = ty :* e
 addE _ = error "called addE on non-block type"
 
@@ -112,11 +112,11 @@ typedOp :: UntypedOp -> State TypeContext PTypedOp
 typedOp (LitBlock block) = do
     ops <- mapM (typedOp . runIdentity) block
     case ops of
-        [] -> typed (LitBlock []) =<< renameType Nothing (s ~> (Block (FLit False) (FLit False) a a) :* s)
+        [] -> typed (LitBlock []) =<< renameType Nothing (s ~> Block (FLit False) (FLit False) a a :* s)
         _  -> do
             let PartiallyTyped a' _  _ = head ops
             let PartiallyTyped _  b' _ = last ops
-            typed (LitBlock ops) =<< renameType Nothing (s ~> (Block (FLit False) (FLit False) (Var a') (Var b')) :* s)
+            typed (LitBlock ops) =<< renameType Nothing (s ~> Block (FLit False) (FLit False) (Var a') (Var b') :* s)
 OP(LitText text, s ~> Fix "L" (x :* Var "L" :+ Unit) :* s)
 
 OP(AssocL, a :* b :* c ~> (a :* b) :* c)
@@ -130,11 +130,11 @@ OPce(Copy, x ~> x :* x, "x", Copyable)
 
 OPe(Apply, (Block aff rel x xp) :* x ~> xp)
 -- XXX This probably should only appear later in the pipeline
-OP(ApplyTail, (Block aff rel x xp) :* x :* Unit ~> xp)
-OPe(Compose, (Block ga gr y z) :* (Block fa fr x y) ~> (Block (FOr fa ga) (FOr fr gr) x z))
+OP(ApplyTail, Block aff rel x xp :* x :* Unit ~> xp)
+OPe(Compose, Block ga gr y z :* Block fa fr x y ~> Block (FOr fa ga) (FOr fr gr) x z)
 OPce(Quote, x ~> (Block (FAffine x) (FRelevant x) s $ x :* s), "x", Quotable)
-OPe(Relevant, (Block aff rel x y) ~> (Block aff (FLit True) x y))
-OPe(Affine, (Block aff rel x y) ~> (Block (FLit True) rel x y))
+OPe(Relevant, Block aff rel x y ~> Block aff (FLit True) x y)
+OPe(Affine, Block aff rel x y ~> Block (FLit True) rel x y)
 
 OP(IntroNum, e ~> Num :* e)
 OPe(Digit digit, Num ~> Num)
@@ -152,7 +152,7 @@ OPe(SwapDS, a :+ b :+ c :+ d ~> a :+ c :+ b :+ d)
 OPe(Intro0, a ~> a :+ Void x)
 OPe(Elim0, a :+ Void x ~> a)
 
-OPe(CondApply, (Block aff (FLit False) x xp) :* (x :+ y) ~> xp :+ y)
+OPe(CondApply, Block aff (FLit False) x xp :* (x :+ y) ~> xp :+ y)
 OPe(Distrib, a :* (b :+ c) ~> a :* b :+ a :* c)
 OPe(Factor, a :* b :+ c :* d ~> (a :+ c) :* (b :+ d))
 OPe(Merge, a :+ ap ~> Merged a ap)
@@ -173,4 +173,4 @@ OP(DebugPrintText, error "DebugPrintText not supported. I need to implement the 
 #undef OPce
 
 addTypes :: [UntypedOp] -> State TypeContext [PTypedOp]
-addTypes ops = mapM typedOp ops
+addTypes = mapM typedOp

@@ -39,10 +39,10 @@ instance Show Type where
       where
         showAff (FLit True) = showChar 'f'
         showAff (FLit False) = id
-        showAff _ = showString "{a=" . showsPrec 0 aff . showChar '}'
+        showAff _ = showString "{a=" . shows aff . showChar '}'
         showRel (FLit True) = showChar 'r'
         showRel (FLit False) = id
-        showRel _ = showString "{k=" . showsPrec 0 rel . showChar '}'
+        showRel _ = showString "{k=" . shows rel . showChar '}'
     showsPrec _    Num = showChar 'N'
     showsPrec _    Unit = showChar '1'
     showsPrec _    (Void ty) = showString "0<" . showsPrec 1 ty . showChar '>'
