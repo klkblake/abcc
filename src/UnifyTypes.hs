@@ -218,6 +218,8 @@ unify (Block aff rel a b) (Block aff' rel' c d) = Block <$> unifyFE aff aff' <*>
 unify Num       Num       = return Num
 unify Unit      Unit      = return Unit
 unify (Void a)  (Void b)  = Void <$> unify a b
+unify (Void a)  b         = Void <$> unify a b
+unify a         (Void b)  = Void <$> unify a b
 unify (Sealed sealA a) (Sealed sealB b) | sealA == sealB = Sealed sealA <$> unify a b
                                         | otherwise = fail $ "Mismatched seals: " ++ show sealA ++ " /= " ++ show sealB
 unify (Fix a b) (Fix c d) | a == c = Fix a <$> unify b d
