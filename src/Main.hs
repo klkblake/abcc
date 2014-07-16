@@ -36,15 +36,9 @@ doTypeCheck = do
     ops <- parse input
     case ops of
         Just ops' -> case runStateT (raise (addTypes ops') >>= unifyTypes >>= resolveFlags >>= resolveTypes >>= mapM reifyPTyped) emptyTCX of
-                         Left err -> print err >> exitFailure
-                         Right (ops'', tcx) -> printOps 0 ops'' >> print tcx
+                         Left err -> putStrLn err >> exitFailure
+                         Right (ops'', tcx) -> putStrLn (showOps 0 ops'') >> print tcx
         Nothing -> exitFailure
-  where
-    reifyPTyped (PartiallyTyped a b (LitBlock ops)) = Typed <$> reify (Var a) <*> reify (Var b) <*> (LitBlock <$> mapM reifyPTyped ops)
-    reifyPTyped (PartiallyTyped a b op) = Typed <$> reify (Var a) <*> reify (Var b) <*> return (castOp op)
-    printOps i = mapM_ (printTyped i)
-    printTyped i (Typed _ b (LitBlock ops)) = putStrLn  (replicate i ' ' ++ "LitBlock: "    ++ show b) >> printOps (i+4) ops
-    printTyped i (Typed _ b op)             = putStrLn $ replicate i ' ' ++ show op ++ ":\t" ++ show b
 
 main :: IO ()
 main = do

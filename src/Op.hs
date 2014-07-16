@@ -2,7 +2,10 @@
  UndecidableInstances, CPP #-}
 module Op where
 
+import Control.Applicative
+import Control.Monad.State
 import Data.Functor.Identity
+import Data.List
 
 import Type
 
@@ -102,3 +105,14 @@ data Typed a = Typed Type Type a
 type UntypedOp = Op Identity
 type PTypedOp = PartiallyTyped (Op PartiallyTyped)
 type TypedOp = Typed (Op Typed)
+
+reifyPTyped :: (Monad m, Functor m) => PTypedOp -> StateT TypeContext m TypedOp
+reifyPTyped (PartiallyTyped a b (LitBlock ops)) = Typed <$> reify (Var a) <*> reify (Var b) <*> (LitBlock <$> mapM reifyPTyped ops)
+reifyPTyped (PartiallyTyped a b op) = Typed <$> reify (Var a) <*> reify (Var b) <*> return (castOp op)
+
+showOps :: Int -> [TypedOp] -> [Char]
+showOps i = intercalate "\n" . map (showTyped i)
+
+showTyped :: Int -> TypedOp -> [Char]
+showTyped i (Typed _ b (LitBlock ops)) = (replicate i ' ' ++ "LitBlock: "    ++ show b) ++ "\n" ++ showOps (i+4) ops
+showTyped i (Typed _ b op)             = replicate i ' ' ++ show op ++ ":\t" ++ show b
