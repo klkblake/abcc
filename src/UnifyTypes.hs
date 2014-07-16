@@ -60,14 +60,17 @@ normalise = derefTypes normalise'
     normalise' (Sealed sealA a) (Sealed sealB b) | sealA == sealB = Sealed sealA <$> normalise a b
     normalise' (Fix a b) (Fix c d) | a == c = Fix a <$> normalise b d
     normalise' (Var a) (Var b) | a == b = return (Var a)
-    normalise' (Merged a b) (Merged c d) = do
+    normalise' (Merged a b) (Merged c d) | a == c || b == c = normalise (Merged a b) d
+                                         | a == d || b == d = normalise (Merged a b) c
+                                         | otherwise = do
         x <- normalise a b
         y <- normalise c d
         case (x, y) of
             (Merged _ _, _) -> return $ Merged x y
             (_, Merged _ _) -> return $ Merged x y
             _ -> normalise x y
-    normalise' (Merged a b) c = do
+    normalise' (Merged a b) c | a == c || b == c = normalise a b
+                              | otherwise = do
         x <- normalise a b
         case x of
             Merged _ _ -> return $ Merged x c
@@ -184,6 +187,8 @@ impose = derefTypes impose'
         return $ Var b
     impose' (Fix _ _) (Var _) = error "Don't know how to impose Fix"
     impose' a (Merged b c) = Merged <$> impose a b <*> impose a c
+    impose' (Merged a _) c | a == c = return c
+    impose' (Merged _ b) c | b == c = return c
     impose' a@(Merged b c) d = do
         a' <- normalise b c
         if a /= a'
