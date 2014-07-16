@@ -60,11 +60,12 @@ data TypeContext = TypeContext { tcx_used         :: Map String Int
                                , tcx_subgraphs    :: Map String Type
                                , tcx_subgraphs_fe :: Map String FlagExpr
                                , tcx_roots        :: Set String
+                               , tcx_delayed      :: [(String, Type)]
                                }
                  deriving Show
 
 emptyTCX :: TypeContext
-emptyTCX = TypeContext Map.empty Map.empty Map.empty Map.empty Set.empty
+emptyTCX = TypeContext Map.empty Map.empty Map.empty Map.empty Set.empty []
 
 fresh :: (Functor m, Monad m) => String -> StateT TypeContext m String
 fresh var = do
@@ -110,6 +111,9 @@ linkFE var fe = modifySubgraphsFE $ Map.insertWith insertOnce var fe
 
 addRoot :: Monad m => String -> StateT TypeContext m ()
 addRoot r = modify $ \tcx -> tcx { tcx_roots = Set.insert r $ tcx_roots tcx }
+
+delay :: Monad m => String -> Type -> StateT TypeContext m ()
+delay v ty = modify $ \tcx -> tcx { tcx_delayed = (v, ty):tcx_delayed tcx }
 
 reify :: (Functor m, Monad m) => Type -> StateT TypeContext m Type
 reify (a :* b) = (:*) <$> reify a <*> reify b

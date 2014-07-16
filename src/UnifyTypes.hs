@@ -164,7 +164,7 @@ impose = derefTypes impose'
     impose' (Sealed sealA a) (Sealed sealB b) | sealA == sealB = Sealed sealA <$> impose a b
                                               | otherwise = fail $ "Mismatched seals: " ++ show sealA ++ " /= " ++ show sealB
     impose' (Fix a b) (Fix c d) | a == c = Fix a <$> impose b d
-    impose' (Var a) b = trace ("impose " ++ show a ++ " on " ++ show b) $ return b -- XXX this is wrong!
+    impose' (Var a) b = delay a b >> trace ("impose " ++ show a ++ " on " ++ show b) (return b)
     impose' (Merged _ _) (Merged _ _) = error "Don't know how to impose Merged"
     impose' (a :* b) (Var c) = imposeAB a b c (:*)
     impose' (a :+ b) (Var c) = imposeAB a b c (:+)
@@ -331,4 +331,12 @@ unifyOps (PartiallyTyped tyll tylr opl:ops) (PartiallyTyped tyrl tyrr (LitBlock 
 unifyOps ops opr = unifyOps' ops opr
 
 unifyTypes :: [PTypedOp] -> StateT TypeContext (Either String) [PTypedOp]
-unifyTypes ops = reverse <$> foldM unifyOps [] ops
+unifyTypes ops = do
+    ops' <- reverse <$> foldM unifyOps [] ops
+    res <- mapM imposeDelayed =<< gets tcx_delayed
+    return $ trace (show res) ops'
+  where
+    imposeDelayed (v, ty) = do
+        v' <- reify (Var v)
+        ty' <- reify ty
+        trace ("Impose (delayed) " ++ show v ++ " (" ++ show v' ++ ") on " ++ show ty') $ impose (Var v) ty
