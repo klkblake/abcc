@@ -311,16 +311,18 @@ unifyBlock s bl ops = do
 
 unifyOps' :: [PTypedOp] -> PTypedOp -> StateT TypeContext (Either String) [PTypedOp]
 unifyOps' ops'@(PartiallyTyped tyll tylr opl:ops) op@(PartiallyTyped tyrl tyrr opr) = do
-    ops'' <- mapM reifyPTyped ops'
-    op' <- reifyPTyped op
-    ty <- mapStateT (errorContext ops'' op') $ unify (Var tylr) (Var tyrl)
+    tcx <- get
+    ty <- mapStateT (errorContext tcx) $ unify (Var tylr) (Var tyrl)
     v <- fresh "op"
     addRoot v
     link v ty
     return $ PartiallyTyped v tyrr opr:PartiallyTyped tyll v opl:ops
   where
-    errorContext ops'' (Typed l r op') (Left err) = Left $ err ++ "\n\twhile unifying\n" ++ show op' ++ ":\t" ++ show l ++ " -> " ++ show r ++ "\n\twith\n" ++ showOps 0 (reverse ops'')
-    errorContext _ _ (Right val) = Right val
+    errorContext tcx (Left err) = flip evalStateT tcx $ do
+        ops'' <- mapM reifyPTyped ops'
+        (Typed l r op') <- reifyPTyped op
+        lift $ Left $ err ++ "\n\twhile unifying\n" ++ show op' ++ ":\t" ++ show l ++ " -> " ++ show r ++ "\n\twith\n" ++ showOps 0 (reverse ops'')
+    errorContext _ (Right val) = Right val
 unifyOps' [] op = return [op]
 
 unifyOps :: [PTypedOp] -> PTypedOp -> StateT TypeContext (Either String) [PTypedOp]
