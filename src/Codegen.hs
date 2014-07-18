@@ -10,16 +10,8 @@ import qualified Data.Map.Lazy as Map
 import Numeric
 
 import Data.ReinterpretCast
-import qualified LLVM.General.AST as LLVM
-import LLVM.General.AST hiding (Add)
 
 import Op
-
-double :: LLVM.Type
-double = FloatingPointType 64 IEEE
-
-run :: String -> String
-run op = "\tv = " ++ op ++ "(v);\n"
 
 data CodegenState = CodegenState { blocks       :: Map.Map Int String
                                  , textNodes    :: Map.Map String (Int, (String, (String, String)))

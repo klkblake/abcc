@@ -82,6 +82,20 @@ deref var = Map.lookup var <$> gets tcx_subgraphs
 derefFE :: (Functor m, Monad m) => String -> StateT TypeContext m (Maybe FlagExpr)
 derefFE var = Map.lookup var <$> gets tcx_subgraphs_fe
 
+deref' :: (Monad m, Functor m) => String -> (Type -> StateT TypeContext m a) -> StateT TypeContext m a -> StateT TypeContext m a
+deref' v f a = do
+    v' <- deref v
+    case v' of
+        Just v'' -> f v''
+        Nothing -> a
+
+derefFE' :: (Monad m, Functor m) => String -> (FlagExpr -> StateT TypeContext m a) -> StateT TypeContext m a -> StateT TypeContext m a
+derefFE' v f a = do
+    v' <- derefFE v
+    case v' of
+        Just v'' -> f v''
+        Nothing -> a
+
 modifySubgraphs :: Monad m => (Map String Type -> Map String Type) -> StateT TypeContext m ()
 modifySubgraphs f = modify $ \tcx -> tcx { tcx_subgraphs = f $ tcx_subgraphs tcx }
 

@@ -1,4 +1,4 @@
-module ResolveFlags where
+module ResolveFlags (resolveFlags) where
 
 import Control.Applicative
 import Control.Monad.State
@@ -11,13 +11,6 @@ fixedM :: (Monad m, Eq a) => (a -> m a) -> a -> m a
 fixedM f x = do
     x' <- f x
     if x == x' then return x else fixedM f x'
-
-deref' :: (Monad m, Functor m) => String -> (Type -> StateT TypeContext m a) -> StateT TypeContext m a -> StateT TypeContext m a
-deref' v f a = do
-    v' <- deref v
-    case v' of
-        Just v'' -> f v''
-        Nothing -> a
 
 resolve :: (Monad m, Functor m) => Type -> StateT TypeContext m Type
 resolve (a :* b) = (:*) <$> resolve a <*> resolve b
