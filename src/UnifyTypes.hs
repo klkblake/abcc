@@ -1,3 +1,4 @@
+{-# LANGUAGE MultiWayIf #-}
 module UnifyTypes where
 
 import Control.Applicative
@@ -191,9 +192,9 @@ impose = derefTypes impose'
     impose' (Merged _ b) c | b == c = return c
     impose' a@(Merged b c) d = do
         a' <- normalise b c
-        if a /= a'
-            then impose a' d
-            else error $ "Don't know how to impose " ++ show a ++ " on " ++ show d
+        if | a /= a' -> impose a' d
+           | hasStructure a && hasStructure a' -> return d -- XXX I don't think this is right.
+           | otherwise -> error $ "Don't know how to impose " ++ show a ++ " on " ++ show d
     impose' a b = do
         strA <- showType a
         strB <- showType b
@@ -204,6 +205,9 @@ impose = derefTypes impose'
         b'' <- impose b b'
         link c $ f a'' b''
         return $ Var c
+    hasStructure (Var _) = False
+    hasStructure (Merged a b) = hasStructure a && hasStructure b
+    hasStructure _ = True
 
 imposeFE :: FlagExpr -> FlagExpr -> StateT TypeContext (Either String) FlagExpr
 imposeFE = derefTypesFE imposeFE'
