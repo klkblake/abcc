@@ -9,7 +9,7 @@ import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 
-data Constraint = Droppable | Copyable | Quotable
+data Constraint = Droppable | Copyable | Quotable | CompatibleWith String
                 deriving (Eq, Show)
 
 data FlagExpr = FVar String
@@ -28,7 +28,6 @@ data Type = (:*) Type Type
           | Sealed String Type
           | Fix String Type
           | Var String
-          | Merged Type Type
           deriving Eq
 
 instance Show Type where
@@ -50,7 +49,6 @@ instance Show Type where
     showsPrec prec (Fix var ty) =
         showParen (prec > 5) $ showString "μ" . showString var . showString ". " . showsPrec 6 ty
     showsPrec _    (Var var) = showString var
-    showsPrec _    (Merged a b) = showChar '{' . showsPrec 1 a . showString " ∧ " . showsPrec 1 b . showChar '}'
 
 infixr 7 :*
 infixr 6 :+
@@ -129,7 +127,6 @@ reify (Var a) = do
     case a' of
         Just a'' -> reify a''
         Nothing -> return $ Var a
-reify (Merged a b) = Merged <$> reify a <*> reify b
 
 reifyFE :: (Functor m, Monad m) => FlagExpr -> StateT TypeContext m FlagExpr
 reifyFE (FVar a) = do

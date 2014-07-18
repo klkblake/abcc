@@ -39,15 +39,15 @@ gr = FVar "gr"
 
 infixr 1 ~>
 
-renameType :: Maybe (String, Constraint) -> Type -> State TypeContext Type
+renameType :: Maybe (String, [Constraint]) -> Type -> State TypeContext Type
 renameType cs (Block _ _ tyl tyr) = do
     (tyl' :* tyr', (_, cs')) <- runStateT (renameType' (tyl :* tyr)) (Map.empty, cs)
     case cs' of
         Nothing -> return ()
-        Just (v, c') -> constrain v c'
+        Just (v, c') -> mapM_ (constrain v) c'
     return $ tyl' ~> tyr'
   where
-    renameType' :: Type -> StateT (Map.Map String String, Maybe (String, Constraint)) (State TypeContext) Type
+    renameType' :: Type -> StateT (Map.Map String String, Maybe (String, [Constraint])) (State TypeContext) Type
     renameType' (l :* r)              = (:*) <$> renameType' l <*> renameType' r
     renameType' (l :+ r)              = (:+) <$> renameType' l <*> renameType' r
     renameType' (Block aff' rel' l r) = Block <$> renameFE aff' <*> renameFE rel' <*> renameType' l <*> renameType' r
@@ -65,11 +65,10 @@ renameType cs (Block _ _ tyl tyr) = do
             Nothing -> do
                 var' <- lift $ fresh var
                 let cs'' = case cs' of
-                               Just (v, c') | v == var -> Just (var', c')
+                               Just (v, c') -> Just (if v == var then var' else v, map (renameConstraint var var') c')
                                _ -> cs'
                 put (Map.insert var var' used, cs'')
                 return $ Var var'
-    renameType' (Merged l r) = Merged <$> renameType' l <*> renameType' r
 
     renameFE (FVar var) = do
         (used, cs') <- get
@@ -83,6 +82,9 @@ renameType cs (Block _ _ tyl tyr) = do
     renameFE (FOr l r)  = FOr <$> renameFE l <*> renameFE r
     renameFE (FAffine ty') = FAffine <$> renameType' ty'
     renameFE (FRelevant ty') = FRelevant <$> renameType' ty'
+
+    renameConstraint var var' (CompatibleWith v) | v == var = CompatibleWith var'
+    renameConstraint _ _ cs' = cs'
 renameType _ _ = error "called renameType on non-block type"
 
 addE :: Type -> Type
@@ -125,14 +127,14 @@ OP(Swap, a :* b :* c ~> b :* a :* c)
 OP(SwapD, a :* b :* c :* d ~> a :* c :* b :* d)
 OP(Intro1, a ~> a :* Unit)
 OP(Elim1, a :* Unit ~> a)
-OPc(Drop, x :* e ~> e, "x", Droppable)
-OPce(Copy, x ~> x :* x, "x", Copyable)
+OPc(Drop, x :* e ~> e, "x", [Droppable])
+OPce(Copy, x ~> x :* x, "x", [Copyable])
 
 OPe(Apply, (Block aff rel x xp) :* x ~> xp)
 -- XXX This probably should only appear later in the pipeline
 OP(ApplyTail, Block aff rel x xp :* x :* Unit ~> xp)
 OPe(Compose, Block ga gr y z :* Block fa fr x y ~> Block (FOr fa ga) (FOr fr gr) x z)
-OPce(Quote, x ~> (Block (FAffine x) (FRelevant x) s $ x :* s), "x", Quotable)
+OPce(Quote, x ~> (Block (FAffine x) (FRelevant x) s $ x :* s), "x", [Quotable])
 OPe(Relevant, Block aff rel x y ~> Block aff (FLit True) x y)
 OPe(Affine, Block aff rel x y ~> Block (FLit True) rel x y)
 
@@ -155,7 +157,7 @@ OPe(Elim0, a :+ Void x ~> a)
 OPe(CondApply, Block aff (FLit False) x xp :* (x :+ y) ~> xp :+ y)
 OPe(Distrib, a :* (b :+ c) ~> a :* b :+ a :* c)
 OPe(Factor, a :* b :+ c :* d ~> (a :+ c) :* (b :+ d))
-OPe(Merge, a :+ ap ~> Merged a ap)
+OPce(Merge, a :+ ap ~> b, "b", ([CompatibleWith "a", CompatibleWith "ap"]))
 OPe(Assert, a :+ b ~> b)
 
 OPe(Greater, Num :* Num ~> Num :* Num :+ Num :* Num)

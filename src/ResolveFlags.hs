@@ -29,7 +29,6 @@ resolve (Void a) = Void <$> resolve a
 resolve (Sealed s a) = Sealed s <$> resolve a
 resolve (Fix a b) = Fix a <$> resolve b
 resolve (Var a) = return $ Var a
-resolve (Merged a b) = Merged <$> resolve a <*> resolve b
 
 resolveFE :: (Monad m, Functor m) => FlagExpr -> StateT TypeContext m FlagExpr
 resolveFE (FVar a) = do
