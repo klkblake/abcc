@@ -9,7 +9,7 @@ import Type
 import Op
 
 derefTypes :: (Functor m, Monad m) => (Type -> Type -> StateT TypeContext m a) -> Type -> Type -> StateT TypeContext m a
-derefTypes f (Var a) b = do
+derefTypes f (Var a) b =
     deref' a (flip (derefTypes f) b) $
         case b of
             Var b' -> deref' b' (derefTypes f $ Var a) $ f (Var a) b
@@ -18,7 +18,7 @@ derefTypes f a (Var b) = deref' b (derefTypes f a) $ f a (Var b)
 derefTypes f a b = f a b
 
 derefTypesFE :: (Functor m, Monad m) => (FlagExpr -> FlagExpr -> StateT TypeContext m a) -> FlagExpr -> FlagExpr -> StateT TypeContext m a
-derefTypesFE f (FVar a) b = do
+derefTypesFE f (FVar a) b =
     derefFE' a (flip (derefTypesFE f) b) $
         case b of
             FVar b' -> derefFE' b' (derefTypesFE f $ FVar a) $ f (FVar a) b
