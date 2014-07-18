@@ -178,7 +178,6 @@ unifyOps' ops'@(PartiallyTyped tyll tylr opl:ops) op@(PartiallyTyped tyrl tyrr o
     tcx <- get
     ty <- mapStateT (errorContext tcx) $ unify (Var tylr) (Var tyrl)
     v <- fresh "op"
-    addRoot v
     link v ty
     return $ PartiallyTyped v tyrr opr:PartiallyTyped tyll v opl:ops
   where

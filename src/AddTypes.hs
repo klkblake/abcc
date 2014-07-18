@@ -98,8 +98,6 @@ typed :: Op PartiallyTyped -> Type -> State TypeContext PTypedOp
 typed op ty = do
     opl <- fresh "opl"
     opr <- fresh "opr"
-    addRoot opl
-    addRoot opr
     let Block _ _ l r = ty
     link opl l
     link opr r
