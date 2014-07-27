@@ -8,24 +8,6 @@ import qualified Data.Map.Strict as Map
 import Type
 import Op
 
-derefTypes :: (Functor m, Monad m) => (Type -> Type -> StateT TypeContext m a) -> Type -> Type -> StateT TypeContext m a
-derefTypes f (Var a) b =
-    deref' a (flip (derefTypes f) b) $
-        case b of
-            Var b' -> deref' b' (derefTypes f $ Var a) $ f (Var a) b
-            _      -> f (Var a) b
-derefTypes f a (Var b) = deref' b (derefTypes f a) $ f a (Var b)
-derefTypes f a b = f a b
-
-derefTypesFE :: (Functor m, Monad m) => (FlagExpr -> FlagExpr -> StateT TypeContext m a) -> FlagExpr -> FlagExpr -> StateT TypeContext m a
-derefTypesFE f (FVar a) b =
-    deref' a (flip (derefTypesFE f) b) $
-        case b of
-            FVar b' -> deref' b' (derefTypesFE f $ FVar a) $ f (FVar a) b
-            _       -> f (FVar a) b
-derefTypesFE f a (FVar b) = deref' b (derefTypesFE f a) $ f a (FVar b)
-derefTypesFE f a b = f a b
-
 referenced :: (Functor m, Monad m) => String -> Type -> StateT TypeContext m Bool
 referenced v (a :*  b) = (||) <$> referenced v a <*> referenced v b
 referenced v (a :+  b) = (||) <$> referenced v a <*> referenced v b
@@ -45,7 +27,7 @@ referencedFE v (FAffine   ty) = referenced v ty
 referencedFE v (FRelevant ty) = referenced v ty
 
 unify :: Type -> Type -> StateT TypeContext (Either String) Type
-unify = derefTypes unify'
+unify = zipDerefed unify'
   where
     unify' (a :*  b) (c :*  d) = (:*) <$> unify a c <*> unify b d
     unify' (a :+  b) (c :+  d) = (:+) <$> unify a c <*> unify b d
@@ -77,7 +59,7 @@ unify = derefTypes unify'
         lift $ Left $ "Could not unify " ++ strA ++ " with " ++ strB
 
 unifyFE :: FlagExpr -> FlagExpr -> StateT TypeContext (Either String) FlagExpr
-unifyFE = derefTypesFE unifyFE'
+unifyFE = zipDerefed unifyFE'
   where
     unifyFE' (FVar a) (FVar b) | a == b    = return $ FVar a
                                | otherwise = do

@@ -115,7 +115,7 @@ deref' v f a = do
 
 applyDerefed :: (Functor m, MonadState s m, LabelledGraph s a, Labelled a) => (a -> m b) -> a -> m b
 applyDerefed f a = case matchLabel a of
-                       Just a' -> f =<< fromMaybe a <$> deref a'
+                       Just a' -> deref' a' (applyDerefed f) $ f a
                        Nothing -> f a
 
 zipDerefed :: (Functor m, MonadState s m, LabelledGraph s a, Labelled a) => (a -> a -> m b) -> a -> a -> m b
