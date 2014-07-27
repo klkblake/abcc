@@ -32,13 +32,12 @@ resolveFE (FVar a) = do
 resolveFE (FOr a b) = do
     a' <- resolveFE a
     b' <- resolveFE b
-    return $ case a' of
-                 FLit True  -> FLit True
-                 FLit False -> b'
-                 _ -> case b' of
-                          FLit True -> FLit True
-                          FLit False -> a'
-                          _ -> FOr a' b'
+    return $ case (a', b') of
+                 (FLit True, _)  -> FLit True
+                 (_, FLit True)  -> FLit True
+                 (FLit False, _) -> b'
+                 (_, FLit False) -> a'
+                 _               -> FOr a' b'
 resolveFE (FAffine   (Block aff _ _ _)) = resolveFE aff
 resolveFE (FRelevant (Block _ rel _ _)) = resolveFE rel
 resolveFE (FAffine   (Var a)) = deref' a (resolveFE . FAffine)   . return . FAffine   $ Var a
