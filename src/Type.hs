@@ -1,3 +1,4 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Type where
 
 import Control.Applicative
@@ -6,6 +7,14 @@ import Data.List (dropWhileEnd, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
+
+class Labelled a where
+    label            :: String -> a
+    matchLabel       :: a -> Maybe String
+
+class LabelledGraph cx a where
+    subgraphs        :: cx -> Map String a
+    replaceSubgraphs :: cx -> Map String a -> cx
 
 data Constraint = Droppable | Copyable | Quotable | CompatibleWith String
                 deriving (Eq, Show)
@@ -58,6 +67,24 @@ data TypeContext = TypeContext { tcx_used         :: Map String Int
                                }
                  deriving Show
 
+instance Labelled Type where
+    label = Var
+    matchLabel (Var v) = Just v
+    matchLabel _       = Nothing
+
+instance LabelledGraph TypeContext Type where
+    subgraphs = tcx_subgraphs
+    replaceSubgraphs tcx sgs = tcx { tcx_subgraphs = sgs }
+
+instance Labelled FlagExpr where
+    label = FVar
+    matchLabel (FVar v) = Just v
+    matchLabel _        = Nothing
+
+instance LabelledGraph TypeContext FlagExpr where
+    subgraphs = tcx_subgraphs_fe
+    replaceSubgraphs tcx sgs = tcx { tcx_subgraphs_fe = sgs }
+
 emptyTCX :: TypeContext
 emptyTCX = TypeContext Map.empty Map.empty Map.empty Map.empty
 
@@ -76,44 +103,34 @@ constrain var c = modifyConstraints $ Map.alter putSet var
   where
     putSet = Just . nub . (c:) . fromMaybe []
 
-deref :: (Functor m, Monad m) => String -> StateT TypeContext m (Maybe Type)
-deref var = Map.lookup var <$> gets tcx_subgraphs
+deref :: (Functor m, MonadState s m, LabelledGraph s a) => String -> m (Maybe a)
+deref var = Map.lookup var <$> gets subgraphs
 
-derefFE :: (Functor m, Monad m) => String -> StateT TypeContext m (Maybe FlagExpr)
-derefFE var = Map.lookup var <$> gets tcx_subgraphs_fe
-
-deref' :: (Monad m, Functor m) => String -> (Type -> StateT TypeContext m a) -> StateT TypeContext m a -> StateT TypeContext m a
+deref' :: (Functor m, MonadState s m, LabelledGraph s a) => String -> (a -> m b) -> m b -> m b
 deref' v f a = do
     v' <- deref v
     case v' of
         Just v'' -> f v''
         Nothing -> a
 
-derefFE' :: (Monad m, Functor m) => String -> (FlagExpr -> StateT TypeContext m a) -> StateT TypeContext m a -> StateT TypeContext m a
-derefFE' v f a = do
-    v' <- derefFE v
-    case v' of
-        Just v'' -> f v''
-        Nothing -> a
+applyDerefed :: (Functor m, MonadState s m, LabelledGraph s a, Labelled a) => (a -> m b) -> a -> m b
+applyDerefed f a = case matchLabel a of
+                       Just a' -> f =<< fromMaybe a <$> deref a'
+                       Nothing -> f a
 
-modifySubgraphs :: Monad m => (Map String Type -> Map String Type) -> StateT TypeContext m ()
-modifySubgraphs f = modify $ \tcx -> tcx { tcx_subgraphs = f $ tcx_subgraphs tcx }
+zipDerefed :: (Functor m, MonadState s m, LabelledGraph s a, Labelled a) => (a -> a -> m b) -> a -> a -> m b
+zipDerefed f a b = flip applyDerefed a $ flip applyDerefed b . f
 
-modifySubgraphsFE :: Monad m => (Map String FlagExpr -> Map String FlagExpr) -> StateT TypeContext m ()
-modifySubgraphsFE f = modify $ \tcx -> tcx { tcx_subgraphs_fe = f $ tcx_subgraphs_fe tcx }
+modifySubgraphs :: (MonadState cx m, LabelledGraph cx a) => (Map String a -> Map String a) -> m ()
+modifySubgraphs f = modify $ \tcx -> replaceSubgraphs tcx . f $ subgraphs tcx
 
 -- TODO implement
 propagateConstraints :: Monad m => String -> Type -> StateT TypeContext m ()
 propagateConstraints _ _ = return ()
 
 -- TODO should propagate constraints
-link :: Monad m => String -> Type -> StateT TypeContext m ()
+link :: (Show a, MonadState cx m, LabelledGraph cx a) => String -> a -> m ()
 link var ty = modifySubgraphs $ Map.insertWith insertOnce var ty
-  where
-    insertOnce new old = error $ "Called link twice on the same var. Var: " ++ var ++ ", new: " ++ show new ++ ", old: " ++ show old
-
-linkFE :: Monad m => String -> FlagExpr -> StateT TypeContext m ()
-linkFE var fe = modifySubgraphsFE $ Map.insertWith insertOnce var fe
   where
     insertOnce new old = error $ "Called link twice on the same var. Var: " ++ var ++ ", new: " ++ show new ++ ", old: " ++ show old
 
@@ -134,7 +151,7 @@ reify (Var a) = do
 
 reifyFE :: (Functor m, Monad m) => FlagExpr -> StateT TypeContext m FlagExpr
 reifyFE (FVar a) = do
-    a' <- derefFE a
+    a' <- deref a
     case a' of
         Just a'' -> reifyFE a''
         Nothing -> return $ FVar a

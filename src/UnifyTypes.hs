@@ -19,11 +19,11 @@ derefTypes f a b = f a b
 
 derefTypesFE :: (Functor m, Monad m) => (FlagExpr -> FlagExpr -> StateT TypeContext m a) -> FlagExpr -> FlagExpr -> StateT TypeContext m a
 derefTypesFE f (FVar a) b =
-    derefFE' a (flip (derefTypesFE f) b) $
+    deref' a (flip (derefTypesFE f) b) $
         case b of
-            FVar b' -> derefFE' b' (derefTypesFE f $ FVar a) $ f (FVar a) b
+            FVar b' -> deref' b' (derefTypesFE f $ FVar a) $ f (FVar a) b
             _       -> f (FVar a) b
-derefTypesFE f a (FVar b) = derefFE' b (derefTypesFE f a) $ f a (FVar b)
+derefTypesFE f a (FVar b) = deref' b (derefTypesFE f a) $ f a (FVar b)
 derefTypesFE f a b = f a b
 
 referenced :: (Functor m, Monad m) => String -> Type -> StateT TypeContext m Bool
@@ -35,18 +35,10 @@ referenced _ Unit = return False
 referenced v (Void a) = referenced v a
 referenced v (Sealed _ a) = referenced v a
 referenced v (Fix _ a) = referenced v a
-referenced v (Var a) = do
-    a' <- deref a
-    case a' of
-        Just a'' -> referenced v a''
-        Nothing -> return $ v == a
+referenced v (Var a) = deref' a (referenced v) . return $ v == a
 
 referencedFE :: (Functor m, Monad m) => String -> FlagExpr -> StateT TypeContext m Bool
-referencedFE v (FVar var) = do
-    var' <- derefFE var
-    case var' of
-        Just var'' -> referencedFE v var''
-        Nothing -> return $ v == var
+referencedFE v (FVar var) = deref' var (referencedFE v) . return $ v == var
 referencedFE _ (FLit _)   = return False
 referencedFE v (FOr  a b) = (||) <$> referencedFE v a <*> referencedFE v b
 referencedFE v (FAffine   ty) = referenced v ty
@@ -89,9 +81,9 @@ unifyFE = derefTypesFE unifyFE'
   where
     unifyFE' (FVar a) (FVar b) | a == b    = return $ FVar a
                                | otherwise = do
-                                   linkFE b $ FVar a
+                                   link b $ FVar a
                                    return $ FVar a
-    unifyFE' (FVar a) b = linkFE a b >> return (FVar a)
+    unifyFE' (FVar a) b = link a b >> return (FVar a)
     unifyFE' a (FVar b) = unifyFE (FVar b) a
     unifyFE' (FLit a) (FLit b) | a == b = return $ FLit a
     unifyFE' (FOr a b) (FOr c d) = FOr <$> unifyFE a c <*> unifyFE b d

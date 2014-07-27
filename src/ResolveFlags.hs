@@ -25,7 +25,7 @@ resolve (Var a) = return $ Var a
 
 resolveFE :: (Monad m, Functor m) => FlagExpr -> StateT TypeContext m FlagExpr
 resolveFE (FVar a) = do
-    a' <- derefFE a
+    a' <- deref a
     case a' of
         Just a'' -> resolveFE a''
         Nothing  -> return $ FVar a
@@ -53,12 +53,12 @@ resolveFlags ops = do
     tys <- gets tcx_subgraphs
     tys' <- mapM (onSnd resolve) $ Map.toList tys
     modifySubgraphs . const $ Map.fromList tys'
-    modifySubgraphsFE $ const Map.empty
+    modifySubgraphs $ const (Map.empty :: Map.Map String FlagExpr)
     return ops
   where
     resolveFlags' fes = do
         fes' <- mapM (onSnd resolveFE) $ Map.toList fes
-        modifySubgraphsFE . const $ Map.fromList fes'
+        modifySubgraphs . const $ Map.fromList fes'
         gets tcx_subgraphs_fe
     onSnd f (a, b) = do
         b' <- f b
