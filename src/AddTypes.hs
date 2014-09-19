@@ -129,7 +129,7 @@ OPce(Copy, x ~> x :* x, "x", [Copyable])
 OPe(Apply, (Block aff rel x xp) :* x ~> xp)
 -- XXX This probably should only appear later in the pipeline
 OP(ApplyTail, Block aff rel x xp :* x :* Unit ~> xp)
-OPe(Compose, Block ga gr y z :* Block fa fr x y ~> Block (FOr fa ga) (FOr fr gr) x z)
+OPe(Compose, Block ga gr x y :* Block fa fr y z ~> Block (FOr fa ga) (FOr fr gr) x z)
 OPce(Quote, x ~> (Block (FAffine x) (FRelevant x) s $ x :* s), "x", [Quotable])
 OPe(Relevant, Block aff rel x y ~> Block aff (FLit True) x y)
 OPe(Affine, Block aff rel x y ~> Block (FLit True) rel x y)
