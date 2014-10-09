@@ -17,6 +17,7 @@ func genLink(seen map[unsafe.Pointer]bool, format string, objs ...interface{}) {
 	objs[2].(PrintCyclicer).PrintCyclic(objs[0].(string), seen)
 }
 
+// immutable
 type TaggedTreeList struct {
 	left, right *TaggedTreeList
 	size, termCount int
@@ -93,6 +94,7 @@ func (l *TaggedTreeList) PrintCyclic(prefix string, seen map[unsafe.Pointer]bool
 	}
 }
 
+// immutable
 type Symbol struct {
 	name string
 	arity int
@@ -107,10 +109,10 @@ func (s *Symbol) PrintCyclic(prefix string, seen map[unsafe.Pointer]bool) {
 }
 
 type TermNode struct {
-	symbol *Symbol
-	varNode *VarNode
-	child []*TermNode
-	done bool
+	symbol *Symbol // immutable
+	varNode *VarNode // const
+	child []*TermNode // const (slice object only)
+	done bool // mutable
 }
 
 func (t *TermNode) Substitute() {
@@ -151,10 +153,10 @@ func (t *TermNode) PrintCyclic(prefix string, seen map[unsafe.Pointer]bool) {
 }
 
 type VarNode struct {
-	symbol string
-	rep *VarNode
-	terms *TaggedTreeList
-	varCount int
+	symbol string // immutable
+	rep *VarNode // mutable
+	terms *TaggedTreeList // mutable
+	varCount int // mutable
 }
 
 func (v *VarNode) PrintCyclic(prefix string, seen map[unsafe.Pointer]bool) {
