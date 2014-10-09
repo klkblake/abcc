@@ -4,6 +4,19 @@ import "fmt"
 import "os"
 import "unsafe"
 
+type PrintCyclicer interface {
+	PrintCyclic(prefix string, seen map[unsafe.Pointer]bool)
+}
+
+func genNode(format string, objs ...interface{}) {
+	fmt.Printf("%s%p [label=\"" + format + "\"]\n", objs...)
+}
+
+func genLink(seen map[unsafe.Pointer]bool, format string, objs ...interface{}) {
+	fmt.Printf("%s%p -> %[1]s%[3]p [label=\"" + format + "\"]\n", objs...)
+	objs[2].(PrintCyclicer).PrintCyclic(objs[0].(string), seen)
+}
+
 type TaggedTreeList struct {
 	left, right *TaggedTreeList
 	size, termCount int
@@ -60,25 +73,22 @@ func (l *TaggedTreeList) TermCount() int {
 	return l.termCount
 }
 
-func (l *TaggedTreeList) PrintCyclicRoot() {
-	fmt.Println("digraph {")
-	l.PrintCyclic(make(map[unsafe.Pointer]bool))
+func (l *TaggedTreeList) PrintCyclicRoot(prefix string) {
+	fmt.Println("subgraph {")
+	l.PrintCyclic(prefix, make(map[unsafe.Pointer]bool))
 	fmt.Println("}")
 }
 
-func (l *TaggedTreeList) PrintCyclic(seen map[unsafe.Pointer]bool) {
+func (l *TaggedTreeList) PrintCyclic(prefix string, seen map[unsafe.Pointer]bool) {
 	ptr := unsafe.Pointer(l)
 	if !seen[ptr] {
 		seen[ptr] = true
-		fmt.Printf("node%p [label=\"%d/%d\"]\n", l, l.termCount, l.size)
+		genNode("%d/%d", prefix, l, l.termCount, l.size)
 		if l.leaf != nil {
-			fmt.Printf("node%p -> node%p [label=\"leaf\"]\n", l, l.leaf)
-			l.leaf.PrintCyclic(seen)
+			genLink(seen, "leaf", prefix, l, l.leaf)
 		} else {
-			fmt.Printf("node%p -> node%p [label=\"left\"]\n", l, l.left)
-			fmt.Printf("node%p -> node%p [label=\"right\"]\n", l, l.right)
-			l.left.PrintCyclic(seen)
-			l.right.PrintCyclic(seen)
+			genLink(seen, "left", prefix, l, l.left)
+			genLink(seen, "right", prefix, l, l.right)
 		}
 	}
 }
@@ -88,11 +98,11 @@ type Symbol struct {
 	arity int
 }
 
-func (s *Symbol) PrintCyclic(seen map[unsafe.Pointer]bool) {
+func (s *Symbol) PrintCyclic(prefix string, seen map[unsafe.Pointer]bool) {
 	ptr := unsafe.Pointer(s)
 	if !seen[ptr] {
 		seen[ptr] = true
-		fmt.Printf("node%p [label=\"%s/%d\"]\n", s, s.name, s.arity)
+		genNode("%s/%d", prefix, s, s.name, s.arity)
 	}
 }
 
@@ -102,26 +112,18 @@ type TermNode struct {
 	child []*TermNode
 }
 
-func (t *TermNode) PrintCyclicRoot() {
-	fmt.Println("digraph {")
-	t.PrintCyclic(make(map[unsafe.Pointer]bool))
-	fmt.Println("}")
-}
-
-func (t *TermNode) PrintCyclic(seen map[unsafe.Pointer]bool) {
+func (t *TermNode) PrintCyclic(prefix string, seen map[unsafe.Pointer]bool) {
 	ptr := unsafe.Pointer(t)
 	if !seen[ptr] {
 		seen[ptr] = true
 		if t.symbol != nil {
-			fmt.Printf("node%p [label=\"%s\"]\n", t, t.symbol.name)
+			genNode("%s", prefix, t, t.symbol.name)
 		} else if t.varNode != nil {
-			fmt.Printf("node%p [label=\"%s\"]\n", t, t.varNode.symbol)
-			fmt.Printf("node%p -> node%p [label=\"var\"]\n", t, t.varNode)
-			t.varNode.PrintCyclic(seen)
+			genNode("%s", prefix, t, t.varNode.symbol)
+			genLink(seen, "var", prefix, t, t.varNode)
 		}
 		for i, c := range t.child {
-			fmt.Printf("node%p -> node%p [label=\"#%d\"]\n", t, c, i)
-			c.PrintCyclic(seen)
+			genLink(seen, "#%d", prefix, t, c, i)
 		}
 	}
 }
@@ -133,18 +135,16 @@ type VarNode struct {
 	varCount int
 }
 
-func (v *VarNode) PrintCyclic(seen map[unsafe.Pointer]bool) {
+func (v *VarNode) PrintCyclic(prefix string, seen map[unsafe.Pointer]bool) {
 	ptr := unsafe.Pointer(v)
 	if !seen[ptr] {
 		seen[ptr] = true
-		fmt.Printf("node%p [label=\"%s (%d, %d)\"]\n", v, v.symbol, v.varCount, v.terms.TermCount())
+		genNode("%s (%d)", prefix, v, v.symbol, v.varCount)
 		if v.rep != nil {
-			fmt.Printf("node%p -> node%p [label=\"rep\"]\n", v, v.rep)
-			v.rep.PrintCyclic(seen)
+			genLink(seen, "rep", prefix, v, v.rep)
 		}
 		if v.terms != nil {
-			fmt.Printf("node%p -> node%p [label=\"terms\"]\n", v, v.terms)
-			v.terms.PrintCyclic(seen)
+			genLink(seen, "terms", prefix, v, v.terms)
 		}
 	}
 }
@@ -282,15 +282,13 @@ func main() {
 	expr1 := &TermNode{ f, nil, []*TermNode{ x1, x1 } }
 	expr2 := &TermNode{ f, nil, []*TermNode{ &TermNode{ f, nil, []*TermNode{ z2, z2 } }, &TermNode{ f, nil, []*TermNode{ z2, x2 } } } }
 	root := NewTaggedTreeList(expr1).Append(expr2)
-	//fmt.Printf("Expr 1: %+v\n", expr1)
-	//fmt.Printf("Expr 2: %+v\n", expr2)
-	fmt.Println("=== Before ===")
-	root.PrintCyclicRoot()
+	fmt.Println("digraph {")
+	root.PrintCyclicRoot("before")
 	err := unify(root.Slice())
 	if err != nil {
 		fmt.Printf("Error: %+v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("=== After ===")
-	root.PrintCyclicRoot()
+	root.PrintCyclicRoot("after")
+	fmt.Println("}")
 }

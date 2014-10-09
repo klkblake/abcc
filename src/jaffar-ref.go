@@ -4,16 +4,29 @@ import "fmt"
 import "os"
 import "unsafe"
 
+type PrintCyclicer interface {
+	PrintCyclic(prefix string, seen map[unsafe.Pointer]bool)
+}
+
+func genNode(format string, objs ...interface{}) {
+	fmt.Printf("%s%p [label=\"" + format + "\"]\n", objs...)
+}
+
+func genLink(seen map[unsafe.Pointer]bool, format string, objs ...interface{}) {
+	fmt.Printf("%s%p -> %[1]s%[3]p [label=\"" + format + "\"]\n", objs...)
+	objs[2].(PrintCyclicer).PrintCyclic(objs[0].(string), seen)
+}
+
 type Symbol struct {
 	name string
 	arity int
 }
 
-func (s *Symbol) PrintCyclic(seen map[unsafe.Pointer]bool) {
+func (s *Symbol) PrintCyclic(prefix string, seen map[unsafe.Pointer]bool) {
 	ptr := unsafe.Pointer(s)
 	if !seen[ptr] {
 		seen[ptr] = true
-		fmt.Printf("node%p [label=\"%s/%d\"]\n", s, s.name, s.arity)
+		genNode("%s/%d", prefix, s, s.name, s.arity)
 	}
 }
 
@@ -24,30 +37,27 @@ type TermNode struct {
 	child []*TermNode
 }
 
-func (t *TermNode) PrintCyclicRoot() {
-	fmt.Println("digraph {")
-	t.PrintCyclic(make(map[unsafe.Pointer]bool))
+func (t *TermNode) PrintCyclicRoot(prefix string) {
+	fmt.Println("subgraph {")
+	t.PrintCyclic(prefix, make(map[unsafe.Pointer]bool))
 	fmt.Println("}")
 }
 
-func (t *TermNode) PrintCyclic(seen map[unsafe.Pointer]bool) {
+func (t *TermNode) PrintCyclic(prefix string, seen map[unsafe.Pointer]bool) {
 	ptr := unsafe.Pointer(t)
 	if !seen[ptr] {
 		seen[ptr] = true
 		if t.symbol != nil {
-			fmt.Printf("node%p [label=\"%s\"]\n", t, t.symbol.name)
+			genNode("%s", prefix, t, t.symbol.name)
 		} else if t.varNode != nil {
-			fmt.Printf("node%p [label=\"%s\"]\n", t, t.varNode.symbol)
-			fmt.Printf("node%p -> node%p [label=\"var\"]\n", t, t.varNode)
-			t.varNode.PrintCyclic(seen)
+			genNode("%s", prefix, t, t.varNode.symbol)
+			genLink(seen, "var", prefix, t, t.varNode)
 		}
 		if t.term != nil {
-			fmt.Printf("node%p -> node%p [label=\"term\"]\n", t, t.term)
-			t.term.PrintCyclic(seen)
+			genLink(seen, "term", prefix, t, t.term)
 		}
 		for i, c := range t.child {
-			fmt.Printf("node%p -> node%p [label=\"#%d\"]\n", t, c, i)
-			c.PrintCyclic(seen)
+			genLink(seen, "#%d", prefix, t, c, i)
 		}
 	}
 }
@@ -60,18 +70,16 @@ type VarNode struct {
 	termCount int
 }
 
-func (v *VarNode) PrintCyclic(seen map[unsafe.Pointer]bool) {
+func (v *VarNode) PrintCyclic(prefix string, seen map[unsafe.Pointer]bool) {
 	ptr := unsafe.Pointer(v)
 	if !seen[ptr] {
 		seen[ptr] = true
-		fmt.Printf("node%p [label=\"%s (%d, %d)\"]\n", v, v.symbol, v.varCount, v.termCount)
+		genNode("%s (%d, %d)", prefix, v, v.symbol, v.varCount, v.termCount)
 		if v.rep != nil {
-			fmt.Printf("node%p -> node%p [label=\"rep\"]\n", v, v.rep)
-			v.rep.PrintCyclic(seen)
+			genLink(seen, "rep", prefix, v, v.rep)
 		}
 		if v.term != nil {
-			fmt.Printf("node%p -> node%p [label=\"term\"]\n", v, v.term)
-			v.term.PrintCyclic(seen)
+			genLink(seen, "term", prefix, v, v.term)
 		}
 	}
 }
@@ -217,15 +225,13 @@ func main() {
 	expr1 := &TermNode{ f, nil, nil, []*TermNode{ x1, x1 } }
 	expr2 := &TermNode{ f, nil, expr1, []*TermNode{ &TermNode{ f, nil, nil, []*TermNode{ z2, z2 } }, &TermNode{ f, nil, nil, []*TermNode{ z2, x2 } } } }
 	expr1.term = expr2
-	//fmt.Printf("Expr 1: %+v\n", expr1)
-	//fmt.Printf("Expr 2: %+v\n", expr2)
-	fmt.Println("=== Before ===")
-	expr1.PrintCyclicRoot()
+	fmt.Println("digraph {")
+	expr1.PrintCyclicRoot("before")
 	err := unify([]*TermNode{expr1, expr2})
 	if err != nil {
 		fmt.Printf("Error: %+v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("=== After ===")
-	expr1.PrintCyclicRoot()
+	expr1.PrintCyclicRoot("after")
+	fmt.Println("}")
 }
