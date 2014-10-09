@@ -212,8 +212,11 @@ func merge(queue []*VarNode, v1, v2 *VarNode) []*VarNode {
 }
 
 func rep(v *VarNode) *VarNode {
+	if v.rep == nil {
+		return v
+	}
 	v0 := v.rep
-	for v0 != v0.rep {
+	for v0.rep != nil {
 		v0 = v0.rep
 	}
 	for v.rep != v0 {
@@ -302,9 +305,7 @@ func main() {
 		return &Symbol{ name, arity }
 	}
 	varNode := func(name string) *VarNode {
-		v := &VarNode{ name, nil, nil, 1 }
-		v.rep = v
-		return v
+		return &VarNode{ name, nil, nil, 1 }
 	}
 	varTerm := func(node *VarNode) *TermNode {
 		return &TermNode{ nil, node, nil, false }
