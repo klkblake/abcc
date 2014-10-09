@@ -220,7 +220,7 @@ func rep(v *VarNode) *VarNode {
 	return v0
 }
 
-func commonFrontier(t_list []*TermNode) *UnificationError {
+func commonFrontier(index int, parents, t_list []*TermNode) *UnificationError {
 	sym := t_list[0].symbol
 	for _, term := range t_list {
 		if term.symbol != sym {
@@ -250,9 +250,12 @@ func commonFrontier(t_list []*TermNode) *UnificationError {
 		if len(s0) != 0 {
 			j := s0[0]
 			s0 := s0[1:]
-			tmp := *t_list[0]
-			*t_list[0] = *t_list[j]
-			*t_list[j] = tmp
+			// In the original this unconditionally swaps them in memory
+			if parents != nil {
+				tmp := parents[0].child[index]
+				parents[0].child[index] = parents[j].child[index]
+				parents[j].child[index] = tmp
+			}
 			v := rep(t0_list[j].varNode)
 			for _, k := range s0 {
 				v2 := rep(t0_list[k].varNode)
@@ -264,7 +267,7 @@ func commonFrontier(t_list []*TermNode) *UnificationError {
 				add(v, t0_list[k])
 			}
 		} else {
-			return commonFrontier(t0_list)
+			return commonFrontier(i, t_list, t0_list)
 		}
 	}
 	return nil
@@ -272,7 +275,7 @@ func commonFrontier(t_list []*TermNode) *UnificationError {
 
 func unify(t_list []*TermNode) *UnificationError {
 	queue = make([]*VarNode, 0)
-	err := commonFrontier(t_list)
+	err := commonFrontier(0, nil, t_list)
 	if err != nil {
 		return err
 	}
@@ -283,7 +286,7 @@ func unify(t_list []*TermNode) *UnificationError {
 		if k >= 2 {
 			t := v.terms.Slice()
 			v.terms = NewTaggedTreeList(t[0])
-			err = commonFrontier(t)
+			err = commonFrontier(0, nil, t)
 			if err != nil {
 				return err
 			}
