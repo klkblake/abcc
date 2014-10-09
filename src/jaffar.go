@@ -177,20 +177,19 @@ type UnificationError struct {
 	left, right *Symbol
 }
 
-var queue []*VarNode
-
-func add(v *VarNode, t *TermNode) {
-	if v.terms.TermCount() == 1 {
-		queue = append(queue, v)
-	}
+func add(queue []*VarNode, v *VarNode, t *TermNode) []*VarNode {
 	if v.terms == nil {
 		v.terms = NewTaggedTreeList(t)
 	} else {
 		v.terms = v.terms.Append(t)
 	}
+	if v.terms.TermCount() == 2 {
+		return append(queue, v)
+	}
+	return queue
 }
 
-func merge(v1, v2 *VarNode) {
+func merge(queue []*VarNode, v1, v2 *VarNode) []*VarNode {
 	r1, r2 := v1.varCount, v2.varCount
 	var bigV, v *VarNode
 	if r1 >= r2 {
@@ -198,10 +197,7 @@ func merge(v1, v2 *VarNode) {
 	} else {
 		bigV, v = v2, v1
 	}
-	k1, k2 := bigV.terms.TermCount(), v.terms.TermCount()
-	if k1 <= 1 && k1 + k2 > 1 {
-		queue = append(queue, bigV)
-	}
+	small := bigV.terms.TermCount() <= 1
 	if bigV.terms == nil {
 		bigV.terms = v.terms
 	} else if v.terms != nil {
@@ -209,6 +205,10 @@ func merge(v1, v2 *VarNode) {
 	}
 	v.rep, v.terms, v.varCount = bigV, nil, 0
 	bigV.varCount = r1 + r1
+	if small && bigV.terms.TermCount() >= 2 {
+		return append(queue, bigV)
+	}
+	return queue
 }
 
 func rep(v *VarNode) *VarNode {
@@ -222,11 +222,11 @@ func rep(v *VarNode) *VarNode {
 	return v0
 }
 
-func commonFrontier(index int, parents, t_list []*TermNode) *UnificationError {
+func commonFrontier(queue []*VarNode, index int, parents, t_list []*TermNode) ([]*VarNode, *UnificationError) {
 	sym := t_list[0].symbol
 	for _, term := range t_list {
 		if term.symbol != sym {
-			return &UnificationError{
+			return nil, &UnificationError{
 				left:  sym,
 				right: term.symbol,
 			}
@@ -259,25 +259,25 @@ func commonFrontier(index int, parents, t_list []*TermNode) *UnificationError {
 				}
 				v2 := rep(term.varNode)
 				if v != v2 {
-					merge(v, v2)
+					queue = merge(queue, v, v2)
 				}
 			}
 			for _, term := range t0_list {
 				if term.varNode != nil {
 					continue
 				}
-				add(v, term)
+				queue = add(queue, v, term)
 			}
 		} else {
-			return commonFrontier(i, t_list, t0_list)
+			return commonFrontier(queue, i, t_list, t0_list)
 		}
 	}
-	return nil
+	return queue, nil
 }
 
 func unify(t_list []*TermNode) *UnificationError {
-	queue = make([]*VarNode, 0)
-	err := commonFrontier(0, nil, t_list)
+	queue := make([]*VarNode, 0)
+	queue, err := commonFrontier(queue, 0, nil, t_list)
 	if err != nil {
 		return err
 	}
@@ -288,7 +288,7 @@ func unify(t_list []*TermNode) *UnificationError {
 		if k >= 2 {
 			t := v.terms.Slice()
 			v.terms = NewTaggedTreeList(t[0])
-			err = commonFrontier(0, nil, t)
+			queue, err = commonFrontier(queue, 0, nil, t)
 			if err != nil {
 				return err
 			}
