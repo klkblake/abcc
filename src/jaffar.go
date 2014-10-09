@@ -234,24 +234,18 @@ func commonFrontier(index int, parents, t_list []*TermNode) *UnificationError {
 	}
 	a := sym.arity
 	t0_list := make([]*TermNode, len(t_list))
-	s0Backing := make([]int, len(t_list))
-	s1Backing := make([]int, len(t_list))
 	for i := 0; i < a; i++ {
 		for j := range t_list {
 			t0_list[j] = t_list[j].child[i]
 		}
-		s0 := s0Backing[0:0]
-		s1 := s1Backing[0:0]
-		for j, term := range t0_list {
+		j := -1
+		for k, term := range t0_list {
 			if term.varNode != nil {
-				s0 = append(s0, j)
-			} else {
-				s1 = append(s1, j)
+				j = k
+				break
 			}
 		}
-		if len(s0) != 0 {
-			j := s0[0]
-			s0 := s0[1:]
+		if j != -1 {
 			// In the original this unconditionally swaps them in memory
 			if parents != nil {
 				tmp := parents[0].child[index]
@@ -259,14 +253,20 @@ func commonFrontier(index int, parents, t_list []*TermNode) *UnificationError {
 				parents[j].child[index] = tmp
 			}
 			v := rep(t0_list[j].varNode)
-			for _, k := range s0 {
-				v2 := rep(t0_list[k].varNode)
+			for k, term := range t0_list {
+				if k == j || term.varNode == nil {
+					continue
+				}
+				v2 := rep(term.varNode)
 				if v != v2 {
 					merge(v, v2)
 				}
 			}
-			for _, k := range s1 {
-				add(v, t0_list[k])
+			for _, term := range t0_list {
+				if term.varNode != nil {
+					continue
+				}
+				add(v, term)
 			}
 		} else {
 			return commonFrontier(i, t_list, t0_list)
