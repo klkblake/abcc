@@ -293,16 +293,25 @@ func unify(t_list []*TermNode) *UnificationError {
 }
 
 func main() {
-	f := &Symbol{ "f", 2 }
-	x := &VarNode{ "x", nil, nil, 1 }
-	x.rep = x
-	z := &VarNode{ "z", nil, nil, 1 }
-	z.rep = z
-	x1 := &TermNode{ nil, x, nil, false }
-	x2 := &TermNode{ nil, x, nil, false }
-	z2 := &TermNode{ nil, z, nil, false }
-	expr1 := &TermNode{ f, nil, []*TermNode{ x1, x1 }, false }
-	expr2 := &TermNode{ f, nil, []*TermNode{ &TermNode{ f, nil, []*TermNode{ z2, z2 }, false }, &TermNode{ f, nil, []*TermNode{ z2, x2 }, false } }, false }
+	sym := func(name string, arity int) *Symbol {
+		return &Symbol{ name, arity }
+	}
+	varNode := func(name string) *VarNode {
+		v := &VarNode{ name, nil, nil, 1 }
+		v.rep = v
+		return v
+	}
+	varTerm := func(node *VarNode) *TermNode {
+		return &TermNode{ nil, node, nil, false }
+	}
+	funcTerm := func(symbol *Symbol, children ...*TermNode) *TermNode {
+		return &TermNode{ symbol, nil, children, false }
+	}
+	f := sym("f", 2)
+	x := varTerm(varNode("x"))
+	z := varTerm(varNode("z"))
+	expr1 := funcTerm(f, x, x)
+	expr2 := funcTerm(f, funcTerm(f, z, z), funcTerm(f, z, x))
 	root := NewTaggedTreeList(expr1).Append(expr2)
 	fmt.Println("digraph {")
 	root.PrintCyclicRoot("initial")
