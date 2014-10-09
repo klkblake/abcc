@@ -110,16 +110,38 @@ type TermNode struct {
 	symbol *Symbol
 	varNode *VarNode
 	child []*TermNode
+	done bool
+}
+
+func (t *TermNode) Substitute() {
+	if !t.done {
+		t.done = true
+		for i, c := range t.child {
+			if c.varNode == nil {
+				c.Substitute()
+			} else {
+				ts := rep(c.varNode).terms.Slice()
+				if len(ts) != 1 {
+					panic("Attempted to substitute variable with multiple terms")
+				}
+				t.child[i] = ts[0]
+			}
+		}
+	}
 }
 
 func (t *TermNode) PrintCyclic(prefix string, seen map[unsafe.Pointer]bool) {
 	ptr := unsafe.Pointer(t)
 	if !seen[ptr] {
 		seen[ptr] = true
+		suffix := ""
+		if t.done {
+			suffix = " ✓"
+		}
 		if t.symbol != nil {
-			genNode("%s", prefix, t, t.symbol.name)
+			genNode("%s%s", prefix, t, t.symbol.name, suffix)
 		} else if t.varNode != nil {
-			genNode("%s", prefix, t, t.varNode.symbol)
+			genNode("%s%s", prefix, t, t.varNode.symbol, suffix)
 			genLink(seen, "var", prefix, t, t.varNode)
 		}
 		for i, c := range t.child {
@@ -276,19 +298,22 @@ func main() {
 	x.rep = x
 	z := &VarNode{ "z", nil, nil, 1 }
 	z.rep = z
-	x1 := &TermNode{ nil, x, nil }
-	x2 := &TermNode{ nil, x, nil }
-	z2 := &TermNode{ nil, z, nil }
-	expr1 := &TermNode{ f, nil, []*TermNode{ x1, x1 } }
-	expr2 := &TermNode{ f, nil, []*TermNode{ &TermNode{ f, nil, []*TermNode{ z2, z2 } }, &TermNode{ f, nil, []*TermNode{ z2, x2 } } } }
+	x1 := &TermNode{ nil, x, nil, false }
+	x2 := &TermNode{ nil, x, nil, false }
+	z2 := &TermNode{ nil, z, nil, false }
+	expr1 := &TermNode{ f, nil, []*TermNode{ x1, x1 }, false }
+	expr2 := &TermNode{ f, nil, []*TermNode{ &TermNode{ f, nil, []*TermNode{ z2, z2 }, false }, &TermNode{ f, nil, []*TermNode{ z2, x2 }, false } }, false }
 	root := NewTaggedTreeList(expr1).Append(expr2)
 	fmt.Println("digraph {")
-	root.PrintCyclicRoot("before")
+	root.PrintCyclicRoot("initial")
 	err := unify(root.Slice())
 	if err != nil {
 		fmt.Printf("Error: %+v\n", err)
 		os.Exit(1)
 	}
-	root.PrintCyclicRoot("after")
+	root.PrintCyclicRoot("unify")
+	expr1.Substitute()
+	expr2.Substitute()
+	root.PrintCyclicRoot("substitute")
 	fmt.Println("}")
 }
