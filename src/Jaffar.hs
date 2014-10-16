@@ -13,11 +13,17 @@ import Data.IntSet (IntSet)
 import qualified Data.IntSet as IS
 import Data.List
 import Data.Maybe
+import Data.Monoid
 import Data.STRef
 import qualified Data.Vector as V
 import Data.Vector.Mutable (MVector)
 import qualified Data.Vector.Mutable as MV
 import Numeric
+
+import Queue (Queue)
+import qualified Queue as Q
+import TTList (TTList, Tagged)
+import qualified TTList as TTL
 
 type ID = Int
 
@@ -54,53 +60,6 @@ showSubgraph name g = do
     showConcat :: Show a => [a] -> ShowS
     showConcat = foldr (.) id . intersperse (showChar '\n') . map shows
 
-data Queue a = Queue [a] [a]
-
-queueEmpty :: Queue a
-queueEmpty = Queue [] []
-
-queuePush :: Queue a -> a -> Queue a
-queuePush (Queue f b) x = Queue f $ x:b
-
-queuePop :: Queue a -> Maybe (a, Queue a)
-queuePop (Queue (x:f) b) = Just (x, Queue f b)
-queuePop (Queue [] b@(_:_)) = queuePop $ Queue (reverse b) []
-queuePop (Queue [] []) = Nothing
-
-data TaggedTreeList s = TTLNode (TaggedTreeList s) (TaggedTreeList s) Int Int
-                      | TTLLeaf (TermNode s) Int
-                      | TTLEmpty
-
-singleton :: TermNode s -> TaggedTreeList s
-singleton t@(TermNode _ _ Nothing  _ _) = TTLLeaf t 1
-singleton t@(TermNode _ _ (Just _) _ _) = TTLLeaf t 0
-
-size :: TaggedTreeList s -> Int
-size (TTLNode _ _ s _) = s
-size (TTLLeaf _ _) = 1
-size TTLEmpty = 0
-
-termCount :: TaggedTreeList s -> Int
-termCount (TTLNode _ _ _ c) = c
-termCount (TTLLeaf _ c) = c
-termCount TTLEmpty = 0
-
-ttlConcat :: TaggedTreeList s -> TaggedTreeList s -> TaggedTreeList s
-ttlConcat TTLEmpty r = r
-ttlConcat l TTLEmpty = l
-ttlConcat l r = TTLNode l r (size l + size r) (termCount l + termCount r)
-
-ttlCons :: TermNode s -> TaggedTreeList s -> TaggedTreeList s
-ttlCons h t = singleton h `ttlConcat` t
-
-ttlToVector :: TaggedTreeList s -> ST s (MVector s (TermNode s))
-ttlToVector ttl = MV.new (size ttl) >>= \v -> go v ttl >> return v
-  where
-    go v (TTLNode l r s _) = let s' = size l
-                             in go (MV.slice 0 s' v) l >> go (MV.slice s' (s - s') v) r
-    go v (TTLLeaf t _) = MV.write v 0 t
-    go _ TTLEmpty = return ()
-
 data Symbol = Symbol String Int
             deriving Eq
 
@@ -108,6 +67,11 @@ instance Show Symbol where
     show (Symbol name arity) = name ++ '/':show arity
 
 data TermNode s = TermNode ID (Maybe Symbol) (Maybe (VarNode s)) (MVector s (TermNode s)) (STRef s Bool)
+
+instance Tagged (TermNode s) where
+    type Tag (TermNode s) = Sum Int
+    tag (TermNode _ _ (Just _) _ _) = Sum 0
+    tag (TermNode _ _ Nothing  _ _) = Sum 1
 
 instance Graph (TermNode s) where
     type State (TermNode s) = s
@@ -142,11 +106,11 @@ substitute (TermNode _ _ _ children doneRef) = do
     go _ c@(TermNode _ _ Nothing _ _) = substitute c
     go i (TermNode _ _ (Just var) _ _) = do
         VarNode _ _ _ terms _ <- rep var
-        ts <- ttlToVector =<< readSTRef terms
-        when (MV.length ts /= 1) $ error "Attempted to substitute variable with multiple terms"
-        MV.write children i =<< MV.read ts 0
+        ts <- TTL.toVector <$> readSTRef terms
+        when (V.length ts /= 1) $ error "Attempted to substitute variable with multiple terms"
+        MV.write children i $ ts V.! 0
 
-data VarNode s = VarNode ID String (STRef s (Maybe (VarNode s))) (STRef s (TaggedTreeList s)) (STRef s Int)
+data VarNode s = VarNode ID String (STRef s (Maybe (VarNode s))) (STRef s (TTList (TermNode s))) (STRef s Int)
 
 instance Graph (VarNode s) where
     type State (VarNode s) = s
@@ -159,7 +123,7 @@ instance Graph (VarNode s) where
         (rns, res) <- case rep' of
                           Just r -> (\(x, y) -> (x, edge (uniqueID r) "rep":y)) <$> toGraph prefix seenRef r
                           Nothing -> return ([], [])
-        ts <- V.toList <$> (V.freeze =<< ttlToVector =<< readSTRef terms)
+        ts <- V.toList . TTL.toVector <$> readSTRef terms
         let edges = zipWith (\c i -> edge (uniqueID c) $ '#':show i) ts [1 :: Int ..]
         (cns, ces) <- unzip <$> mapM (toGraph prefix seenRef) ts
         return (node:rns ++ concat cns, edges ++ res ++ concat ces)
@@ -167,9 +131,9 @@ instance Graph (VarNode s) where
 add :: Queue (VarNode s) -> VarNode s -> TermNode s -> ST s (Queue (VarNode s))
 add queue v@(VarNode _ _ _ termsRef _) t = do
     ts <- readSTRef termsRef
-    writeSTRef termsRef $ ttlCons t ts
-    return $ if termCount ts == 1
-                 then queuePush queue v
+    writeSTRef termsRef $ TTL.cons t ts
+    return $ if TTL.tag ts == 1
+                 then Q.push queue v
                  else queue
 
 merge :: Queue (VarNode s) -> VarNode s -> VarNode s -> ST s (Queue (VarNode s))
@@ -184,16 +148,14 @@ merge queue v1@(VarNode _ _ _ _ varCountRef1) v2@(VarNode _ _ repRef _ varCountR
     go vc bigV@(VarNode _ _ _ bigTermsRef bigVarCountRef) (VarNode _ _ _ termsRef varCountRef) = do
         bigTerms <- readSTRef bigTermsRef
         terms    <- readSTRef termsRef
-        let bigTerms' = case bigTerms of
-                            TTLEmpty -> terms
-                            _     -> bigTerms `ttlConcat` terms
+        let bigTerms' = bigTerms `TTL.concat` terms
         writeSTRef bigTermsRef bigTerms'
         writeSTRef repRef (Just bigV)
-        writeSTRef termsRef TTLEmpty
+        writeSTRef termsRef TTL.empty
         writeSTRef varCountRef 0
         writeSTRef bigVarCountRef vc
-        return $ if termCount bigTerms <= 1 && termCount bigTerms' >= 2
-                     then queuePush queue bigV
+        return $ if TTL.tag bigTerms <= 1 && TTL.tag bigTerms' >= 2
+                     then Q.push queue bigV
                      else queue
 
 rep :: VarNode s -> ST s (VarNode s)
@@ -257,23 +219,23 @@ commonFrontier queue parentsIndex t_list = do
 
 unify :: V.Vector (TermNode s) -> ST s (Maybe (TermNode s, TermNode s))
 unify t_list = do
-    res <- commonFrontier queueEmpty Nothing t_list
+    res <- commonFrontier Q.empty Nothing t_list
     case res of
         Left  err   -> return $ Just err
-        Right queue -> go $ queuePop queue
+        Right queue -> go $ Q.pop queue
   where
     go Nothing = return Nothing
     go (Just (VarNode _ _ _ termsRef _, queue')) = do
         terms <- readSTRef termsRef
-        if termCount terms < 2
-            then go $ queuePop queue'
+        if TTL.tag terms < 2
+            then go $ Q.pop queue'
             else do
-                t <- V.freeze =<< ttlToVector terms
-                writeSTRef termsRef . singleton $ t V.! 0
+                let t = TTL.toVector terms
+                writeSTRef termsRef . TTL.singleton $ t V.! 0
                 res <- commonFrontier queue' Nothing t
                 case res of
                     Left  err     -> return $ Just err
-                    Right queue'' -> go $ queuePop queue''
+                    Right queue'' -> go $ Q.pop queue''
 
 main :: IO ()
 main = putStrLn $ runST $ do
@@ -281,7 +243,7 @@ main = putStrLn $ runST $ do
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-        varNode v = VarNode <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TTLEmpty <*> newSTRef 1
+        varNode v = VarNode <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TTL.empty <*> newSTRef 1
         varTerm v = TermNode <$> unique <*> pure Nothing <*> (Just <$> varNode v) <*> MV.new 0 <*> newSTRef False
         funcTerm sym children = TermNode <$> unique <*> pure (Just sym) <*> pure Nothing <*> V.thaw (V.fromList children) <*> newSTRef False
     let f = Symbol "f" 2
