@@ -285,23 +285,21 @@ main = putStrLn $ runST $ do
         varTerm v = TermNode <$> unique <*> pure Nothing <*> (Just <$> varNode v) <*> MV.new 0 <*> newSTRef False
         funcTerm sym children = TermNode <$> unique <*> pure (Just sym) <*> pure Nothing <*> V.thaw (V.fromList children) <*> newSTRef False
     let f = Symbol "f" 2
+        unifyTerm x y = funcTerm (Symbol "unify" 2) [x, y]
+        errorTerm x y = funcTerm (Symbol "Could not unify" 2) [x, y]
     x <- varTerm "x"
     z <- varTerm "z"
     expr1 <- funcTerm f [x, x]
     expr2 <- funcTerm f =<< sequence [funcTerm f [z, z], funcTerm f [z, x]]
-    initial1 <- showSubgraph "initial1" expr1
-    initial2 <- showSubgraph "initial2" expr2
+    g1 <- showSubgraph "initial" =<< unifyTerm expr1 expr2
     err <- unify $ V.fromList [expr1, expr2]
     case err of
         Just (t1, t2) -> do
-            term1 <- showSubgraph "term1" t1
-            term2 <- showSubgraph "term2" t2
-            return $ "ERROR Could not match:\ndigraph {" ++ term1 ++ term2 ++ "}"
+            e <- showSubgraph "error" =<< errorTerm t1 t2
+            return $ "digraph {" ++ e ++ "}"
         Nothing -> do
-            unify1 <- showSubgraph "unify1" expr1
-            unify2 <- showSubgraph "unify2" expr2
+            g2 <- showSubgraph "unify" =<< unifyTerm expr1 expr2
             substitute expr1
             substitute expr2
-            substitute1 <- showSubgraph "substitute1" expr1
-            substitute2 <- showSubgraph "substitute2" expr2
-            return $ intercalate "\n" ["digraph {", initial1, initial2, unify1, unify2, substitute1, substitute2, "}"]
+            g3 <- showSubgraph "substitute" =<< unifyTerm expr1 expr2
+            return $ intercalate "\n" ["digraph {", g1, g2, g3, "}"]
