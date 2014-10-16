@@ -11,8 +11,7 @@ import Control.Monad
 import Control.Monad.ST
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IS
-import Data.Sequence (Seq, (|>), viewl, ViewL (..))
-import qualified Data.Sequence as S
+import Data.Maybe
 import Data.STRef
 import qualified Data.Vector as V
 import Data.Vector.Mutable (MVector)
@@ -51,6 +50,19 @@ showSubgraph name g = do
     graph <- toGraph name seen g
     return . shows "subgraph {\n" . shows graph . shows "\n}" $ ""
 
+data Queue a = Queue [a] [a]
+
+queueEmpty :: Queue a
+queueEmpty = Queue [] []
+
+queuePush :: Queue a -> a -> Queue a
+queuePush (Queue f b) x = Queue f $ x:b
+
+queuePop :: Queue a -> Maybe (a, Queue a)
+queuePop (Queue (x:f) b) = Just (x, Queue f b)
+queuePop (Queue [] b@(_:_)) = queuePop $ Queue (reverse b) []
+queuePop (Queue [] []) = Nothing
+
 data TaggedTreeList s = TTLNode (TaggedTreeList s) (TaggedTreeList s) Int Int
                       | TTLLeaf (TermNode s) Int
                       | TTLEmpty
@@ -86,6 +98,7 @@ ttlToVector ttl = MV.new (size ttl) >>= \v -> go v ttl >> return v
     go _ TTLEmpty = return ()
 
 data Symbol = Symbol String Int
+            deriving Eq
 
 instance Show Symbol where
     show (Symbol name arity) = name ++ '/':show arity
@@ -147,15 +160,15 @@ instance Graph (VarNode s) where
         (cns, ces) <- unzip <$> mapM (toGraph prefix seenRef) ts
         return (node:rns ++ concat cns, edges ++ res ++ concat ces)
 
-add :: Seq (VarNode s) -> VarNode s -> TermNode s -> ST s (Seq (VarNode s))
+add :: Queue (VarNode s) -> VarNode s -> TermNode s -> ST s (Queue (VarNode s))
 add queue v@(VarNode _ _ _ termsRef _) t = do
     ts <- readSTRef termsRef
     writeSTRef termsRef $ ttlCons t ts
     return $ if termCount ts == 1
-                 then queue |> v
+                 then queuePush queue v
                  else queue
 
-merge :: Seq (VarNode s) -> VarNode s -> VarNode s -> ST s (Seq (VarNode s))
+merge :: Queue (VarNode s) -> VarNode s -> VarNode s -> ST s (Queue (VarNode s))
 merge queue v1@(VarNode _ _ _ _ varCountRef1) v2@(VarNode _ _ repRef _ varCountRef2) = do
     r1 <- readSTRef varCountRef1
     r2 <- readSTRef varCountRef2
@@ -176,7 +189,7 @@ merge queue v1@(VarNode _ _ _ _ varCountRef1) v2@(VarNode _ _ repRef _ varCountR
         writeSTRef varCountRef 0
         writeSTRef bigVarCountRef vc
         return $ if termCount bigTerms <= 1 && termCount bigTerms' >= 2
-                     then queue |> bigV
+                     then queuePush queue bigV
                      else queue
 
 rep :: VarNode s -> ST s (VarNode s)
@@ -195,83 +208,72 @@ rep v = do
             Just r'' -> writeSTRef repRef (Just r) >> setRep r r''
             Nothing  -> return r
 
+commonFrontier :: Queue (VarNode s) -> Maybe (V.Vector (TermNode s), Int) -> V.Vector (TermNode s) -> ST s (Either (TermNode s, TermNode s) (Queue (VarNode s)))
+commonFrontier queue parentsIndex t_list = do
+    let t@(TermNode _ (Symbol _ arity) _ _ _) = t_list V.! 0
+    case checkEqual t t_list of
+        Just err -> return $ Left err
+        Nothing  -> foldM goChild (Right queue) [0 .. arity]
+  where
+    checkEqual t@(TermNode _ sym _ _ _) ts = let diffs = V.filter (\(TermNode _ sym' _ _ _) -> sym /= sym') ts
+                                             in if V.null diffs
+                                                    then Nothing
+                                                    else Just (t, diffs V.! 0)
+    goChild (Left err) _ = return $ Left err
+    goChild (Right queue') i = do
+        t0_list <- ithChildren i
+        case firstVarNode t0_list of
+            Nothing -> commonFrontier queue' (Just (t_list, i)) t0_list
+            Just (j, (TermNode _ _ (Just varNode) _ _)) -> do
+                case parentsIndex of
+                    Nothing -> return ()
+                    Just (parents, index) -> swapChild parents index j
+                v <- rep varNode
+                queue''  <- V.foldM (processVars j v) queue' $ V.indexed t0_list
+                queue''' <- V.foldM (processTerms  v) queue'' t0_list
+                return $ Right queue'''
+            Just _ -> error "firstVarNode returned a TermNode with no varNode"
+    ithChildren i = V.forM t_list $ \(TermNode _ _ _ children _) -> MV.read children i
+    firstVarNode ts = (V.!? 0) . V.filter (\(_, TermNode _ _ varNode _ _) -> isJust varNode) $ V.indexed ts
+    swapChild parents index j = do
+        let (TermNode _ _ _ child0 _) = parents V.! 0
+            (TermNode _ _ _ childj _) = parents V.! j
+        tmp <- MV.read child0 index
+        MV.write child0 index =<< MV.read childj index
+        MV.write childj index tmp
+    processVars j _ queue' (k, _) | k == j = return queue'
+    processVars _ _ queue' (_, TermNode _ _ Nothing _ _) = return queue'
+    processVars _ v queue' (_, TermNode _ _ (Just varNode) _ _) = do
+        v2 <- rep varNode
+        if uniqueID v /= uniqueID v2
+            then merge queue' v v2
+            else return queue'
+    processTerms _ queue' (TermNode _ _ (Just _) _ _) = return queue'
+    processTerms v queue' term = add queue' v term
+
+unify :: V.Vector (TermNode s) -> ST s (Maybe (TermNode s, TermNode s))
+unify t_list = do
+    res <- commonFrontier queueEmpty Nothing t_list
+    case res of
+        Left  err   -> return $ Just err
+        Right queue -> go $ queuePop queue
+  where
+    go Nothing = return Nothing
+    go (Just (VarNode _ _ _ termsRef _, queue')) = do
+        terms <- readSTRef termsRef
+        if termCount terms < 2
+            then go $ queuePop queue'
+            else do
+                t <- V.freeze =<< ttlToVector terms
+                writeSTRef termsRef . singleton $ t V.! 0
+                res <- commonFrontier queue' Nothing t
+                case res of
+                    Left  err     -> return $ Just err
+                    Right queue'' -> go $ queuePop queue''
+
+main :: IO ()
+main = undefined
 {-
-
-func commonFrontier(queue []*VarNode, index int, parents, t_list []*TermNode) ([]*VarNode, *UnificationError) {
-	sym := t_list[0].symbol
-	for _, term := range t_list {
-		if term.symbol != sym {
-			return nil, &UnificationError{
-				left:  sym,
-				right: term.symbol,
-			}
-		}
-	}
-	a := sym.arity
-	t0_list := make([]*TermNode, len(t_list))
-	for i := 0; i < a; i++ {
-		for j := range t_list {
-			t0_list[j] = t_list[j].child[i]
-		}
-		j := -1
-		for k, term := range t0_list {
-			if term.varNode != nil {
-				j = k
-				break
-			}
-		}
-		if j != -1 {
-			// In the original this unconditionally swaps them in memory
-			if parents != nil {
-				tmp := parents[0].child[index]
-				parents[0].child[index] = parents[j].child[index]
-				parents[j].child[index] = tmp
-			}
-			v := rep(t0_list[j].varNode)
-			for k, term := range t0_list {
-				if k == j || term.varNode == nil {
-					continue
-				}
-				v2 := rep(term.varNode)
-				if v != v2 {
-					queue = merge(queue, v, v2)
-				}
-			}
-			for _, term := range t0_list {
-				if term.varNode != nil {
-					continue
-				}
-				queue = add(queue, v, term)
-			}
-		} else {
-			return commonFrontier(queue, i, t_list, t0_list)
-		}
-	}
-	return queue, nil
-}
-
-func unify(t_list []*TermNode) *UnificationError {
-	queue := make([]*VarNode, 0)
-	queue, err := commonFrontier(queue, 0, nil, t_list)
-	if err != nil {
-		return err
-	}
-	for len(queue) != 0 {
-		v := queue[0]
-		queue = queue[1:]
-		k := v.terms.TermCount()
-		if k >= 2 {
-			t := v.terms.Slice()
-			v.terms = NewTaggedTreeList(t[0])
-			queue, err = commonFrontier(queue, 0, nil, t)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func main() {
 	sym := func(name string, arity int) *Symbol {
 		return &Symbol{ name, arity }
