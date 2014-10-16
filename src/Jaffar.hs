@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
-module Jaffar where
+module Main where
 
 -- Implementation of the algorithm described in "Efficient Unification over
 -- Infinite Types" by Joxan Jaffar. Runs in O(n*F(n)) time, where F(n) is
@@ -11,6 +11,7 @@ import Control.Monad
 import Control.Monad.ST
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IS
+import Data.List
 import Data.Maybe
 import Data.STRef
 import qualified Data.Vector as V
@@ -23,14 +24,14 @@ type ID = Int
 data Node = Node String ID String
 
 instance Show Node where
-    showsPrec _ (Node prefix ident label) = showString prefix . showInt ident . showString " [label=\"" . showString label . showString "]"
+    showsPrec _ (Node prefix ident label) = showString prefix . showChar '_' . showInt ident . showString " [label=\"" . showString label . showString "\"]"
 
 data Edge = Edge String ID ID String
 
 instance Show Edge where
-    showsPrec _ (Edge prefix from to label) = showID from . showString " -> " . showID to . showString " [label=\"" . showString label . showString "]"
+    showsPrec _ (Edge prefix from to label) = showID from . showString " -> " . showID to . showString " [label=\"" . showString label . showString "\"]"
       where
-        showID ident = showString prefix . showInt ident
+        showID ident = showString prefix . showChar '_' . showInt ident
 
 class Graph g where
     type State g
@@ -47,8 +48,11 @@ doIfUnseen seenRef ident x a = do
 showSubgraph :: Graph g => String -> g -> ST (State g) String
 showSubgraph name g = do
     seen <- newSTRef IS.empty
-    graph <- toGraph name seen g
-    return . shows "subgraph {\n" . shows graph . shows "\n}" $ ""
+    (nodes, edges) <- toGraph name seen g
+    return . showString "subgraph {\n" . showConcat nodes . showChar '\n' . showConcat edges . showString "\n}" $ ""
+  where
+    showConcat :: Show a => [a] -> ShowS
+    showConcat = foldr (.) id . intersperse (showChar '\n') . map shows
 
 data Queue a = Queue [a] [a]
 
@@ -103,7 +107,7 @@ data Symbol = Symbol String Int
 instance Show Symbol where
     show (Symbol name arity) = name ++ '/':show arity
 
-data TermNode s = TermNode ID Symbol (Maybe (VarNode s)) (MVector s (TermNode s)) (STRef s Bool)
+data TermNode s = TermNode ID (Maybe Symbol) (Maybe (VarNode s)) (MVector s (TermNode s)) (STRef s Bool)
 
 instance Graph (TermNode s) where
     type State (TermNode s) = s
@@ -111,11 +115,11 @@ instance Graph (TermNode s) where
     toGraph prefix seenRef (TermNode ident sym var children doneRef) = doIfUnseen seenRef ident ([], []) $ do
         let label = case var of
                         Just (VarNode _ sym' _ _ _) -> sym'
-                        Nothing -> show sym
+                        Nothing -> show $ fromJust sym
         done <- readSTRef doneRef
         let check = if done
-                        then ""
-                        else " ✓"
+                        then " ✓"
+                        else ""
             node = Node prefix ident $ label ++ check
             edge = Edge prefix ident
         children' <- V.toList <$> V.freeze children
@@ -210,10 +214,10 @@ rep v = do
 
 commonFrontier :: Queue (VarNode s) -> Maybe (V.Vector (TermNode s), Int) -> V.Vector (TermNode s) -> ST s (Either (TermNode s, TermNode s) (Queue (VarNode s)))
 commonFrontier queue parentsIndex t_list = do
-    let t@(TermNode _ (Symbol _ arity) _ _ _) = t_list V.! 0
+    let t@(TermNode _ (Just (Symbol _ arity)) _ _ _) = t_list V.! 0
     case checkEqual t t_list of
         Just err -> return $ Left err
-        Nothing  -> foldM goChild (Right queue) [0 .. arity]
+        Nothing  -> foldM goChild (Right queue) [0 .. arity - 1]
   where
     checkEqual t@(TermNode _ sym _ _ _) ts = let diffs = V.filter (\(TermNode _ sym' _ _ _) -> sym /= sym') ts
                                              in if V.null diffs
@@ -272,39 +276,32 @@ unify t_list = do
                     Right queue'' -> go $ queuePop queue''
 
 main :: IO ()
-main = undefined
-{-
-func main() {
-	sym := func(name string, arity int) *Symbol {
-		return &Symbol{ name, arity }
-	}
-	varNode := func(name string) *VarNode {
-		return &VarNode{ name, nil, nil, 1 }
-	}
-	varTerm := func(node *VarNode) *TermNode {
-		return &TermNode{ nil, node, nil, false }
-	}
-	funcTerm := func(symbol *Symbol, children ...*TermNode) *TermNode {
-		return &TermNode{ symbol, nil, children, false }
-	}
-	f := sym("f", 2)
-	x := varTerm(varNode("x"))
-	z := varTerm(varNode("z"))
-	expr1 := funcTerm(f, x, x)
-	expr2 := funcTerm(f, funcTerm(f, z, z), funcTerm(f, z, x))
-	root := NewTaggedTreeList(expr1).Append(expr2)
-	fmt.Println("digraph {")
-	root.PrintCyclicRoot("initial")
-	err := unify(root.Slice())
-	if err != nil {
-		fmt.Printf("Error: %+v\n", err)
-		os.Exit(1)
-	}
-	root.PrintCyclicRoot("unify")
-	expr1.Substitute()
-	expr2.Substitute()
-	root.PrintCyclicRoot("substitute")
-	fmt.Println("}")
-}
-
--}
+main = putStrLn $ runST $ do
+    counter <- newSTRef (0 :: Int)
+    let unique = do
+            modifySTRef' counter (+1)
+            readSTRef counter
+        varNode v = VarNode <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TTLEmpty <*> newSTRef 1
+        varTerm v = TermNode <$> unique <*> pure Nothing <*> (Just <$> varNode v) <*> MV.new 0 <*> newSTRef False
+        funcTerm sym children = TermNode <$> unique <*> pure (Just sym) <*> pure Nothing <*> V.thaw (V.fromList children) <*> newSTRef False
+    let f = Symbol "f" 2
+    x <- varTerm "x"
+    z <- varTerm "z"
+    expr1 <- funcTerm f [x, x]
+    expr2 <- funcTerm f =<< sequence [funcTerm f [z, z], funcTerm f [z, x]]
+    initial1 <- showSubgraph "initial1" expr1
+    initial2 <- showSubgraph "initial2" expr2
+    err <- unify $ V.fromList [expr1, expr2]
+    case err of
+        Just (t1, t2) -> do
+            term1 <- showSubgraph "term1" t1
+            term2 <- showSubgraph "term2" t2
+            return $ "ERROR Could not match:\ndigraph {" ++ term1 ++ term2 ++ "}"
+        Nothing -> do
+            unify1 <- showSubgraph "unify1" expr1
+            unify2 <- showSubgraph "unify2" expr2
+            substitute expr1
+            substitute expr2
+            substitute1 <- showSubgraph "substitute1" expr1
+            substitute2 <- showSubgraph "substitute2" expr2
+            return $ intercalate "\n" ["digraph {", initial1, initial2, unify1, unify2, substitute1, substitute2, "}"]
