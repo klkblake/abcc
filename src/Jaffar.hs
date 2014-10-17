@@ -27,10 +27,10 @@ import qualified TTList as TTL
 
 type ID = Int
 
-data Node = Node String ID String
+data DotNode = DotNode String ID String
 
-instance Show Node where
-    showsPrec _ (Node prefix ident label) = showString prefix . showChar '_' . showInt ident . showString " [label=\"" . showString label . showString "\"]"
+instance Show DotNode where
+    showsPrec _ (DotNode prefix ident label) = showString prefix . showChar '_' . showInt ident . showString " [label=\"" . showString label . showString "\"]"
 
 data Edge = Edge String ID ID String
 
@@ -42,7 +42,7 @@ instance Show Edge where
 class Graph g where
     type State g
     uniqueID :: g -> ID
-    toGraph :: String -> STRef (State g) IntSet -> g -> ST (State g) ([Node], [Edge])
+    toGraph :: String -> STRef (State g) IntSet -> g -> ST (State g) ([DotNode], [Edge])
 
 doIfUnseen :: STRef s IntSet -> ID -> a -> ST s a -> ST s (a)
 doIfUnseen seenRef ident x a = do
@@ -66,17 +66,17 @@ data Symbol = Symbol String Int
 instance Show Symbol where
     show (Symbol name arity) = name ++ '/':show arity
 
-data TermNode s = TermNode ID (Maybe Symbol) (Maybe (Var s)) (MVector s (TermNode s)) (STRef s Bool)
+data Node s = Node ID (Maybe Symbol) (Maybe (Var s)) (MVector s (Node s)) (STRef s Bool)
 
-instance Tagged (TermNode s) where
-    type Tag (TermNode s) = Sum Int
-    tag (TermNode _ _ (Just _) _ _) = Sum 0
-    tag (TermNode _ _ Nothing  _ _) = Sum 1
+instance Tagged (Node s) where
+    type Tag (Node s) = Sum Int
+    tag (Node _ _ (Just _) _ _) = Sum 0
+    tag (Node _ _ Nothing  _ _) = Sum 1
 
-instance Graph (TermNode s) where
-    type State (TermNode s) = s
-    uniqueID (TermNode ident _ _ _ _) = ident
-    toGraph prefix seenRef (TermNode ident sym var children doneRef) = doIfUnseen seenRef ident ([], []) $ do
+instance Graph (Node s) where
+    type State (Node s) = s
+    uniqueID (Node ident _ _ _ _) = ident
+    toGraph prefix seenRef (Node ident sym var children doneRef) = doIfUnseen seenRef ident ([], []) $ do
         let label = case var of
                         Just (Var _ sym' _ _ _) -> sym'
                         Nothing -> show $ fromJust sym
@@ -84,7 +84,7 @@ instance Graph (TermNode s) where
         let check = if done
                         then " ✓"
                         else ""
-            node = Node prefix ident $ label ++ check
+            node = DotNode prefix ident $ label ++ check
             edge = Edge prefix ident
         children' <- V.toList <$> V.freeze children
         let edges = zipWith (\c i -> edge (uniqueID c) $ '#':show i) children' [1 :: Int ..]
@@ -94,8 +94,8 @@ instance Graph (TermNode s) where
         (cns, ces) <- unzip <$> mapM (toGraph prefix seenRef) children'
         return (node:vns ++ concat cns, edges ++ ves ++ concat ces)
 
-substitute :: TermNode s -> ST s ()
-substitute (TermNode _ _ _ children doneRef) = do
+substitute :: Node s -> ST s ()
+substitute (Node _ _ _ children doneRef) = do
     done <- readSTRef doneRef
     if done
         then return ()
@@ -103,21 +103,21 @@ substitute (TermNode _ _ _ children doneRef) = do
             writeSTRef doneRef True
             V.sequence_ . V.imap go =<< V.freeze children
   where
-    go _ c@(TermNode _ _ Nothing _ _) = substitute c
-    go i (TermNode _ _ (Just var) _ _) = do
+    go _ c@(Node _ _ Nothing _ _) = substitute c
+    go i (Node _ _ (Just var) _ _) = do
         Var _ _ _ terms _ <- rep var
         ts <- TTL.toVector <$> readSTRef terms
         when (V.length ts /= 1) $ error "Attempted to substitute variable with multiple terms"
         MV.write children i $ ts V.! 0
 
-data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TTList (TermNode s))) (STRef s Int)
+data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TTList (Node s))) (STRef s Int)
 
 instance Graph (Var s) where
     type State (Var s) = s
     uniqueID (Var ident _ _ _ _) = ident
     toGraph prefix seenRef (Var ident sym repRef terms varCountRef) = doIfUnseen seenRef ident ([], []) $ do
         varCount <- readSTRef varCountRef
-        let node = Node prefix ident $ sym ++ " (" ++ show varCount ++ ")"
+        let node = DotNode prefix ident $ sym ++ " (" ++ show varCount ++ ")"
         rep' <- readSTRef repRef
         let edge = Edge prefix ident
         (rns, res) <- case rep' of
@@ -128,7 +128,7 @@ instance Graph (Var s) where
         (cns, ces) <- unzip <$> mapM (toGraph prefix seenRef) ts
         return (node:rns ++ concat cns, edges ++ res ++ concat ces)
 
-add :: Queue (Var s) -> Var s -> TermNode s -> ST s (Queue (Var s))
+add :: Queue (Var s) -> Var s -> Node s -> ST s (Queue (Var s))
 add queue v@(Var _ _ _ termsRef _) t = do
     ts <- readSTRef termsRef
     writeSTRef termsRef $ TTL.cons t ts
@@ -174,14 +174,14 @@ rep v = do
             Just r'' -> writeSTRef repRef (Just r) >> setRep r r''
             Nothing  -> return r
 
-commonFrontier :: Queue (Var s) -> Maybe (V.Vector (TermNode s), Int) -> V.Vector (TermNode s) -> ST s (Either (TermNode s, TermNode s) (Queue (Var s)))
+commonFrontier :: Queue (Var s) -> Maybe (V.Vector (Node s), Int) -> V.Vector (Node s) -> ST s (Either (Node s, Node s) (Queue (Var s)))
 commonFrontier queue parentsIndex t_list = do
-    let t@(TermNode _ (Just (Symbol _ arity)) _ _ _) = t_list V.! 0
+    let t@(Node _ (Just (Symbol _ arity)) _ _ _) = t_list V.! 0
     case checkEqual t t_list of
         Just err -> return $ Left err
         Nothing  -> foldM goChild (Right queue) [0 .. arity - 1]
   where
-    checkEqual t@(TermNode _ sym _ _ _) ts = let diffs = V.filter (\(TermNode _ sym' _ _ _) -> sym /= sym') ts
+    checkEqual t@(Node _ sym _ _ _) ts = let diffs = V.filter (\(Node _ sym' _ _ _) -> sym /= sym') ts
                                              in if V.null diffs
                                                     then Nothing
                                                     else Just (t, diffs V.! 0)
@@ -190,7 +190,7 @@ commonFrontier queue parentsIndex t_list = do
         t0_list <- ithChildren i
         case firstVar t0_list of
             Nothing -> commonFrontier queue' (Just (t_list, i)) t0_list
-            Just (j, (TermNode _ _ (Just varNode) _ _)) -> do
+            Just (j, (Node _ _ (Just varNode) _ _)) -> do
                 case parentsIndex of
                     Nothing -> return ()
                     Just (parents, index) -> swapChild parents index j
@@ -198,26 +198,26 @@ commonFrontier queue parentsIndex t_list = do
                 queue''  <- V.foldM (processVars j v) queue' $ V.indexed t0_list
                 queue''' <- V.foldM (processTerms  v) queue'' t0_list
                 return $ Right queue'''
-            Just _ -> error "firstVar returned a TermNode with no varNode"
-    ithChildren i = V.forM t_list $ \(TermNode _ _ _ children _) -> MV.read children i
-    firstVar ts = (V.!? 0) . V.filter (\(_, TermNode _ _ varNode _ _) -> isJust varNode) $ V.indexed ts
+            Just _ -> error "firstVar returned a Node with no varNode"
+    ithChildren i = V.forM t_list $ \(Node _ _ _ children _) -> MV.read children i
+    firstVar ts = (V.!? 0) . V.filter (\(_, Node _ _ varNode _ _) -> isJust varNode) $ V.indexed ts
     swapChild parents index j = do
-        let (TermNode _ _ _ child0 _) = parents V.! 0
-            (TermNode _ _ _ childj _) = parents V.! j
+        let (Node _ _ _ child0 _) = parents V.! 0
+            (Node _ _ _ childj _) = parents V.! j
         tmp <- MV.read child0 index
         MV.write child0 index =<< MV.read childj index
         MV.write childj index tmp
     processVars j _ queue' (k, _) | k == j = return queue'
-    processVars _ _ queue' (_, TermNode _ _ Nothing _ _) = return queue'
-    processVars _ v queue' (_, TermNode _ _ (Just varNode) _ _) = do
+    processVars _ _ queue' (_, Node _ _ Nothing _ _) = return queue'
+    processVars _ v queue' (_, Node _ _ (Just varNode) _ _) = do
         v2 <- rep varNode
         if uniqueID v /= uniqueID v2
             then merge queue' v v2
             else return queue'
-    processTerms _ queue' (TermNode _ _ (Just _) _ _) = return queue'
+    processTerms _ queue' (Node _ _ (Just _) _ _) = return queue'
     processTerms v queue' term = add queue' v term
 
-unify :: V.Vector (TermNode s) -> ST s (Maybe (TermNode s, TermNode s))
+unify :: V.Vector (Node s) -> ST s (Maybe (Node s, Node s))
 unify t_list = do
     res <- commonFrontier Q.empty Nothing t_list
     case res of
@@ -244,8 +244,8 @@ main = putStrLn $ runST $ do
             modifySTRef' counter (+1)
             readSTRef counter
         varNode v = Var <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TTL.empty <*> newSTRef 1
-        varTerm v = TermNode <$> unique <*> pure Nothing <*> (Just <$> varNode v) <*> MV.new 0 <*> newSTRef False
-        funcTerm sym children = TermNode <$> unique <*> pure (Just sym) <*> pure Nothing <*> V.thaw (V.fromList children) <*> newSTRef False
+        varTerm v = Node <$> unique <*> pure Nothing <*> (Just <$> varNode v) <*> MV.new 0 <*> newSTRef False
+        funcTerm sym children = Node <$> unique <*> pure (Just sym) <*> pure Nothing <*> V.thaw (V.fromList children) <*> newSTRef False
     let f = Symbol "f" 2
         unifyTerm x y = funcTerm (Symbol "unify" 2) [x, y]
         errorTerm x y = funcTerm (Symbol "Could not unify" 2) [x, y]
