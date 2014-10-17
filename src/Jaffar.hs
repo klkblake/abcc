@@ -66,7 +66,7 @@ data Symbol = Symbol String Int
 instance Show Symbol where
     show (Symbol name arity) = name ++ '/':show arity
 
-data TermNode s = TermNode ID (Maybe Symbol) (Maybe (VarNode s)) (MVector s (TermNode s)) (STRef s Bool)
+data TermNode s = TermNode ID (Maybe Symbol) (Maybe (Var s)) (MVector s (TermNode s)) (STRef s Bool)
 
 instance Tagged (TermNode s) where
     type Tag (TermNode s) = Sum Int
@@ -78,7 +78,7 @@ instance Graph (TermNode s) where
     uniqueID (TermNode ident _ _ _ _) = ident
     toGraph prefix seenRef (TermNode ident sym var children doneRef) = doIfUnseen seenRef ident ([], []) $ do
         let label = case var of
-                        Just (VarNode _ sym' _ _ _) -> sym'
+                        Just (Var _ sym' _ _ _) -> sym'
                         Nothing -> show $ fromJust sym
         done <- readSTRef doneRef
         let check = if done
@@ -105,17 +105,17 @@ substitute (TermNode _ _ _ children doneRef) = do
   where
     go _ c@(TermNode _ _ Nothing _ _) = substitute c
     go i (TermNode _ _ (Just var) _ _) = do
-        VarNode _ _ _ terms _ <- rep var
+        Var _ _ _ terms _ <- rep var
         ts <- TTL.toVector <$> readSTRef terms
         when (V.length ts /= 1) $ error "Attempted to substitute variable with multiple terms"
         MV.write children i $ ts V.! 0
 
-data VarNode s = VarNode ID String (STRef s (Maybe (VarNode s))) (STRef s (TTList (TermNode s))) (STRef s Int)
+data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TTList (TermNode s))) (STRef s Int)
 
-instance Graph (VarNode s) where
-    type State (VarNode s) = s
-    uniqueID (VarNode ident _ _ _ _) = ident
-    toGraph prefix seenRef (VarNode ident sym repRef terms varCountRef) = doIfUnseen seenRef ident ([], []) $ do
+instance Graph (Var s) where
+    type State (Var s) = s
+    uniqueID (Var ident _ _ _ _) = ident
+    toGraph prefix seenRef (Var ident sym repRef terms varCountRef) = doIfUnseen seenRef ident ([], []) $ do
         varCount <- readSTRef varCountRef
         let node = Node prefix ident $ sym ++ " (" ++ show varCount ++ ")"
         rep' <- readSTRef repRef
@@ -128,16 +128,16 @@ instance Graph (VarNode s) where
         (cns, ces) <- unzip <$> mapM (toGraph prefix seenRef) ts
         return (node:rns ++ concat cns, edges ++ res ++ concat ces)
 
-add :: Queue (VarNode s) -> VarNode s -> TermNode s -> ST s (Queue (VarNode s))
-add queue v@(VarNode _ _ _ termsRef _) t = do
+add :: Queue (Var s) -> Var s -> TermNode s -> ST s (Queue (Var s))
+add queue v@(Var _ _ _ termsRef _) t = do
     ts <- readSTRef termsRef
     writeSTRef termsRef $ TTL.cons t ts
     return $ if TTL.tag ts == 1
                  then Q.push queue v
                  else queue
 
-merge :: Queue (VarNode s) -> VarNode s -> VarNode s -> ST s (Queue (VarNode s))
-merge queue v1@(VarNode _ _ _ _ varCountRef1) v2@(VarNode _ _ repRef _ varCountRef2) = do
+merge :: Queue (Var s) -> Var s -> Var s -> ST s (Queue (Var s))
+merge queue v1@(Var _ _ _ _ varCountRef1) v2@(Var _ _ repRef _ varCountRef2) = do
     r1 <- readSTRef varCountRef1
     r2 <- readSTRef varCountRef2
     let vc = r1 + r2
@@ -145,7 +145,7 @@ merge queue v1@(VarNode _ _ _ _ varCountRef1) v2@(VarNode _ _ repRef _ varCountR
         then go vc v1 v2
         else go vc v2 v1
   where
-    go vc bigV@(VarNode _ _ _ bigTermsRef bigVarCountRef) (VarNode _ _ _ termsRef varCountRef) = do
+    go vc bigV@(Var _ _ _ bigTermsRef bigVarCountRef) (Var _ _ _ termsRef varCountRef) = do
         bigTerms <- readSTRef bigTermsRef
         terms    <- readSTRef termsRef
         let bigTerms' = bigTerms `TTL.concat` terms
@@ -158,23 +158,23 @@ merge queue v1@(VarNode _ _ _ _ varCountRef1) v2@(VarNode _ _ repRef _ varCountR
                      then Q.push queue bigV
                      else queue
 
-rep :: VarNode s -> ST s (VarNode s)
+rep :: Var s -> ST s (Var s)
 rep v = do
     r <- findRep v
     setRep r v
   where
-    findRep v'@(VarNode _ _ repRef _ _) = do
+    findRep v'@(Var _ _ repRef _ _) = do
         r <- readSTRef repRef
         case r of
             Just r' -> findRep r'
             Nothing -> return v'
-    setRep r (VarNode _ _ repRef _ _) = do
+    setRep r (Var _ _ repRef _ _) = do
         r' <- readSTRef repRef
         case r' of
             Just r'' -> writeSTRef repRef (Just r) >> setRep r r''
             Nothing  -> return r
 
-commonFrontier :: Queue (VarNode s) -> Maybe (V.Vector (TermNode s), Int) -> V.Vector (TermNode s) -> ST s (Either (TermNode s, TermNode s) (Queue (VarNode s)))
+commonFrontier :: Queue (Var s) -> Maybe (V.Vector (TermNode s), Int) -> V.Vector (TermNode s) -> ST s (Either (TermNode s, TermNode s) (Queue (Var s)))
 commonFrontier queue parentsIndex t_list = do
     let t@(TermNode _ (Just (Symbol _ arity)) _ _ _) = t_list V.! 0
     case checkEqual t t_list of
@@ -188,7 +188,7 @@ commonFrontier queue parentsIndex t_list = do
     goChild (Left err) _ = return $ Left err
     goChild (Right queue') i = do
         t0_list <- ithChildren i
-        case firstVarNode t0_list of
+        case firstVar t0_list of
             Nothing -> commonFrontier queue' (Just (t_list, i)) t0_list
             Just (j, (TermNode _ _ (Just varNode) _ _)) -> do
                 case parentsIndex of
@@ -198,9 +198,9 @@ commonFrontier queue parentsIndex t_list = do
                 queue''  <- V.foldM (processVars j v) queue' $ V.indexed t0_list
                 queue''' <- V.foldM (processTerms  v) queue'' t0_list
                 return $ Right queue'''
-            Just _ -> error "firstVarNode returned a TermNode with no varNode"
+            Just _ -> error "firstVar returned a TermNode with no varNode"
     ithChildren i = V.forM t_list $ \(TermNode _ _ _ children _) -> MV.read children i
-    firstVarNode ts = (V.!? 0) . V.filter (\(_, TermNode _ _ varNode _ _) -> isJust varNode) $ V.indexed ts
+    firstVar ts = (V.!? 0) . V.filter (\(_, TermNode _ _ varNode _ _) -> isJust varNode) $ V.indexed ts
     swapChild parents index j = do
         let (TermNode _ _ _ child0 _) = parents V.! 0
             (TermNode _ _ _ childj _) = parents V.! j
@@ -225,7 +225,7 @@ unify t_list = do
         Right queue -> go $ Q.pop queue
   where
     go Nothing = return Nothing
-    go (Just (VarNode _ _ _ termsRef _, queue')) = do
+    go (Just (Var _ _ _ termsRef _, queue')) = do
         terms <- readSTRef termsRef
         if TTL.tag terms < 2
             then go $ Q.pop queue'
@@ -243,7 +243,7 @@ main = putStrLn $ runST $ do
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-        varNode v = VarNode <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TTL.empty <*> newSTRef 1
+        varNode v = Var <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TTL.empty <*> newSTRef 1
         varTerm v = TermNode <$> unique <*> pure Nothing <*> (Just <$> varNode v) <*> MV.new 0 <*> newSTRef False
         funcTerm sym children = TermNode <$> unique <*> pure (Just sym) <*> pure Nothing <*> V.thaw (V.fromList children) <*> newSTRef False
     let f = Symbol "f" 2
