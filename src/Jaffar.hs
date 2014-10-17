@@ -10,67 +10,23 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
 import Data.Either
-import Data.IntSet (IntSet)
-import qualified Data.IntSet as IS
 import Data.List
 import Data.STRef
 import qualified Data.Vector as V
 import Data.Vector.Mutable (MVector)
 import qualified Data.Vector.Mutable as MV
-import Numeric
 
-import Queue (Queue)
-import qualified Queue as Q
+import Dot
 import TreeList (TreeList)
 import qualified TreeList as TL
-
-type ID = Int
-
-data DotNode = DotNode String ID String
-
-instance Show DotNode where
-    showsPrec _ (DotNode prefix ident label) = showString prefix . showChar '_' . showInt ident . showString " [label=\"" . showString label . showString "\"]"
-
-data Edge = Edge String ID ID String
-
-instance Show Edge where
-    showsPrec _ (Edge prefix from to label) = showID from . showString " -> " . showID to . showString " [label=\"" . showString label . showString "\"]"
-      where
-        showID ident = showString prefix . showChar '_' . showInt ident
-
-class Graph g where
-    type State g
-    uniqueID :: g -> ID
-    toGraph :: String -> STRef (State g) IntSet -> g -> ST (State g) ([DotNode], [Edge])
-
-doIfUnseen :: STRef s IntSet -> ID -> a -> ST s a -> ST s (a)
-doIfUnseen seenRef ident x a = do
-    seen <- readSTRef seenRef
-    if IS.member ident seen
-        then return x
-        else writeSTRef seenRef (IS.insert ident seen) >> a
-
-showSubgraph :: Graph g => String -> g -> ST (State g) String
-showSubgraph name g = do
-    seen <- newSTRef IS.empty
-    (nodes, edges) <- toGraph name seen g
-    return . showString "subgraph {\n" . showConcat nodes . showChar '\n' . showConcat edges . showString "\n}" $ ""
-  where
-    showConcat :: Show a => [a] -> ShowS
-    showConcat = foldr (.) id . intersperse (showChar '\n') . map shows
+import Queue (Queue)
+import qualified Queue as Q
 
 data Symbol = Symbol String Int
             deriving Eq
 
 instance Show Symbol where
     show (Symbol name arity) = name ++ '/':show arity
-
-instance (Graph a, Graph b, State a ~ State b) => Graph (Either a b) where
-    type State (Either a b) = State a
-    uniqueID (Left  x) = uniqueID x
-    uniqueID (Right y) = uniqueID y
-    toGraph prefix seenRef (Left  x) = toGraph prefix seenRef x
-    toGraph prefix seenRef (Right y) = toGraph prefix seenRef y
 
 data Term s = Term ID Symbol (MVector s (Either (Term s) (Var s))) (STRef s Bool)
 
@@ -82,7 +38,7 @@ instance Graph (Term s) where
         let check = if done
                         then " ✓"
                         else ""
-            node = DotNode prefix ident $ show sym ++ check
+            node = Node prefix ident $ show sym ++ check
             edge = Edge prefix ident
         children' <- V.toList <$> V.freeze children
         let edges = zipWith (\c i -> edge (uniqueID c) $ '#':show i) children' [1 :: Int ..]
@@ -112,7 +68,7 @@ instance Graph (Var s) where
     uniqueID (Var ident _ _ _ _) = ident
     toGraph prefix seenRef (Var ident sym repRef terms varCountRef) = doIfUnseen seenRef ident ([], []) $ do
         varCount <- readSTRef varCountRef
-        let node = DotNode prefix ident $ sym ++ " (" ++ show varCount ++ ")"
+        let node = Node prefix ident $ sym ++ " (" ++ show varCount ++ ")"
         rep' <- readSTRef repRef
         let edge = Edge prefix ident
         (rns, res) <- case rep' of
