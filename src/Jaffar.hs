@@ -22,8 +22,8 @@ import Numeric
 
 import Queue (Queue)
 import qualified Queue as Q
-import TTList (TTList, Tagged)
-import qualified TTList as TTL
+import TreeList (TreeList)
+import qualified TreeList as TL
 
 type ID = Int
 
@@ -69,16 +69,6 @@ instance Show Symbol where
 data Node s = Term' (Term s)
             | Var' (Var s)
 
-instance Tagged (Node s) where
-    type Tag (Node s) = Sum Int
-    tag (Term' _) = Sum 1
-    tag (Var' _) = Sum 0
-
--- I think the tag can be eliminated entirely
-instance Tagged (Term s) where
-    type Tag (Term s) = Sum Int
-    tag _ = Sum 1
-
 instance Graph (Node s) where
     type State (Node s) = s
     uniqueID (Term' term) = uniqueID term
@@ -115,11 +105,11 @@ substitute (Term _ _ children doneRef) = do
     go _ (Term' term) = substitute term
     go i (Var' var) = do
         Var _ _ _ terms _ <- rep var
-        ts <- TTL.toVector <$> readSTRef terms
+        ts <- TL.toVector <$> readSTRef terms
         when (V.length ts /= 1) $ error "Attempted to substitute variable with multiple terms"
         MV.write children i . Term' $ ts V.! 0
 
-data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TTList (Term s))) (STRef s Int)
+data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TreeList (Term s))) (STRef s Int)
 
 instance Graph (Var s) where
     type State (Var s) = s
@@ -132,7 +122,7 @@ instance Graph (Var s) where
         (rns, res) <- case rep' of
                           Just r -> (\(x, y) -> (x, edge (uniqueID r) "rep":y)) <$> toGraph prefix seenRef r
                           Nothing -> return ([], [])
-        ts <- V.toList . TTL.toVector <$> readSTRef terms
+        ts <- V.toList . TL.toVector <$> readSTRef terms
         let edges = zipWith (\c i -> edge (uniqueID c) $ '#':show i) ts [1 :: Int ..]
         (cns, ces) <- unzip <$> mapM (toGraph prefix seenRef) ts
         return (node:rns ++ concat cns, edges ++ res ++ concat ces)
@@ -140,8 +130,8 @@ instance Graph (Var s) where
 add :: Queue (Var s) -> Var s -> Term s -> ST s (Queue (Var s))
 add queue v@(Var _ _ _ termsRef _) t = do
     ts <- readSTRef termsRef
-    writeSTRef termsRef $ TTL.cons t ts
-    return $ if TTL.tag ts == 1
+    writeSTRef termsRef $ TL.cons t ts
+    return $ if TL.size ts == 1
                  then Q.push queue v
                  else queue
 
@@ -157,13 +147,13 @@ merge queue v1@(Var _ _ _ _ varCountRef1) v2@(Var _ _ repRef _ varCountRef2) = d
     go vc bigV@(Var _ _ _ bigTermsRef bigVarCountRef) (Var _ _ _ termsRef varCountRef) = do
         bigTerms <- readSTRef bigTermsRef
         terms    <- readSTRef termsRef
-        let bigTerms' = bigTerms `TTL.concat` terms
+        let bigTerms' = bigTerms `TL.concat` terms
         writeSTRef bigTermsRef bigTerms'
         writeSTRef repRef (Just bigV)
-        writeSTRef termsRef TTL.empty
+        writeSTRef termsRef TL.empty
         writeSTRef varCountRef 0
         writeSTRef bigVarCountRef vc
-        return $ if TTL.tag bigTerms <= 1 && TTL.tag bigTerms' >= 2
+        return $ if TL.size bigTerms <= 1 && TL.size bigTerms' >= 2
                      then Q.push queue bigV
                      else queue
 
@@ -235,11 +225,11 @@ unify t_list = do
     go Nothing = return Nothing
     go (Just (Var _ _ _ termsRef _, queue')) = do
         terms <- readSTRef termsRef
-        if TTL.tag terms < 2
+        if TL.size terms < 2
             then go $ Q.pop queue'
             else do
-                let t = TTL.toVector terms
-                writeSTRef termsRef . TTL.singleton $ t V.! 0
+                let t = TL.toVector terms
+                writeSTRef termsRef . TL.singleton $ t V.! 0
                 res <- commonFrontier queue' Nothing t
                 case res of
                     Left  err     -> return $ Just err
@@ -251,7 +241,7 @@ main = putStrLn $ runST $ do
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-        var v = Var <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TTL.empty <*> newSTRef 1
+        var v = Var <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef 1
         varNode v = Var' <$> var v
         term sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef False
         termNode sym children = Term' <$> term sym children
