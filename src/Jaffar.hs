@@ -9,10 +9,10 @@ module Main where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
+import Data.Either
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IS
 import Data.List
-import Data.Maybe
 import Data.Monoid
 import Data.STRef
 import qualified Data.Vector as V
@@ -66,19 +66,31 @@ data Symbol = Symbol String Int
 instance Show Symbol where
     show (Symbol name arity) = name ++ '/':show arity
 
-data Node s = Term ID Symbol (MVector s (Node s)) (STRef s Bool)
+data Node s = Term' (Term s)
             | Var' (Var s)
 
 instance Tagged (Node s) where
     type Tag (Node s) = Sum Int
-    tag (Term _ _ _ _) = Sum 1
+    tag (Term' _) = Sum 1
     tag (Var' _) = Sum 0
+
+-- I think the tag can be eliminated entirely
+instance Tagged (Term s) where
+    type Tag (Term s) = Sum Int
+    tag _ = Sum 1
 
 instance Graph (Node s) where
     type State (Node s) = s
+    uniqueID (Term' term) = uniqueID term
+    uniqueID (Var'  var)  = uniqueID var
+    toGraph prefix seenRef (Term' term) = toGraph prefix seenRef term
+    toGraph prefix seenRef (Var'  var)  = toGraph prefix seenRef var
+
+data Term s = Term ID Symbol (MVector s (Node s)) (STRef s Bool)
+
+instance Graph (Term s) where
+    type State (Term s) = s
     uniqueID (Term ident _ _ _) = ident
-    uniqueID (Var' var) = uniqueID var
-    toGraph prefix seenRef (Var' var) = toGraph prefix seenRef var
     toGraph prefix seenRef (Term ident sym children doneRef) = doIfUnseen seenRef ident ([], []) $ do
         done <- readSTRef doneRef
         let check = if done
@@ -91,8 +103,7 @@ instance Graph (Node s) where
         (cns, ces) <- unzip <$> mapM (toGraph prefix seenRef) children'
         return (node:concat cns, edges ++ concat ces)
 
-substitute :: Node s -> ST s ()
-substitute (Var' _) = error "Called substitute on var"
+substitute :: Term s -> ST s ()
 substitute (Term _ _ children doneRef) = do
     done <- readSTRef doneRef
     if done
@@ -101,14 +112,14 @@ substitute (Term _ _ children doneRef) = do
             writeSTRef doneRef True
             V.sequence_ . V.imap go =<< V.freeze children
   where
-    go _ c@(Term _ _ _ _) = substitute c
+    go _ (Term' term) = substitute term
     go i (Var' var) = do
         Var _ _ _ terms _ <- rep var
         ts <- TTL.toVector <$> readSTRef terms
         when (V.length ts /= 1) $ error "Attempted to substitute variable with multiple terms"
-        MV.write children i $ ts V.! 0
+        MV.write children i . Term' $ ts V.! 0
 
-data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TTList (Node s))) (STRef s Int)
+data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TTList (Term s))) (STRef s Int)
 
 instance Graph (Var s) where
     type State (Var s) = s
@@ -126,7 +137,7 @@ instance Graph (Var s) where
         (cns, ces) <- unzip <$> mapM (toGraph prefix seenRef) ts
         return (node:rns ++ concat cns, edges ++ res ++ concat ces)
 
-add :: Queue (Var s) -> Var s -> Node s -> ST s (Queue (Var s))
+add :: Queue (Var s) -> Var s -> Term s -> ST s (Queue (Var s))
 add queue v@(Var _ _ _ termsRef _) t = do
     ts <- readSTRef termsRef
     writeSTRef termsRef $ TTL.cons t ts
@@ -172,14 +183,13 @@ rep v = do
             Just r'' -> writeSTRef repRef (Just r) >> setRep r r''
             Nothing  -> return r
 
-commonFrontier :: Queue (Var s) -> Maybe (V.Vector (Node s), Int) -> V.Vector (Node s) -> ST s (Either (Node s, Node s) (Queue (Var s)))
+commonFrontier :: Queue (Var s) -> Maybe (V.Vector (Term s), Int) -> V.Vector (Term s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
 commonFrontier queue parentsIndex t_list = do
     let t@(Term _ (Symbol _ arity) _ _) = t_list V.! 0
     case checkEqual t t_list of
         Just err -> return $ Left err
         Nothing  -> foldM goChild (Right queue) [0 .. arity - 1]
   where
-    checkEqual (Var' _) _ = error "Var passed to commonFrontier"
     checkEqual t@(Term _ sym _ _) ts =
         let diffs = V.filter (\(Term _ sym' _ _) -> sym /= sym') ts
         in if V.null diffs
@@ -188,37 +198,34 @@ commonFrontier queue parentsIndex t_list = do
     goChild (Left err) _ = return $ Left err
     goChild (Right queue') i = do
         t0_list <- ithChildren i
-        case firstVar t0_list of
-            Nothing -> commonFrontier queue' (Just (t_list, i)) t0_list
-            Just (j, var) -> do
+        case splitNodes t0_list of
+            (terms, []) -> commonFrontier queue' (Just (t_list, i)) . V.fromList $ terms
+            (terms, (j, var):vars) -> do
                 case parentsIndex of
                     Nothing -> return ()
                     Just (parents, index) -> swapChild parents index j
                 v <- rep var
-                queue''  <- V.foldM (processVars j v) queue' $ V.indexed t0_list
-                queue''' <- V.foldM (processTerms  v) queue'' t0_list
+                queue''  <- foldM (processVars  v) queue' $ map snd vars
+                queue''' <- foldM (processTerms v) queue'' terms
                 return $ Right queue'''
     ithChildren i = V.forM t_list $ \(Term _ _ children _) -> MV.read children i
-    firstVar ts = listToMaybe . catMaybes . map toVar . zip [0 :: Int ..] $ V.toList ts
-    toVar (_, (Term _ _ _ _)) = Nothing
-    toVar (i, (Var' var)) = Just (i, var)
+    splitNodes ts = partitionEithers . map toEither . zip [0 :: Int ..] $ V.toList ts
+    toEither (_, (Term' term)) = Left  term
+    toEither (i, (Var'  var))  = Right (i, var)
     swapChild parents index j = do
         let (Term _ _ child0 _) = parents V.! 0
             (Term _ _ childj _) = parents V.! j
         tmp <- MV.read child0 index
         MV.write child0 index =<< MV.read childj index
         MV.write childj index tmp
-    processVars j _ queue' (k, _) | k == j = return queue'
-    processVars _ _ queue' (_, Term _ _ _ _) = return queue'
-    processVars _ v queue' (_, Var' var) = do
+    processVars v queue' var = do
         v2 <- rep var
         if uniqueID v /= uniqueID v2
             then merge queue' v v2
             else return queue'
-    processTerms _ queue' (Var' _) = return queue'
     processTerms v queue' term = add queue' v term
 
-unify :: V.Vector (Node s) -> ST s (Maybe (Node s, Node s))
+unify :: V.Vector (Term s) -> ST s (Maybe (Term s, Term s))
 unify t_list = do
     res <- commonFrontier Q.empty Nothing t_list
     case res of
@@ -244,16 +251,17 @@ main = putStrLn $ runST $ do
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-        varNode v = Var <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TTL.empty <*> newSTRef 1
-        varTerm v = Var' <$> varNode v
-        funcTerm sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef False
+        var v = Var <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TTL.empty <*> newSTRef 1
+        varNode v = Var' <$> var v
+        term sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef False
+        termNode sym children = Term' <$> term sym children
     let f = Symbol "f" 2
-        unifyTerm x y = funcTerm (Symbol "unify" 2) [x, y]
-        errorTerm x y = funcTerm (Symbol "Could not unify" 2) [x, y]
-    x <- varTerm "x"
-    z <- varTerm "z"
-    expr1 <- funcTerm f [x, x]
-    expr2 <- funcTerm f =<< sequence [funcTerm f [z, z], funcTerm f [z, x]]
+        unifyTerm x y = term (Symbol "unify" 2) [Term' x, Term' y]
+        errorTerm x y = term (Symbol "Could not unify" 2) [Term' x, Term' y]
+    x <- varNode "x"
+    z <- varNode "z"
+    expr1 <- term f [x, x]
+    expr2 <- term f =<< sequence [termNode f [z, z], termNode f [z, x]]
     g1 <- showSubgraph "initial" =<< unifyTerm expr1 expr2
     err <- unify $ V.fromList [expr1, expr2]
     case err of
