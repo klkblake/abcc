@@ -13,7 +13,6 @@ import Data.Either
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IS
 import Data.List
-import Data.Monoid
 import Data.STRef
 import qualified Data.Vector as V
 import Data.Vector.Mutable (MVector)
@@ -66,17 +65,14 @@ data Symbol = Symbol String Int
 instance Show Symbol where
     show (Symbol name arity) = name ++ '/':show arity
 
-data Node s = Term' (Term s)
-            | Var' (Var s)
+instance (Graph a, Graph b, State a ~ State b) => Graph (Either a b) where
+    type State (Either a b) = State a
+    uniqueID (Left  x) = uniqueID x
+    uniqueID (Right y) = uniqueID y
+    toGraph prefix seenRef (Left  x) = toGraph prefix seenRef x
+    toGraph prefix seenRef (Right y) = toGraph prefix seenRef y
 
-instance Graph (Node s) where
-    type State (Node s) = s
-    uniqueID (Term' term) = uniqueID term
-    uniqueID (Var'  var)  = uniqueID var
-    toGraph prefix seenRef (Term' term) = toGraph prefix seenRef term
-    toGraph prefix seenRef (Var'  var)  = toGraph prefix seenRef var
-
-data Term s = Term ID Symbol (MVector s (Node s)) (STRef s Bool)
+data Term s = Term ID Symbol (MVector s (Either (Term s) (Var s))) (STRef s Bool)
 
 instance Graph (Term s) where
     type State (Term s) = s
@@ -102,12 +98,12 @@ substitute (Term _ _ children doneRef) = do
             writeSTRef doneRef True
             V.sequence_ . V.imap go =<< V.freeze children
   where
-    go _ (Term' term) = substitute term
-    go i (Var' var) = do
+    go _ (Left term) = substitute term
+    go i (Right var) = do
         Var _ _ _ terms _ <- rep var
         ts <- TL.toVector <$> readSTRef terms
         when (V.length ts /= 1) $ error "Attempted to substitute variable with multiple terms"
-        MV.write children i . Term' $ ts V.! 0
+        MV.write children i . Left $ ts V.! 0
 
 data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TreeList (Term s))) (STRef s Int)
 
@@ -200,8 +196,8 @@ commonFrontier queue parentsIndex t_list = do
                 return $ Right queue'''
     ithChildren i = V.forM t_list $ \(Term _ _ children _) -> MV.read children i
     splitNodes ts = partitionEithers . map toEither . zip [0 :: Int ..] $ V.toList ts
-    toEither (_, (Term' term)) = Left  term
-    toEither (i, (Var'  var))  = Right (i, var)
+    toEither (_, (Left  term)) = Left  term
+    toEither (i, (Right var))  = Right (i, var)
     swapChild parents index j = do
         let (Term _ _ child0 _) = parents V.! 0
             (Term _ _ childj _) = parents V.! j
@@ -242,12 +238,12 @@ main = putStrLn $ runST $ do
             modifySTRef' counter (+1)
             readSTRef counter
         var v = Var <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef 1
-        varNode v = Var' <$> var v
+        varNode v = Right <$> var v
         term sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef False
-        termNode sym children = Term' <$> term sym children
+        termNode sym children = Left <$> term sym children
     let f = Symbol "f" 2
-        unifyTerm x y = term (Symbol "unify" 2) [Term' x, Term' y]
-        errorTerm x y = term (Symbol "Could not unify" 2) [Term' x, Term' y]
+        unifyTerm x y = term (Symbol "unify" 2) [Left x, Left y]
+        errorTerm x y = term (Symbol "Could not unify" 2) [Left x, Left y]
     x <- varNode "x"
     z <- varNode "z"
     expr1 <- term f [x, x]
