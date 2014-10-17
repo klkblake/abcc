@@ -24,7 +24,7 @@ empty :: TreeList a
 empty = Empty
 
 singleton :: a -> TreeList a
-singleton x = Leaf x
+singleton = Leaf
 
 size :: TreeList a -> Int
 size (Node _ _ s) = s

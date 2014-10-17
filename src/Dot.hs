@@ -41,7 +41,7 @@ instance (Graph a, Graph b, State a ~ State b) => Graph (Either a b) where
     toGraph prefix seenRef (Left  x) = toGraph prefix seenRef x
     toGraph prefix seenRef (Right y) = toGraph prefix seenRef y
 
-doIfUnseen :: STRef s IntSet -> ID -> a -> ST s a -> ST s (a)
+doIfUnseen :: STRef s IntSet -> ID -> a -> ST s a -> ST s a
 doIfUnseen seenRef ident x a = do
     seen <- readSTRef seenRef
     if IS.member ident seen

@@ -7,6 +7,7 @@ module Main where
 -- this time complexity!
 
 import Control.Applicative
+import Control.Arrow (second)
 import Control.Monad
 import Control.Monad.ST
 import Data.Either
@@ -48,11 +49,9 @@ instance Graph (Term s) where
 substitute :: Term s -> ST s ()
 substitute (Term _ _ children doneRef) = do
     done <- readSTRef doneRef
-    if done
-        then return ()
-        else do
-            writeSTRef doneRef True
-            V.sequence_ . V.imap go =<< V.freeze children
+    unless done $ do
+        writeSTRef doneRef True
+        V.sequence_ . V.imap go =<< V.freeze children
   where
     go _ (Left term) = substitute term
     go i (Right var) = do
@@ -72,7 +71,7 @@ instance Graph (Var s) where
         rep' <- readSTRef repRef
         let edge = Edge prefix ident
         (rns, res) <- case rep' of
-                          Just r -> (\(x, y) -> (x, edge (uniqueID r) "rep":y)) <$> toGraph prefix seenRef r
+                          Just r -> second (edge (uniqueID r) "rep":) <$> toGraph prefix seenRef r
                           Nothing -> return ([], [])
         ts <- V.toList . TL.toVector <$> readSTRef terms
         let edges = zipWith (\c i -> edge (uniqueID c) $ '#':show i) ts [1 :: Int ..]
@@ -151,9 +150,9 @@ commonFrontier queue parentsIndex t_list = do
                 queue''' <- foldM (processTerms v) queue'' terms
                 return $ Right queue'''
     ithChildren i = V.forM t_list $ \(Term _ _ children _) -> MV.read children i
-    splitNodes ts = partitionEithers . map toEither . zip [0 :: Int ..] $ V.toList ts
-    toEither (_, (Left  term)) = Left  term
-    toEither (i, (Right var))  = Right (i, var)
+    splitNodes ts = partitionEithers . zipWith toEither [0 :: Int ..] $ V.toList ts
+    toEither _ (Left  term) = Left  term
+    toEither i (Right var)  = Right (i, var)
     swapChild parents index j = do
         let (Term _ _ child0 _) = parents V.! 0
             (Term _ _ childj _) = parents V.! j
@@ -165,7 +164,7 @@ commonFrontier queue parentsIndex t_list = do
         if uniqueID v /= uniqueID v2
             then merge queue' v v2
             else return queue'
-    processTerms v queue' term = add queue' v term
+    processTerms v queue' = add queue' v
 
 unify :: V.Vector (Term s) -> ST s (Maybe (Term s, Term s))
 unify t_list = do
