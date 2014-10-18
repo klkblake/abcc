@@ -34,15 +34,16 @@ data Term s = Term ID Symbol (MVector s (Either (Term s) (Var s))) (STRef s Bool
 instance Graph (Term s) where
     type State (Term s) = s
     uniqueID (Term ident _ _ _) = ident
-    toGraph prefix seenRef (Term ident sym children doneRef) = doIfUnseen seenRef ident ([], []) $ do
+    nodeLabel (Term _ sym _ doneRef) = do
         done <- readSTRef doneRef
-        let check = if done
-                        then " ✓"
-                        else ""
-            node = Node prefix ident $ show sym ++ check
-            edge = Edge prefix ident
+        return $ show sym ++ if done then " ✓" else ""
+    labelledChildren (Term _ _ children _) = zip (map (('#':) . show) [1 :: Int ..]) . map AnyGraph . V.toList <$> V.freeze children
+    toGraph prefix seenRef t@(Term ident _ children _) = doIfUnseen seenRef ident ([], []) $ do
+        label <- nodeLabel t
+        let node = Node prefix ident label
+            edge (l, AnyGraph c) = Edge prefix ident (uniqueID c) l
         children' <- V.toList <$> V.freeze children
-        let edges = zipWith (\c i -> edge (uniqueID c) $ '#':show i) children' [1 :: Int ..]
+        edges <- map edge <$> labelledChildren t
         (cns, ces) <- unzip <$> mapM (toGraph prefix seenRef) children'
         return (node:concat cns, edges ++ concat ces)
 
@@ -65,9 +66,18 @@ data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TreeList (Term s)
 instance Graph (Var s) where
     type State (Var s) = s
     uniqueID (Var ident _ _ _ _) = ident
-    toGraph prefix seenRef (Var ident sym repRef terms varCountRef) = doIfUnseen seenRef ident ([], []) $ do
+    nodeLabel (Var _ sym _ _ varCountRef) = do
         varCount <- readSTRef varCountRef
-        let node = Node prefix ident $ sym ++ " (" ++ show varCount ++ ")"
+        return $ sym ++ " (" ++ show varCount ++ ")"
+    labelledChildren (Var _ _ repRef terms _) = do
+        rep' <- readSTRef repRef
+        let repEdge = case rep' of
+                          Just r -> [("rep", AnyGraph r)]
+                          Nothing -> []
+        (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map AnyGraph . V.toList . TL.toVector <$> readSTRef terms
+    toGraph prefix seenRef v@(Var ident _ repRef terms _) = doIfUnseen seenRef ident ([], []) $ do
+        label <- nodeLabel v
+        let node = Node prefix ident label
         rep' <- readSTRef repRef
         let edge = Edge prefix ident
         (rns, res) <- case rep' of

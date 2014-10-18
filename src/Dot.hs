@@ -1,9 +1,10 @@
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilies, ExistentialQuantification #-}
 module Dot
     ( ID
     , Node (..)
     , Edge (..)
     , Graph (..)
+    , AnyGraph (..)
     , doIfUnseen
     , showSubgraph
     ) where
@@ -32,14 +33,22 @@ instance Show Edge where
 class Graph g where
     type State g
     uniqueID :: g -> ID
+    nodeLabel :: g -> ST (State g) String
+    labelledChildren :: g -> ST (State g) [(String, AnyGraph)]
     toGraph :: String -> STRef (State g) IntSet -> g -> ST (State g) ([Node], [Edge])
 
 instance (Graph a, Graph b, State a ~ State b) => Graph (Either a b) where
     type State (Either a b) = State a
     uniqueID (Left  x) = uniqueID x
     uniqueID (Right y) = uniqueID y
+    nodeLabel (Left  x) = nodeLabel x
+    nodeLabel (Right y) = nodeLabel y
+    labelledChildren (Left  x) = labelledChildren x
+    labelledChildren (Right y) = labelledChildren y
     toGraph prefix seenRef (Left  x) = toGraph prefix seenRef x
     toGraph prefix seenRef (Right y) = toGraph prefix seenRef y
+
+data AnyGraph = forall g. Graph g => AnyGraph g
 
 doIfUnseen :: STRef s IntSet -> ID -> a -> ST s a -> ST s a
 doIfUnseen seenRef ident x a = do
