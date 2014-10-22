@@ -7,7 +7,6 @@ module Main where
 -- this time complexity!
 
 import Control.Applicative
-import Control.Arrow (second)
 import Control.Monad
 import Control.Monad.ST
 import Data.Either
@@ -33,19 +32,12 @@ data Term s = Term ID Symbol (MVector s (Either (Term s) (Var s))) (STRef s Bool
 
 instance Graph (Term s) where
     type State (Term s) = s
-    uniqueID (Term ident _ _ _) = ident
-    nodeLabel (Term _ sym _ doneRef) = do
-        done <- readSTRef doneRef
-        return $ show sym ++ if done then " ✓" else ""
-    labelledChildren (Term _ _ children _) = zip (map (('#':) . show) [1 :: Int ..]) . map AnyGraph . V.toList <$> V.freeze children
-    toGraph prefix seenRef t@(Term ident _ children _) = doIfUnseen seenRef ident ([], []) $ do
-        label <- nodeLabel t
-        let node = Node prefix ident label
-            edge (l, AnyGraph c) = Edge prefix ident (uniqueID c) l
-        children' <- V.toList <$> V.freeze children
-        edges <- map edge <$> labelledChildren t
-        (cns, ces) <- unzip <$> mapM (toGraph prefix seenRef) children'
-        return (node:concat cns, edges ++ concat ces)
+    toNode (Term ident sym children doneRef) = Node ident label labelledChildren
+      where
+        label = do
+            done <- readSTRef doneRef
+            return $ show sym ++ if done then " ✓" else ""
+        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> V.freeze children
 
 substitute :: Term s -> ST s ()
 substitute (Term _ _ children doneRef) = do
@@ -65,28 +57,17 @@ data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TreeList (Term s)
 
 instance Graph (Var s) where
     type State (Var s) = s
-    uniqueID (Var ident _ _ _ _) = ident
-    nodeLabel (Var _ sym _ _ varCountRef) = do
-        varCount <- readSTRef varCountRef
-        return $ sym ++ " (" ++ show varCount ++ ")"
-    labelledChildren (Var _ _ repRef terms _) = do
-        rep' <- readSTRef repRef
-        let repEdge = case rep' of
-                          Just r -> [("rep", AnyGraph r)]
-                          Nothing -> []
-        (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map AnyGraph . V.toList . TL.toVector <$> readSTRef terms
-    toGraph prefix seenRef v@(Var ident _ repRef terms _) = doIfUnseen seenRef ident ([], []) $ do
-        label <- nodeLabel v
-        let node = Node prefix ident label
-        rep' <- readSTRef repRef
-        let edge = Edge prefix ident
-        (rns, res) <- case rep' of
-                          Just r -> second (edge (uniqueID r) "rep":) <$> toGraph prefix seenRef r
-                          Nothing -> return ([], [])
-        ts <- V.toList . TL.toVector <$> readSTRef terms
-        let edges = zipWith (\c i -> edge (uniqueID c) $ '#':show i) ts [1 :: Int ..]
-        (cns, ces) <- unzip <$> mapM (toGraph prefix seenRef) ts
-        return (node:rns ++ concat cns, edges ++ res ++ concat ces)
+    toNode (Var ident sym repRef terms varCountRef) = Node ident label labelledChildren
+      where
+        label = do
+            varCount <- readSTRef varCountRef
+            return $ sym ++ " (" ++ show varCount ++ ")"
+        labelledChildren = do
+            rep' <- readSTRef repRef
+            let repEdge = case rep' of
+                              Just r -> [("rep", toNode r)]
+                              Nothing -> []
+            (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList . TL.toVector <$> readSTRef terms
 
 add :: Queue (Var s) -> Var s -> Term s -> ST s (Queue (Var s))
 add queue v@(Var _ _ _ termsRef _) t = do
@@ -169,9 +150,9 @@ commonFrontier queue parentsIndex t_list = do
         tmp <- MV.read child0 index
         MV.write child0 index =<< MV.read childj index
         MV.write childj index tmp
-    processVars v queue' var = do
-        v2 <- rep var
-        if uniqueID v /= uniqueID v2
+    processVars v@(Var ident _ _ _ _) queue' var = do
+        v2@(Var ident2 _ _ _ _) <- rep var
+        if ident /= ident2
             then merge queue' v v2
             else return queue'
     processTerms v queue' = add queue' v
