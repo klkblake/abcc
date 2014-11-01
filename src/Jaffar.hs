@@ -22,11 +22,41 @@ import qualified TreeList as TL
 import Queue (Queue)
 import qualified Queue as Q
 
-data Symbol = Symbol String Int
+data Symbol = Product
+            | Sum
+            | Block
+            | Num
+            | Unit
+            | Void
+            | Sealed String
+            | Attribs
+            | Or
+            | Attrib Bool
             deriving Eq
 
 instance Show Symbol where
-    show (Symbol name arity) = name ++ '/':show arity
+    show Product       = "*"
+    show Sum           = "+"
+    show Block         = "[ -> ]"
+    show Num           = "N"
+    show Unit          = "1"
+    show Void          = "0"
+    show (Sealed seal) = '{' : seal ++ "}"
+    show Attribs       = "tkf"
+    show Or            = "∨"
+    show (Attrib attr) = show attr
+
+arity :: Symbol -> Int
+arity Product    = 2
+arity Sum        = 2
+arity Block      = 2
+arity Num        = 0
+arity Unit       = 0
+arity Void       = 0
+arity (Sealed _) = 1
+arity Attribs    = 3
+arity Or         = 2
+arity (Attrib _) = 0
 
 data Term s = Term ID Symbol (MVector s (Either (Term s) (Var s))) (STRef s Bool)
 
@@ -117,10 +147,10 @@ rep v = do
 
 commonFrontier :: Queue (Var s) -> Maybe (V.Vector (Term s), Int) -> V.Vector (Term s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
 commonFrontier queue parentsIndex t_list = do
-    let t@(Term _ (Symbol _ arity) _ _) = t_list V.! 0
+    let t@(Term _ sym _ _) = t_list V.! 0
     case checkEqual t t_list of
         Just err -> return $ Left err
-        Nothing  -> foldM goChild (Right queue) [0 .. arity - 1]
+        Nothing  -> foldM goChild (Right queue) [0 .. arity sym - 1]
   where
     checkEqual t@(Term _ sym _ _) ts =
         let diffs = V.filter (\(Term _ sym' _ _) -> sym /= sym') ts
@@ -187,13 +217,12 @@ main = putStrLn $ runST $ do
         varNode v = Right <$> var v
         term sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef False
         termNode sym children = Left <$> term sym children
-    let f = Symbol "f" 2
-        unifyTerm x y = term (Symbol "unify" 2) [Left x, Left y]
-        errorTerm x y = term (Symbol "Could not unify" 2) [Left x, Left y]
+    let unifyTerm x y = term (Sealed "unify") [Left x, Left y]
+        errorTerm x y = term (Sealed "Could not unify") [Left x, Left y]
     x <- varNode "x"
     z <- varNode "z"
-    expr1 <- term f [x, x]
-    expr2 <- term f =<< sequence [termNode f [z, z], termNode f [z, x]]
+    expr1 <- term Product [x, x]
+    expr2 <- term Product =<< sequence [termNode Product [z, z], termNode Product [z, x]]
     g1 <- showSubgraph "initial" =<< unifyTerm expr1 expr2
     err <- unify $ V.fromList [expr1, expr2]
     case err of
