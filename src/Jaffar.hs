@@ -69,8 +69,8 @@ instance Graph (Term s) where
             return $ show sym ++ if done then " ✓" else ""
         labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> V.freeze children
 
-mkTerm :: ID -> Symbol -> [Either (Term s) (Var s)] -> ST s (Term s)
-mkTerm ident sym children = Term ident sym <$> V.thaw (V.fromList children) <*> newSTRef False
+mkTerm :: ST s ID -> Symbol -> [Either (Term s) (Var s)] -> ST s (Term s)
+mkTerm unique sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef False
 
 substitute :: Term s -> ST s ()
 substitute (Term _ _ children doneRef) = do
@@ -102,8 +102,8 @@ instance Graph (Var s) where
                               Nothing -> []
             (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList . TL.toVector <$> readSTRef terms
 
-mkVar :: ID -> String -> ST s (Var s)
-mkVar ident v = Var ident v <$> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef 1
+mkVar :: ST s ID -> String -> ST s (Var s)
+mkVar unique v = Var <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef 1
 
 add :: Queue (Var s) -> Var s -> Term s -> ST s (Queue (Var s))
 add queue v@(Var _ _ _ termsRef _) t = do
@@ -213,22 +213,48 @@ unify t_list = do
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
 
+mkAttribTerm :: ST s ID -> Symbol -> [Term s] -> ST s (Term s)
+mkAttribTerm unique sym children = do
+    t <- mkTerm' sym children
+    ks <- mapM getRelevant children
+    fs <- mapM getAffine   children
+    false <- Left <$> mkTerm' (Attrib False) []
+    k  <- foldM mkOr false ks
+    f  <- foldM mkOr false fs
+    mkTerm unique Attribs [Left t, k, f]
+  where
+    mkTerm' sym' children' = mkTerm unique sym' $ map Left children'
+    getRelevant (Term _ _ cs _) = MV.read cs 1
+    getAffine   (Term _ _ cs _) = MV.read cs 2
+    mkOr a@(Left (Term _ (Attrib True) _ _)) _ = return a
+    mkOr _ b@(Left (Term _ (Attrib True) _ _)) = return b
+    mkOr (Left (Term _ (Attrib False) _ _)) b  = return b
+    mkOr a (Left (Term _ (Attrib False) _ _))  = return a
+    mkOr a@(Left (Term ident _ _ _)) (Left (Term ident' _ _ _)) | ident == ident'  = return a
+    mkOr a@(Right (Var ident _ _ _ _)) (Right (Var ident' _ _ _ _)) | ident == ident'  = return a
+    mkOr a b = Left <$> mkTerm unique Or [a, b]
+
+mkAttribVar :: ST s ID -> String -> ST s (Term s)
+mkAttribVar unique name = do
+    v <- mkVar unique name
+    k <- mkVar unique $ name ++ "_k"
+    f <- mkVar unique $ name ++ "_f"
+    mkTerm unique Attribs $ map Right [v, k, f]
+
 main :: IO ()
 main = putStrLn $ runST $ do
     counter <- newSTRef (0 :: Int)
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-        var v = unique >>= \ident -> mkVar ident v
-        varNode v = Right <$> var v
-        term sym children = unique >>= \ident -> mkTerm ident sym children
-        termNode sym children = Left <$> term sym children
-    let unifyTerm x y = term (Sealed "unify") [Left x, Left y]
-        errorTerm x y = term (Sealed "Could not unify") [Left x, Left y]
+        varNode v = mkAttribVar unique v
+        term sym children = mkAttribTerm unique sym children
+    let unifyTerm x y = mkTerm unique (Sealed "unify") [Left x, Left y]
+        errorTerm x y = mkTerm unique (Sealed "Could not unify") [Left x, Left y]
     x <- varNode "x"
     z <- varNode "z"
     expr1 <- term Product [x, x]
-    expr2 <- term Product =<< sequence [termNode Product [z, z], termNode Product [z, x]]
+    expr2 <- term Product =<< sequence [term Product [z, z], term Product [z, x]]
     g1 <- showSubgraph "initial" =<< unifyTerm expr1 expr2
     err <- unify $ V.fromList [expr1, expr2]
     case err of
