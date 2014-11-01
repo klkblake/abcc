@@ -3,5 +3,5 @@ process() {
 	tr -d ' \n' | sed 's/\(.\)/\1\n/g'
 }
 
-diff --minimal -u1000000 <(ao abcRaw "$@" | process) <(ao abc "$@" | process) | tail -n+4 | sed 's/-\(.\)/[31m\1[0m/' | sed 's/+\(.\)/[32m\1[0m/' | tr -d ' \n'
+diff --minimal -u1000000 <(ao abc.raw "$@" | process) <(ao abc "$@" | process) | tail -n+4 | sed 's/-\(.\)/[31m\1[0m/' | sed 's/+\(.\)/[32m\1[0m/' | tr -d ' \n'
 echo
