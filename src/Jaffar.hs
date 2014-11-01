@@ -69,6 +69,9 @@ instance Graph (Term s) where
             return $ show sym ++ if done then " ✓" else ""
         labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> V.freeze children
 
+mkTerm :: ID -> Symbol -> [Either (Term s) (Var s)] -> ST s (Term s)
+mkTerm ident sym children = Term ident sym <$> V.thaw (V.fromList children) <*> newSTRef False
+
 substitute :: Term s -> ST s ()
 substitute (Term _ _ children doneRef) = do
     done <- readSTRef doneRef
@@ -98,6 +101,9 @@ instance Graph (Var s) where
                               Just r -> [("rep", toNode r)]
                               Nothing -> []
             (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList . TL.toVector <$> readSTRef terms
+
+mkVar :: ID -> String -> ST s (Var s)
+mkVar ident v = Var ident v <$> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef 1
 
 add :: Queue (Var s) -> Var s -> Term s -> ST s (Queue (Var s))
 add queue v@(Var _ _ _ termsRef _) t = do
@@ -213,9 +219,9 @@ main = putStrLn $ runST $ do
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-        var v = Var <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef 1
+        var v = unique >>= \ident -> mkVar ident v
         varNode v = Right <$> var v
-        term sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef False
+        term sym children = unique >>= \ident -> mkTerm ident sym children
         termNode sym children = Left <$> term sym children
     let unifyTerm x y = term (Sealed "unify") [Left x, Left y]
         errorTerm x y = term (Sealed "Could not unify") [Left x, Left y]
