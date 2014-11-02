@@ -58,7 +58,7 @@ arity Attribs    = 3
 arity Or         = 2
 arity (Attrib _) = 0
 
-data Term s = Term ID Symbol (MVector s (Either (Term s) (Var s))) (STRef s Bool)
+data Term s = Term ID Symbol (MVector s (Either (RTerm s) (Var s))) (STRef s Bool)
 
 instance Graph (Term s) where
     type State (Term s) = s
@@ -67,26 +67,45 @@ instance Graph (Term s) where
         label = do
             done <- readSTRef doneRef
             return $ show sym ++ if done then " ✓" else ""
-        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> V.freeze children
+        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> (V.mapM fromRTermE =<< V.freeze children)
 
-mkTerm :: ST s ID -> Symbol -> [Either (Term s) (Var s)] -> ST s (Term s)
+mkTerm :: ST s ID -> Symbol -> [Either (RTerm s) (Var s)] -> ST s (Term s)
 mkTerm unique sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef False
 
-substitute :: Term s -> ST s ()
-substitute (Term _ _ children doneRef) = do
+substitute :: RTerm s -> ST s ()
+substitute term = do
+    Term _ _ children doneRef <- fromRTerm term
     done <- readSTRef doneRef
     unless done $ do
         writeSTRef doneRef True
-        V.sequence_ . V.imap go =<< V.freeze children
+        V.sequence_ . V.imap (go children) =<< V.freeze children
   where
-    go _ (Left term) = substitute term
-    go i (Right var) = do
+    go _        _ (Left term') = substitute term'
+    go children i (Right var) = do
         Var _ _ _ terms _ <- rep var
         ts <- TL.toVector <$> readSTRef terms
         when (V.length ts /= 1) $ error "Attempted to substitute variable with multiple terms"
         MV.write children i . Left $ ts V.! 0
 
-data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TreeList (Term s))) (STRef s Int)
+newtype RTerm s = RTerm (STRef s (Term s))
+
+toRTerm :: Term s -> ST s (RTerm s)
+toRTerm term = RTerm <$> newSTRef term
+
+fromRTerm :: RTerm s -> ST s (Term s)
+fromRTerm (RTerm ref) = readSTRef ref
+
+replaceTerm :: RTerm s -> Term s -> ST s ()
+replaceTerm (RTerm ref) term = writeSTRef ref term
+
+mkRTerm :: ST s ID -> Symbol -> [Either (RTerm s) (Var s)] -> ST s (RTerm s)
+mkRTerm unique sym children = toRTerm =<< mkTerm unique sym children
+
+fromRTermE :: Either (RTerm s) b -> ST s (Either (Term s) b)
+fromRTermE (Left  term) = Left <$> fromRTerm term
+fromRTermE (Right r)    = return $ Right r
+
+data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TreeList (RTerm s))) (STRef s Int)
 
 instance Graph (Var s) where
     type State (Var s) = s
@@ -100,12 +119,12 @@ instance Graph (Var s) where
             let repEdge = case rep' of
                               Just r -> [("rep", toNode r)]
                               Nothing -> []
-            (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList . TL.toVector <$> readSTRef terms
+            (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map toNode <$> (mapM fromRTerm =<< V.toList . TL.toVector <$> readSTRef terms)
 
 mkVar :: ST s ID -> String -> ST s (Var s)
 mkVar unique v = Var <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef 1
 
-add :: Queue (Var s) -> Var s -> Term s -> ST s (Queue (Var s))
+add :: Queue (Var s) -> Var s -> RTerm s -> ST s (Queue (Var s))
 add queue v@(Var _ _ _ termsRef _) t = do
     ts <- readSTRef termsRef
     writeSTRef termsRef $ TL.cons t ts
@@ -151,21 +170,22 @@ rep v = do
             Just r'' -> writeSTRef repRef (Just r) >> setRep r r''
             Nothing  -> return r
 
-commonFrontier :: Queue (Var s) -> Maybe (V.Vector (Term s), Int) -> V.Vector (Term s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
+commonFrontier :: Queue (Var s) -> Maybe (V.Vector (RTerm s), Int) -> V.Vector (RTerm s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
 commonFrontier queue parentsIndex t_list = do
-    let t@(Term _ sym _ _) = t_list V.! 0
-    case checkEqual t t_list of
+    t@(Term _ sym _ _) <- fromRTerm $ t_list V.! 0
+    t_list' <- V.mapM fromRTerm t_list
+    case checkEqual t t_list' of
         Just err -> return $ Left err
-        Nothing  -> foldM goChild (Right queue) [0 .. arity sym - 1]
+        Nothing  -> foldM (goChild t_list') (Right queue) [0 .. arity sym - 1]
   where
     checkEqual t@(Term _ sym _ _) ts =
         let diffs = V.filter (\(Term _ sym' _ _) -> sym /= sym') ts
         in if V.null diffs
                then Nothing
                else Just (t, diffs V.! 0)
-    goChild (Left err) _ = return $ Left err
-    goChild (Right queue') i = do
-        t0_list <- ithChildren i
+    goChild _       (Left err) _ = return $ Left err
+    goChild t_list' (Right queue') i = do
+        t0_list <- ithChildren t_list' i
         case splitNodes t0_list of
             (terms, []) -> commonFrontier queue' (Just (t_list, i)) . V.fromList $ terms
             (terms, (j, var):vars) -> do
@@ -176,13 +196,13 @@ commonFrontier queue parentsIndex t_list = do
                 queue''  <- foldM (processVars  v) queue' $ map snd vars
                 queue''' <- foldM (processTerms v) queue'' terms
                 return $ Right queue'''
-    ithChildren i = V.forM t_list $ \(Term _ _ children _) -> MV.read children i
+    ithChildren t_list' i = V.forM t_list' $ \(Term _ _ children _) -> MV.read children i
     splitNodes ts = partitionEithers . zipWith toEither [0 :: Int ..] $ V.toList ts
     toEither _ (Left  term) = Left  term
     toEither i (Right var)  = Right (i, var)
     swapChild parents index j = do
-        let (Term _ _ child0 _) = parents V.! 0
-            (Term _ _ childj _) = parents V.! j
+        (Term _ _ child0 _) <- fromRTerm $ parents V.! 0
+        (Term _ _ childj _) <- fromRTerm $ parents V.! j
         tmp <- MV.read child0 index
         MV.write child0 index =<< MV.read childj index
         MV.write childj index tmp
@@ -193,7 +213,7 @@ commonFrontier queue parentsIndex t_list = do
             else return queue'
     processTerms v queue' = add queue' v
 
-unify :: V.Vector (Term s) -> ST s (Maybe (Term s, Term s))
+unify :: V.Vector (RTerm s) -> ST s (Maybe (Term s, Term s))
 unify t_list = do
     res <- commonFrontier Q.empty Nothing t_list
     case res of
@@ -213,33 +233,39 @@ unify t_list = do
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
 
-mkAttribTerm :: ST s ID -> Symbol -> [Term s] -> ST s (Term s)
+mkAttribTerm :: ST s ID -> Symbol -> [RTerm s] -> ST s (RTerm s)
 mkAttribTerm unique sym children = do
-    t <- mkTerm' sym children
-    ks <- mapM getRelevant children
-    fs <- mapM getAffine   children
-    false <- Left <$> mkTerm' (Attrib False) []
+    t <- mkRTerm' sym $ map Left children
+    children' <- mapM fromRTerm children
+    ks <- mapM getRelevant children'
+    fs <- mapM getAffine   children'
+    false <- Left <$> mkRTerm' (Attrib False) []
     k  <- foldM mkOr false ks
     f  <- foldM mkOr false fs
-    mkTerm unique Attribs [Left t, k, f]
+    mkRTerm' Attribs [Left t, k, f]
   where
-    mkTerm' sym' children' = mkTerm unique sym' $ map Left children'
+    mkRTerm' = mkRTerm unique
     getRelevant (Term _ _ cs _) = MV.read cs 1
     getAffine   (Term _ _ cs _) = MV.read cs 2
-    mkOr a@(Left (Term _ (Attrib True) _ _)) _ = return a
-    mkOr _ b@(Left (Term _ (Attrib True) _ _)) = return b
-    mkOr (Left (Term _ (Attrib False) _ _)) b  = return b
-    mkOr a (Left (Term _ (Attrib False) _ _))  = return a
-    mkOr a@(Left (Term ident _ _ _)) (Left (Term ident' _ _ _)) | ident == ident'  = return a
-    mkOr a@(Right (Var ident _ _ _ _)) (Right (Var ident' _ _ _ _)) | ident == ident'  = return a
-    mkOr a b = Left <$> mkTerm unique Or [a, b]
+    mkOr a b = do
+        a' <- fromRTermE a
+        b' <- fromRTermE b
+        mkOr' a' b'
+      where
+        mkOr' (Left (Term _ (Attrib True)  _ _)) _ = return a
+        mkOr' (Left (Term _ (Attrib False) _ _)) _ = return b
+        mkOr' _ (Left (Term _ (Attrib True)  _ _)) = return b
+        mkOr' _ (Left (Term _ (Attrib False) _ _)) = return a
+        mkOr' (Left  (Term ident _ _ _))   (Left  (Term ident' _ _ _))   | ident == ident' = return a
+        mkOr' (Right (Var  ident _ _ _ _)) (Right (Var  ident' _ _ _ _)) | ident == ident' = return a
+        mkOr' _ _ = Left <$> mkRTerm' Or [a, b]
 
-mkAttribVar :: ST s ID -> String -> ST s (Term s)
+mkAttribVar :: ST s ID -> String -> ST s (RTerm s)
 mkAttribVar unique name = do
     v <- mkVar unique name
     k <- mkVar unique $ name ++ "_k"
     f <- mkVar unique $ name ++ "_f"
-    mkTerm unique Attribs $ map Right [v, k, f]
+    mkRTerm unique Attribs $ map Right [v, k, f]
 
 main :: IO ()
 main = putStrLn $ runST $ do
@@ -250,7 +276,7 @@ main = putStrLn $ runST $ do
         varNode v = mkAttribVar unique v
         term sym children = mkAttribTerm unique sym children
     let unifyTerm x y = mkTerm unique (Sealed "unify") [Left x, Left y]
-        errorTerm x y = mkTerm unique (Sealed "Could not unify") [Left x, Left y]
+        errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (fmap Left . toRTerm) [x, y]
     x <- varNode "x"
     z <- varNode "z"
     expr1 <- term Product [x, x]
