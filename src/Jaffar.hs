@@ -16,7 +16,7 @@ import qualified Data.Vector as V
 import Data.Vector.Mutable (MVector)
 import qualified Data.Vector.Mutable as MV
 
-import Dot
+import GraphViz
 import TreeList (TreeList)
 import qualified TreeList as TL
 import Queue (Queue)
@@ -60,7 +60,7 @@ arity (Attrib _) = 0
 
 data Term s = Term ID Symbol (MVector s (Either (RTerm s) (Var s))) (STRef s Bool)
 
-instance Graph (Term s) where
+instance GraphViz (Term s) where
     type State (Term s) = s
     toNode (Term ident sym children doneRef) = Node ident label labelledChildren
       where
@@ -107,7 +107,7 @@ fromRTermE (Right r)    = return $ Right r
 
 data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TreeList (RTerm s))) (STRef s Int)
 
-instance Graph (Var s) where
+instance GraphViz (Var s) where
     type State (Var s) = s
     toNode (Var ident sym repRef terms varCountRef) = Node ident label labelledChildren
       where
