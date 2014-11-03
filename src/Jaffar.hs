@@ -186,12 +186,10 @@ splitNodes = V.foldM splitNode ([], []) . V.indexed
                      Left  _ -> (n:ls, rs)
                      Right _ -> (ls, (i, n):rs)
 
-commonFrontier :: Queue (Var s) -> V.Vector (RNode s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
+commonFrontier :: Queue (Var s) -> V.Vector (Term s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
 commonFrontier queue t_list = do
-    -- We must not pass this to goChild. Nodes may be replaced in the middle of the fold
-    t_list' <- V.mapM fromRTerm t_list
-    let t@(Term _ sym _ _) = t_list' V.! 0
-    case checkEqual t t_list' of
+    let t@(Term _ sym _ _) = t_list V.! 0
+    case checkEqual t t_list of
         Just err -> return $ Left err
         Nothing  -> foldM goChild (Right queue) [0 .. arity sym - 1]
   where
@@ -202,20 +200,20 @@ commonFrontier queue t_list = do
                else Just (t, diffs V.! 0)
     goChild (Left err) _ = return $ Left err
     goChild (Right queue') i = do
-        t0_list <- ithChildren i =<< V.mapM fromRTerm t_list
+        t0_list <- ithChildren i
         sns <- splitNodes t0_list
         case sns of
-            (terms, []) -> commonFrontier queue' . V.fromList $ terms
+            (terms, []) -> commonFrontier queue' . V.fromList =<< mapM fromRTerm terms
             (terms, (j, var):vars) -> do
                 swapChild i j
                 v <- rep =<< fromRVar var
                 queue''  <- foldM (processVars  v) queue' $ map snd vars
                 queue''' <- foldM (processTerms v) queue'' terms
                 return $ Right queue'''
-    ithChildren i t_list' = V.forM t_list' $ \(Term _ _ children _) -> MV.read children i
+    ithChildren i = V.forM t_list $ \(Term _ _ children _) -> MV.read children i
     swapChild i j = do
-        (Left (Term _ _ c0 _)) <- fromRNode $ t_list V.! 0
-        (Left (Term _ _ cj _)) <- fromRNode $ t_list V.! j
+        let Term _ _ c0 _ = t_list V.! 0
+            Term _ _ cj _ = t_list V.! j
         t0 <- MV.read c0 i
         tj <- MV.read cj i
         MV.write c0 i tj
@@ -227,7 +225,7 @@ commonFrontier queue t_list = do
             else return queue'
     processTerms v queue' = add queue' v
 
-unify :: V.Vector (RNode s) -> ST s (Maybe (Term s, Term s))
+unify :: V.Vector (Term s) -> ST s (Maybe (Term s, Term s))
 unify t_list = do
     res <- commonFrontier Q.empty t_list
     case res of
@@ -242,7 +240,7 @@ unify t_list = do
             else do
                 let t = TL.toVector terms
                 writeSTRef termsRef . TL.singleton $ t V.! 0
-                res <- commonFrontier queue' t
+                res <- commonFrontier queue' =<< V.mapM fromRTerm t
                 case res of
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
@@ -296,7 +294,7 @@ main = putStrLn $ runST $ do
     expr1 <- term Product [x, x]
     expr2 <- term Product =<< sequence [term Product [z, z], term Product [z, x]]
     g1 <- showSubgraph "initial" =<< unifyTerm expr1 expr2
-    err <- unify $ V.fromList [expr1, expr2]
+    err <- unify =<< V.mapM fromRTerm (V.fromList [expr1, expr2])
     case err of
         Just (t1, t2) -> do
             e <- showSubgraph "error" =<< errorTerm t1 t2
