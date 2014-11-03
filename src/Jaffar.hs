@@ -104,11 +104,15 @@ mkRVar unique v = toRNode =<< Right <$> mkVar unique v
 fromRNode :: RNode s -> ST s (Either (Term s) (Var s))
 fromRNode (RNode ref) = readSTRef ref
 
-fromLeft :: Either a b -> a
-fromLeft = either id $ error "Expected Right value"
+fromRTerm :: RNode s -> ST s (Term s)
+fromRTerm t = do
+    Left t' <- fromRNode t
+    return t'
 
-fromRight :: Either a b -> b
-fromRight = flip either id $ error "Expected Left value"
+fromRVar :: RNode s -> ST s (Var s)
+fromRVar v = do
+    Right v' <- fromRNode v
+    return v'
 
 replaceNode :: RNode s -> Either (Term s) (Var s) -> ST s ()
 replaceNode (RNode ref) node = writeSTRef ref node
@@ -185,7 +189,7 @@ splitNodes = V.foldM splitNode ([], []) . V.indexed
 commonFrontier :: Queue (Var s) -> V.Vector (RNode s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
 commonFrontier queue t_list = do
     -- We must not pass this to goChild. Nodes may be replaced in the middle of the fold
-    t_list' <- V.mapM (fmap fromLeft . fromRNode) t_list
+    t_list' <- V.mapM fromRTerm t_list
     let t@(Term _ sym _ _) = t_list' V.! 0
     case checkEqual t t_list' of
         Just err -> return $ Left err
@@ -198,13 +202,13 @@ commonFrontier queue t_list = do
                else Just (t, diffs V.! 0)
     goChild (Left err) _ = return $ Left err
     goChild (Right queue') i = do
-        t0_list <- ithChildren i =<< V.mapM (fmap fromLeft . fromRNode) t_list
+        t0_list <- ithChildren i =<< V.mapM fromRTerm t_list
         sns <- splitNodes t0_list
         case sns of
             (terms, []) -> commonFrontier queue' . V.fromList $ terms
             (terms, (j, var):vars) -> do
                 swapChild i j
-                v <- rep =<< fromRight <$> fromRNode var
+                v <- rep =<< fromRVar var
                 queue''  <- foldM (processVars  v) queue' $ map snd vars
                 queue''' <- foldM (processTerms v) queue'' terms
                 return $ Right queue'''
@@ -217,7 +221,7 @@ commonFrontier queue t_list = do
         MV.write c0 i tj
         MV.write cj i t0
     processVars v@(Var ident _ _ _ _) queue' var = do
-        v2@(Var ident2 _ _ _ _) <- rep =<< fromRight <$> fromRNode var
+        v2@(Var ident2 _ _ _ _) <- rep =<< fromRVar var
         if ident /= ident2
             then merge queue' v v2
             else return queue'
@@ -246,7 +250,7 @@ unify t_list = do
 mkAttribTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (RNode s)
 mkAttribTerm unique sym children = do
     t <- mkRTerm' sym children
-    children' <- mapM (fmap fromLeft . fromRNode) children
+    children' <- mapM fromRTerm children
     ks <- mapM getRelevant children'
     fs <- mapM getAffine   children'
     false <- mkRTerm' (Attrib False) []
@@ -299,7 +303,7 @@ main = putStrLn $ runST $ do
             return $ "digraph {" ++ e ++ "}"
         Nothing -> do
             g2 <- showSubgraph "unify" =<< unifyTerm expr1 expr2
-            substitute =<< fromLeft <$> fromRNode expr1
-            substitute =<< fromLeft <$> fromRNode expr2
+            substitute =<< fromRTerm expr1
+            substitute =<< fromRTerm expr2
             g3 <- showSubgraph "substitute" =<< unifyTerm expr1 expr2
             return $ intercalate "\n" ["digraph {", g1, g2, g3, "}"]
