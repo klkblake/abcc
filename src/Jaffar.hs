@@ -9,7 +9,6 @@ module Main where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
-import Data.Either
 import Data.List
 import Data.STRef
 import qualified Data.Vector as V
@@ -58,7 +57,11 @@ arity Attribs    = 3
 arity Or         = 2
 arity (Attrib _) = 0
 
-data Term s = Term ID Symbol (MVector s (Either (RTerm s) (Var s))) (STRef s Bool)
+data Term s = Term ID Symbol (MVector s (RNode s)) (STRef s Bool)
+
+data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TreeList (RNode s))) (STRef s Int)
+
+newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
 
 instance GraphViz (Term s) where
     type State (Term s) = s
@@ -67,45 +70,7 @@ instance GraphViz (Term s) where
         label = do
             done <- readSTRef doneRef
             return $ show sym ++ if done then " ✓" else ""
-        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> (V.mapM fromRTermE =<< V.freeze children)
-
-mkTerm :: ST s ID -> Symbol -> [Either (RTerm s) (Var s)] -> ST s (Term s)
-mkTerm unique sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef False
-
-substitute :: RTerm s -> ST s ()
-substitute term = do
-    Term _ _ children doneRef <- fromRTerm term
-    done <- readSTRef doneRef
-    unless done $ do
-        writeSTRef doneRef True
-        V.sequence_ . V.imap (go children) =<< V.freeze children
-  where
-    go _        _ (Left term') = substitute term'
-    go children i (Right var) = do
-        Var _ _ _ terms _ <- rep var
-        ts <- TL.toVector <$> readSTRef terms
-        when (V.length ts /= 1) $ error "Attempted to substitute variable with multiple terms"
-        MV.write children i . Left $ ts V.! 0
-
-newtype RTerm s = RTerm (STRef s (Term s))
-
-toRTerm :: Term s -> ST s (RTerm s)
-toRTerm term = RTerm <$> newSTRef term
-
-fromRTerm :: RTerm s -> ST s (Term s)
-fromRTerm (RTerm ref) = readSTRef ref
-
-replaceTerm :: RTerm s -> Term s -> ST s ()
-replaceTerm (RTerm ref) term = writeSTRef ref term
-
-mkRTerm :: ST s ID -> Symbol -> [Either (RTerm s) (Var s)] -> ST s (RTerm s)
-mkRTerm unique sym children = toRTerm =<< mkTerm unique sym children
-
-fromRTermE :: Either (RTerm s) b -> ST s (Either (Term s) b)
-fromRTermE (Left  term) = Left <$> fromRTerm term
-fromRTermE (Right r)    = return $ Right r
-
-data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TreeList (RTerm s))) (STRef s Int)
+        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> (V.mapM fromRNode =<< V.freeze children)
 
 instance GraphViz (Var s) where
     type State (Var s) = s
@@ -119,12 +84,50 @@ instance GraphViz (Var s) where
             let repEdge = case rep' of
                               Just r -> [("rep", toNode r)]
                               Nothing -> []
-            (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map toNode <$> (mapM fromRTerm =<< V.toList . TL.toVector <$> readSTRef terms)
+            (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map toNode <$> (mapM fromRNode =<< V.toList . TL.toVector <$> readSTRef terms)
+
+mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Term s)
+mkTerm unique sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef False
 
 mkVar :: ST s ID -> String -> ST s (Var s)
 mkVar unique v = Var <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef 1
 
-add :: Queue (Var s) -> Var s -> RTerm s -> ST s (Queue (Var s))
+toRNode :: Either (Term s) (Var s) -> ST s (RNode s)
+toRNode node = RNode <$> newSTRef node
+
+mkRTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (RNode s)
+mkRTerm unique sym children = toRNode =<< Left <$> mkTerm unique sym children
+
+mkRVar :: ST s ID -> String -> ST s (RNode s)
+mkRVar unique v = toRNode =<< Right <$> mkVar unique v
+
+fromRNode :: RNode s -> ST s (Either (Term s) (Var s))
+fromRNode (RNode ref) = readSTRef ref
+
+fromLeft :: Either a b -> a
+fromLeft = either id $ error "Expected Right value"
+
+fromRight :: Either a b -> b
+fromRight = flip either id $ error "Expected Left value"
+
+replaceNode :: RNode s -> Either (Term s) (Var s) -> ST s ()
+replaceNode (RNode ref) node = writeSTRef ref node
+
+substitute :: Term s -> ST s ()
+substitute (Term _ _ children doneRef) = do
+    done <- readSTRef doneRef
+    unless done $ do
+        writeSTRef doneRef True
+        V.sequence_ . V.imap go =<< V.mapM fromRNode =<< V.freeze children
+  where
+    go _ (Left term') = substitute term'
+    go i (Right var) = do
+        Var _ _ _ terms _ <- rep var
+        ts <- TL.toVector <$> readSTRef terms
+        when (V.length ts /= 1) $ error "Attempted to substitute variable with multiple terms"
+        MV.write children i $ ts V.! 0
+
+add :: Queue (Var s) -> Var s -> RNode s -> ST s (Queue (Var s))
 add queue v@(Var _ _ _ termsRef _) t = do
     ts <- readSTRef termsRef
     writeSTRef termsRef $ TL.cons t ts
@@ -170,50 +173,57 @@ rep v = do
             Just r'' -> writeSTRef repRef (Just r) >> setRep r r''
             Nothing  -> return r
 
-commonFrontier :: Queue (Var s) -> Maybe (V.Vector (RTerm s), Int) -> V.Vector (RTerm s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
+commonFrontier :: Queue (Var s) -> Maybe (V.Vector (RNode s), Int) -> V.Vector (RNode s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
 commonFrontier queue parentsIndex t_list = do
-    t@(Term _ sym _ _) <- fromRTerm $ t_list V.! 0
-    t_list' <- V.mapM fromRTerm t_list
+    -- We must not pass this to goChild. Nodes may be replaced in the middle of the fold
+    t_list' <- V.mapM (fmap fromLeft . fromRNode) t_list
+    let t@(Term _ sym _ _) = t_list' V.! 0
     case checkEqual t t_list' of
         Just err -> return $ Left err
-        Nothing  -> foldM (goChild t_list') (Right queue) [0 .. arity sym - 1]
+        Nothing  -> foldM goChild (Right queue) [0 .. arity sym - 1]
   where
     checkEqual t@(Term _ sym _ _) ts =
         let diffs = V.filter (\(Term _ sym' _ _) -> sym /= sym') ts
         in if V.null diffs
                then Nothing
                else Just (t, diffs V.! 0)
-    goChild _       (Left err) _ = return $ Left err
-    goChild t_list' (Right queue') i = do
-        t0_list <- ithChildren t_list' i
-        case splitNodes t0_list of
+    goChild (Left err) _ = return $ Left err
+    goChild (Right queue') i = do
+        t0_list <- ithChildren i =<< V.mapM (fmap fromLeft . fromRNode) t_list
+        sns <- splitNodes t0_list
+        case sns of
             (terms, []) -> commonFrontier queue' (Just (t_list, i)) . V.fromList $ terms
             (terms, (j, var):vars) -> do
                 case parentsIndex of
                     Nothing -> return ()
                     Just (parents, index) -> swapChild parents index j
-                v <- rep var
+                v <- rep =<< fromRight <$> fromRNode var
                 queue''  <- foldM (processVars  v) queue' $ map snd vars
                 queue''' <- foldM (processTerms v) queue'' terms
                 return $ Right queue'''
-    ithChildren t_list' i = V.forM t_list' $ \(Term _ _ children _) -> MV.read children i
-    splitNodes ts = partitionEithers . zipWith toEither [0 :: Int ..] $ V.toList ts
-    toEither _ (Left  term) = Left  term
-    toEither i (Right var)  = Right (i, var)
+    ithChildren i t_list' = V.forM t_list' $ \(Term _ _ children _) -> MV.read children i
+    splitNodes :: V.Vector (RNode s) -> ST s ([RNode s], [(Int, RNode s)])
+    splitNodes = V.foldM splitNode ([], []) . V.indexed
+    splitNode :: ([RNode s], [(Int, RNode s)]) -> (Int, RNode s) -> ST s ([RNode s], [(Int, RNode s)])
+    splitNode (ls, rs) (i, n) = do
+        n' <- fromRNode n
+        return $ case n' of
+                     Left  _ -> (n:ls, rs)
+                     Right _ -> (ls, (i, n):rs)
     swapChild parents index j = do
-        (Term _ _ child0 _) <- fromRTerm $ parents V.! 0
-        (Term _ _ childj _) <- fromRTerm $ parents V.! j
+        Left (Term _ _ child0 _) <- fromRNode $ parents V.! 0
+        Left (Term _ _ childj _) <- fromRNode $ parents V.! j
         tmp <- MV.read child0 index
         MV.write child0 index =<< MV.read childj index
         MV.write childj index tmp
     processVars v@(Var ident _ _ _ _) queue' var = do
-        v2@(Var ident2 _ _ _ _) <- rep var
+        v2@(Var ident2 _ _ _ _) <- rep =<< fromRight <$> fromRNode var
         if ident /= ident2
             then merge queue' v v2
             else return queue'
     processTerms v queue' = add queue' v
 
-unify :: V.Vector (RTerm s) -> ST s (Maybe (Term s, Term s))
+unify :: V.Vector (RNode s) -> ST s (Maybe (Term s, Term s))
 unify t_list = do
     res <- commonFrontier Q.empty Nothing t_list
     case res of
@@ -233,23 +243,23 @@ unify t_list = do
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
 
-mkAttribTerm :: ST s ID -> Symbol -> [RTerm s] -> ST s (RTerm s)
+mkAttribTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (RNode s)
 mkAttribTerm unique sym children = do
-    t <- mkRTerm' sym $ map Left children
-    children' <- mapM fromRTerm children
+    t <- mkRTerm' sym children
+    children' <- mapM (fmap fromLeft . fromRNode) children
     ks <- mapM getRelevant children'
     fs <- mapM getAffine   children'
-    false <- Left <$> mkRTerm' (Attrib False) []
+    false <- mkRTerm' (Attrib False) []
     k  <- foldM mkOr false ks
     f  <- foldM mkOr false fs
-    mkRTerm' Attribs [Left t, k, f]
+    mkRTerm' Attribs [t, k, f]
   where
     mkRTerm' = mkRTerm unique
     getRelevant (Term _ _ cs _) = MV.read cs 1
     getAffine   (Term _ _ cs _) = MV.read cs 2
     mkOr a b = do
-        a' <- fromRTermE a
-        b' <- fromRTermE b
+        a' <- fromRNode a
+        b' <- fromRNode b
         mkOr' a' b'
       where
         mkOr' (Left (Term _ (Attrib True)  _ _)) _ = return a
@@ -258,14 +268,14 @@ mkAttribTerm unique sym children = do
         mkOr' _ (Left (Term _ (Attrib False) _ _)) = return a
         mkOr' (Left  (Term ident _ _ _))   (Left  (Term ident' _ _ _))   | ident == ident' = return a
         mkOr' (Right (Var  ident _ _ _ _)) (Right (Var  ident' _ _ _ _)) | ident == ident' = return a
-        mkOr' _ _ = Left <$> mkRTerm' Or [a, b]
+        mkOr' _ _ = mkRTerm' Or [a, b]
 
-mkAttribVar :: ST s ID -> String -> ST s (RTerm s)
+mkAttribVar :: ST s ID -> String -> ST s (RNode s)
 mkAttribVar unique name = do
-    v <- mkVar unique name
-    k <- mkVar unique $ name ++ "_k"
-    f <- mkVar unique $ name ++ "_f"
-    mkRTerm unique Attribs $ map Right [v, k, f]
+    v <- mkRVar unique name
+    k <- mkRVar unique $ name ++ "_k"
+    f <- mkRVar unique $ name ++ "_f"
+    mkRTerm unique Attribs [v, k, f]
 
 main :: IO ()
 main = putStrLn $ runST $ do
@@ -275,8 +285,8 @@ main = putStrLn $ runST $ do
             readSTRef counter
         varNode v = mkAttribVar unique v
         term sym children = mkAttribTerm unique sym children
-    let unifyTerm x y = mkTerm unique (Sealed "unify") [Left x, Left y]
-        errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (fmap Left . toRTerm) [x, y]
+    let unifyTerm x y = mkTerm unique (Sealed "unify") [x, y]
+        errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
     x <- varNode "x"
     z <- varNode "z"
     expr1 <- term Product [x, x]
@@ -289,7 +299,7 @@ main = putStrLn $ runST $ do
             return $ "digraph {" ++ e ++ "}"
         Nothing -> do
             g2 <- showSubgraph "unify" =<< unifyTerm expr1 expr2
-            substitute expr1
-            substitute expr2
+            substitute =<< fromLeft <$> fromRNode expr1
+            substitute =<< fromLeft <$> fromRNode expr2
             g3 <- showSubgraph "substitute" =<< unifyTerm expr1 expr2
             return $ intercalate "\n" ["digraph {", g1, g2, g3, "}"]
