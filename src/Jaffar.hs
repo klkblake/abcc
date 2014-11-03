@@ -173,8 +173,17 @@ rep v = do
             Just r'' -> writeSTRef repRef (Just r) >> setRep r r''
             Nothing  -> return r
 
-commonFrontier :: Queue (Var s) -> Maybe (V.Vector (RNode s), Int) -> V.Vector (RNode s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
-commonFrontier queue parentsIndex t_list = do
+splitNodes :: V.Vector (RNode s) -> ST s ([RNode s], [(Int, RNode s)])
+splitNodes = V.foldM splitNode ([], []) . V.indexed
+  where
+    splitNode (ls, rs) (i, n) = do
+        n' <- fromRNode n
+        return $ case n' of
+                     Left  _ -> (n:ls, rs)
+                     Right _ -> (ls, (i, n):rs)
+
+commonFrontier :: Queue (Var s) -> V.Vector (RNode s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
+commonFrontier queue t_list = do
     -- We must not pass this to goChild. Nodes may be replaced in the middle of the fold
     t_list' <- V.mapM (fmap fromLeft . fromRNode) t_list
     let t@(Term _ sym _ _) = t_list' V.! 0
@@ -192,30 +201,21 @@ commonFrontier queue parentsIndex t_list = do
         t0_list <- ithChildren i =<< V.mapM (fmap fromLeft . fromRNode) t_list
         sns <- splitNodes t0_list
         case sns of
-            (terms, []) -> commonFrontier queue' (Just (t_list, i)) . V.fromList $ terms
+            (terms, []) -> commonFrontier queue' . V.fromList $ terms
             (terms, (j, var):vars) -> do
-                case parentsIndex of
-                    Nothing -> return ()
-                    Just (parents, index) -> swapChild parents index j
+                swapChild i j
                 v <- rep =<< fromRight <$> fromRNode var
                 queue''  <- foldM (processVars  v) queue' $ map snd vars
                 queue''' <- foldM (processTerms v) queue'' terms
                 return $ Right queue'''
     ithChildren i t_list' = V.forM t_list' $ \(Term _ _ children _) -> MV.read children i
-    splitNodes :: V.Vector (RNode s) -> ST s ([RNode s], [(Int, RNode s)])
-    splitNodes = V.foldM splitNode ([], []) . V.indexed
-    splitNode :: ([RNode s], [(Int, RNode s)]) -> (Int, RNode s) -> ST s ([RNode s], [(Int, RNode s)])
-    splitNode (ls, rs) (i, n) = do
-        n' <- fromRNode n
-        return $ case n' of
-                     Left  _ -> (n:ls, rs)
-                     Right _ -> (ls, (i, n):rs)
-    swapChild parents index j = do
-        Left (Term _ _ child0 _) <- fromRNode $ parents V.! 0
-        Left (Term _ _ childj _) <- fromRNode $ parents V.! j
-        tmp <- MV.read child0 index
-        MV.write child0 index =<< MV.read childj index
-        MV.write childj index tmp
+    swapChild i j = do
+        (Left (Term _ _ c0 _)) <- fromRNode $ t_list V.! 0
+        (Left (Term _ _ cj _)) <- fromRNode $ t_list V.! j
+        t0 <- MV.read c0 i
+        tj <- MV.read cj i
+        MV.write c0 i tj
+        MV.write cj i t0
     processVars v@(Var ident _ _ _ _) queue' var = do
         v2@(Var ident2 _ _ _ _) <- rep =<< fromRight <$> fromRNode var
         if ident /= ident2
@@ -225,7 +225,7 @@ commonFrontier queue parentsIndex t_list = do
 
 unify :: V.Vector (RNode s) -> ST s (Maybe (Term s, Term s))
 unify t_list = do
-    res <- commonFrontier Q.empty Nothing t_list
+    res <- commonFrontier Q.empty t_list
     case res of
         Left  err   -> return $ Just err
         Right queue -> go $ Q.pop queue
@@ -238,7 +238,7 @@ unify t_list = do
             else do
                 let t = TL.toVector terms
                 writeSTRef termsRef . TL.singleton $ t V.! 0
-                res <- commonFrontier queue' Nothing t
+                res <- commonFrontier queue' t
                 case res of
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
