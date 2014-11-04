@@ -57,9 +57,11 @@ arity Attribs    = 3
 arity Or         = 2
 arity (Attrib _) = 0
 
+data VarType = Structural | Substructural deriving Eq
+
 data Term s = Term ID Symbol (MVector s (RNode s)) (STRef s Bool)
 
-data Var s = Var ID String (STRef s (Maybe (Var s))) (STRef s (TreeList (RNode s))) (STRef s Int)
+data Var s = Var ID String VarType (STRef s (Maybe (Var s))) (STRef s (TreeList (RNode s))) (STRef s Int)
 
 newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
 
@@ -74,11 +76,11 @@ instance GraphViz (Term s) where
 
 instance GraphViz (Var s) where
     type State (Var s) = s
-    toNode (Var ident sym repRef terms varCountRef) = Node ident label labelledChildren
+    toNode (Var ident sym ty repRef terms varCountRef) = Node ident label labelledChildren
       where
         label = do
             varCount <- readSTRef varCountRef
-            return $ sym ++ " (" ++ show varCount ++ ")"
+            return $ sym ++ " (" ++ show varCount ++ ")" ++ if ty == Structural then "" else " (sub)"
         labelledChildren = do
             rep' <- readSTRef repRef
             let repEdge = case rep' of
@@ -89,8 +91,8 @@ instance GraphViz (Var s) where
 mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Term s)
 mkTerm unique sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef False
 
-mkVar :: ST s ID -> String -> ST s (Var s)
-mkVar unique v = Var <$> unique <*> pure v <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef 1
+mkVar :: ST s ID -> String -> VarType -> ST s (Var s)
+mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef 1
 
 toRNode :: Either (Term s) (Var s) -> ST s (RNode s)
 toRNode node = RNode <$> newSTRef node
@@ -98,8 +100,8 @@ toRNode node = RNode <$> newSTRef node
 mkRTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (RNode s)
 mkRTerm unique sym children = toRNode =<< Left <$> mkTerm unique sym children
 
-mkRVar :: ST s ID -> String -> ST s (RNode s)
-mkRVar unique v = toRNode =<< Right <$> mkVar unique v
+mkRVar :: ST s ID -> String -> VarType -> ST s (RNode s)
+mkRVar unique v ty = toRNode =<< Right <$> mkVar unique v ty
 
 fromRNode :: RNode s -> ST s (Either (Term s) (Var s))
 fromRNode (RNode ref) = readSTRef ref
@@ -126,21 +128,21 @@ substitute (Term _ _ children doneRef) = do
   where
     go _ (Left term') = substitute term'
     go i (Right var) = do
-        Var _ _ _ terms _ <- rep var
+        Var _ _ _ _ terms _ <- rep var
         ts <- TL.toVector <$> readSTRef terms
-        when (V.length ts /= 1) $ error "Attempted to substitute variable with multiple terms"
-        MV.write children i $ ts V.! 0
+        when (V.length ts == 1) $ MV.write children i $ ts V.! 0
+        V.mapM_ substitute =<< V.mapM fromRTerm ts
 
 add :: Queue (Var s) -> Var s -> RNode s -> ST s (Queue (Var s))
-add queue v@(Var _ _ _ termsRef _) t = do
+add queue v@(Var _ _ ty _ termsRef _) t = do
     ts <- readSTRef termsRef
     writeSTRef termsRef $ TL.cons t ts
-    return $ if TL.size ts == 1
+    return $ if TL.size ts == 1 && ty == Structural
                  then Q.push queue v
                  else queue
 
 merge :: Queue (Var s) -> Var s -> Var s -> ST s (Queue (Var s))
-merge queue v1@(Var _ _ _ _ varCountRef1) v2@(Var _ _ repRef _ varCountRef2) = do
+merge queue v1@(Var _ _ _ _ _ varCountRef1) v2@(Var _ _ _ repRef _ varCountRef2) = do
     r1 <- readSTRef varCountRef1
     r2 <- readSTRef varCountRef2
     let vc = r1 + r2
@@ -148,7 +150,7 @@ merge queue v1@(Var _ _ _ _ varCountRef1) v2@(Var _ _ repRef _ varCountRef2) = d
         then go vc v1 v2
         else go vc v2 v1
   where
-    go vc bigV@(Var _ _ _ bigTermsRef bigVarCountRef) (Var _ _ _ termsRef varCountRef) = do
+    go vc bigV@(Var _ _ ty _ bigTermsRef bigVarCountRef) (Var _ _ _ _ termsRef varCountRef) = do
         bigTerms <- readSTRef bigTermsRef
         terms    <- readSTRef termsRef
         let bigTerms' = bigTerms `TL.concat` terms
@@ -157,7 +159,7 @@ merge queue v1@(Var _ _ _ _ varCountRef1) v2@(Var _ _ repRef _ varCountRef2) = d
         writeSTRef termsRef TL.empty
         writeSTRef varCountRef 0
         writeSTRef bigVarCountRef vc
-        return $ if TL.size bigTerms <= 1 && TL.size bigTerms' >= 2
+        return $ if TL.size bigTerms <= 1 && TL.size bigTerms' >= 2 && ty == Structural
                      then Q.push queue bigV
                      else queue
 
@@ -166,12 +168,12 @@ rep v = do
     r <- findRep v
     setRep r v
   where
-    findRep v'@(Var _ _ repRef _ _) = do
+    findRep v'@(Var _ _ _ repRef _ _) = do
         r <- readSTRef repRef
         case r of
             Just r' -> findRep r'
             Nothing -> return v'
-    setRep r (Var _ _ repRef _ _) = do
+    setRep r (Var _ _ _ repRef _ _) = do
         r' <- readSTRef repRef
         case r' of
             Just r'' -> writeSTRef repRef (Just r) >> setRep r r''
@@ -186,8 +188,8 @@ splitNodes = V.foldM splitNode ([], []) . V.indexed
                      Left  _ -> (n:ls, rs)
                      Right _ -> (ls, (i, n):rs)
 
-commonFrontier :: Queue (Var s) -> V.Vector (Term s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
-commonFrontier queue t_list = do
+commonFrontier :: ST s ID -> Queue (Var s) -> V.Vector (Term s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
+commonFrontier unique queue t_list = do
     let t@(Term _ sym _ _) = t_list V.! 0
     case checkEqual t t_list of
         Just err -> return $ Left err
@@ -203,7 +205,17 @@ commonFrontier queue t_list = do
         t0_list <- ithChildren i
         sns <- splitNodes t0_list
         case sns of
-            (terms, []) -> commonFrontier queue' . V.fromList =<< mapM fromRTerm terms
+            ([], []) -> error "commonFrontier called on empty term list"
+            (t:terms, []) -> do
+                Term _ sym _ _ <- fromRTerm t
+                case sym of
+                    Or       -> fmap Right . genSubVar queue' i $ t:terms
+                    Attrib a -> do
+                        terms' <- mapM fromRTerm terms
+                        Right <$> if null $ filter (not . matchingAttrib a) terms'
+                                      then return queue'
+                                      else genSubVar queue' i $ t:terms
+                    _ -> commonFrontier unique queue' . V.fromList =<< mapM fromRTerm (t:terms)
             (terms, (j, var):vars) -> do
                 swapChild i j
                 v <- rep =<< fromRVar var
@@ -211,6 +223,15 @@ commonFrontier queue t_list = do
                 queue''' <- foldM (processTerms v) queue'' terms
                 return $ Right queue'''
     ithChildren i = V.forM t_list $ \(Term _ _ children _) -> MV.read children i
+    genSubVar queue' i terms = do
+        v <- mkRVar unique "attr" Substructural
+        v' <- fromRVar v
+        queue'' <- foldM (\q -> add q v') queue' terms
+        let Term _ _ cs _ = t_list V.! 0
+        MV.write cs i v
+        return queue''
+    matchingAttrib a (Term _ (Attrib a') _ _) = a == a'
+    matchingAttrib _ _ = False
     swapChild i j = do
         let Term _ _ c0 _ = t_list V.! 0
             Term _ _ cj _ = t_list V.! j
@@ -218,29 +239,29 @@ commonFrontier queue t_list = do
         tj <- MV.read cj i
         MV.write c0 i tj
         MV.write cj i t0
-    processVars v@(Var ident _ _ _ _) queue' var = do
-        v2@(Var ident2 _ _ _ _) <- rep =<< fromRVar var
+    processVars v@(Var ident _ _ _ _ _) queue' var = do
+        v2@(Var ident2 _ _ _ _ _) <- rep =<< fromRVar var
         if ident /= ident2
             then merge queue' v v2
             else return queue'
     processTerms v queue' = add queue' v
 
-unify :: V.Vector (Term s) -> ST s (Maybe (Term s, Term s))
-unify t_list = do
-    res <- commonFrontier Q.empty t_list
+unify :: ST s ID -> V.Vector (Term s) -> ST s (Maybe (Term s, Term s))
+unify unique t_list = do
+    res <- commonFrontier unique Q.empty t_list
     case res of
         Left  err   -> return $ Just err
         Right queue -> go $ Q.pop queue
   where
     go Nothing = return Nothing
-    go (Just (Var _ _ _ termsRef _, queue')) = do
+    go (Just (Var _ _ _ _ termsRef _, queue')) = do
         terms <- readSTRef termsRef
         if TL.size terms < 2
             then go $ Q.pop queue'
             else do
                 let t = TL.toVector terms
                 writeSTRef termsRef . TL.singleton $ t V.! 0
-                res <- commonFrontier queue' =<< V.mapM fromRTerm t
+                res <- commonFrontier unique queue' =<< V.mapM fromRTerm t
                 case res of
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
@@ -268,15 +289,15 @@ mkAttribTerm unique sym children = do
         mkOr' (Left (Term _ (Attrib False) _ _)) _ = return b
         mkOr' _ (Left (Term _ (Attrib True)  _ _)) = return b
         mkOr' _ (Left (Term _ (Attrib False) _ _)) = return a
-        mkOr' (Left  (Term ident _ _ _))   (Left  (Term ident' _ _ _))   | ident == ident' = return a
-        mkOr' (Right (Var  ident _ _ _ _)) (Right (Var  ident' _ _ _ _)) | ident == ident' = return a
+        mkOr' (Left  (Term ident _ _ _))     (Left  (Term ident' _ _ _))     | ident == ident' = return a
+        mkOr' (Right (Var  ident _ _ _ _ _)) (Right (Var  ident' _ _ _ _ _)) | ident == ident' = return a
         mkOr' _ _ = mkRTerm' Or [a, b]
 
 mkAttribVar :: ST s ID -> String -> ST s (RNode s)
 mkAttribVar unique name = do
-    v <- mkRVar unique name
-    k <- mkRVar unique $ name ++ "_k"
-    f <- mkRVar unique $ name ++ "_f"
+    v <- mkRVar unique name Structural
+    k <- mkRVar unique (name ++ "_k") Substructural
+    f <- mkRVar unique (name ++ "_f") Substructural
     mkRTerm unique Attribs [v, k, f]
 
 main :: IO ()
@@ -291,10 +312,11 @@ main = putStrLn $ runST $ do
         errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
     x <- varNode "x"
     z <- varNode "z"
-    expr1 <- term Product [x, x]
+    txx <- term Product [x, x]
+    expr1 <- term Product =<< sequence [term Product [txx, z], return txx]
     expr2 <- term Product =<< sequence [term Product [z, z], term Product [z, x]]
     g1 <- showSubgraph "initial" =<< unifyTerm expr1 expr2
-    err <- unify =<< V.mapM fromRTerm (V.fromList [expr1, expr2])
+    err <- unify unique =<< V.mapM fromRTerm (V.fromList [expr1, expr2])
     case err of
         Just (t1, t2) -> do
             e <- showSubgraph "error" =<< errorTerm t1 t2
