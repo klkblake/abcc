@@ -57,7 +57,7 @@ arity Attribs    = 3
 arity Or         = 2
 arity (Attrib _) = 0
 
-data Stage = New | Delooped | Substituted deriving Eq
+data Stage = New | DeloopSeen | Delooped | Substituted deriving Eq
 
 data VarType = Structural | Substructural deriving Eq
 
@@ -75,8 +75,9 @@ instance GraphViz (Term s) where
             stage <- readSTRef stageRef
             return $ show sym ++ case stage of
                                      New -> ""
-                                     Delooped -> " ✓"
-                                     Substituted -> " ✓✓"
+                                     DeloopSeen  -> " ✓"
+                                     Delooped    -> " ✓✓"
+                                     Substituted -> " ✓✓✓"
         labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> (V.mapM fromRNode =<< V.freeze children)
 
 instance GraphViz (Var s) where
@@ -121,6 +122,10 @@ fromRVar v = do
     Right v' <- fromRNode v
     return v'
 
+matchingAttrib :: Bool -> Term s -> Bool
+matchingAttrib a (Term _ (Attrib a') _ _) = a == a'
+matchingAttrib _ _ = False
+
 replaceNode :: RNode s -> Either (Term s) (Var s) -> ST s ()
 replaceNode (RNode ref) node = writeSTRef ref node
 
@@ -133,7 +138,7 @@ add queue v@(Var _ _ ty _ termsRef _) t = do
                  else queue
 
 merge :: Queue (Var s) -> Var s -> Var s -> ST s (Queue (Var s))
-merge queue v1@(Var _ _ _ _ _ varCountRef1) v2@(Var _ _ _ repRef _ varCountRef2) = do
+merge queue v1@(Var _ _ _ _ _ varCountRef1) v2@(Var _ _ _ _ _ varCountRef2) = do
     r1 <- readSTRef varCountRef1
     r2 <- readSTRef varCountRef2
     let vc = r1 + r2
@@ -141,7 +146,7 @@ merge queue v1@(Var _ _ _ _ _ varCountRef1) v2@(Var _ _ _ repRef _ varCountRef2)
         then go vc v1 v2
         else go vc v2 v1
   where
-    go vc bigV@(Var _ _ ty _ bigTermsRef bigVarCountRef) (Var _ _ _ _ termsRef varCountRef) = do
+    go vc bigV@(Var _ _ ty _ bigTermsRef bigVarCountRef) (Var _ _ _ repRef termsRef varCountRef) = do
         bigTerms <- readSTRef bigTermsRef
         terms    <- readSTRef termsRef
         let bigTerms' = bigTerms `TL.concat` terms
@@ -221,8 +226,6 @@ commonFrontier unique queue t_list = do
         let Term _ _ cs _ = t_list V.! 0
         MV.write cs i v
         return queue''
-    matchingAttrib a (Term _ (Attrib a') _ _) = a == a'
-    matchingAttrib _ _ = False
     swapChild i j = do
         let Term _ _ c0 _ = t_list V.! 0
             Term _ _ cj _ = t_list V.! j
@@ -257,6 +260,64 @@ unify unique t_list = do
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
 
+simplifyOr :: (RNode s -> RNode s -> ST s (RNode s)) -> RNode s -> RNode s -> ST s (RNode s)
+simplifyOr f a b = do
+    a' <- fromRNode a
+    b' <- fromRNode b
+    go a' b'
+  where
+    go (Left (Term _ (Attrib True)  _ _)) _ = return a
+    go (Left (Term _ (Attrib False) _ _)) _ = return b
+    go _ (Left (Term _ (Attrib True)  _ _)) = return b
+    go _ (Left (Term _ (Attrib False) _ _)) = return a
+    go (Left  (Term ident _ _ _))     (Left  (Term ident' _ _ _))     | ident == ident' = return a
+    go (Right (Var  ident _ _ _ _ _)) (Right (Var  ident' _ _ _ _ _)) | ident == ident' = return a
+    go _ _ = f a b
+
+deloop :: ST s ID -> RNode s -> ST s ()
+deloop unique node = do
+    n <- fromRNode node
+    case n of
+        Left (Term _ sym children stageRef) -> do
+            stage <- readSTRef stageRef
+            case stage of
+                New -> do
+                    writeSTRef stageRef DeloopSeen
+                    children' <- V.freeze children
+                    V.mapM_ (deloop unique) children'
+                    case sym of
+                        Or -> replaceNode node =<< fromRNode =<< simplifyOr (const . const $ return node) (children' V.! 0) (children' V.! 1)
+                        _  -> return ()
+                    writeSTRef stageRef Delooped
+                DeloopSeen -> case sym of
+                                  Or -> replaceNode node =<< Left <$> mkTerm unique (Attrib False) []
+                                  _  -> return ()
+                _ -> return ()
+        Right var -> do
+            v@(Var _ _ _ _ terms _) <- rep var
+            ts <- TL.toVector <$> readSTRef terms
+            V.mapM_ (deloop unique) ts
+            ts' <- TL.toVector <$> readSTRef terms
+            (terms', vars) <- V.foldM splitVars ([], []) ts'
+            terms'' <- mapM fromRTerm terms'
+            writeSTRef terms $ case terms'' of
+                                   Term _ (Attrib a) _ _:_ -> do
+                                       if all (matchingAttrib a) terms''
+                                           then TL.singleton $ head terms'
+                                           else TL.fromList terms'
+                                   _ -> TL.fromList terms'
+            mapM_ (mergeVar v) vars
+  where
+    splitVars (terms, vars) node' = do
+        n <- fromRNode node'
+        return $ case n of
+                     Left  _ -> (node':terms, vars)
+                     Right v -> (terms, v:vars)
+    mergeVar v v' = do
+            vr@(Var ident _ _ _ _ _) <- rep v
+            vr'@(Var ident' _ _ _ _ _) <- rep v'
+            when (ident /= ident') $ merge Q.empty vr vr' >> return ()
+
 substitute :: Term s -> ST s ()
 substitute (Term _ _ children stageRef) = do
     stage <- readSTRef stageRef
@@ -278,25 +339,14 @@ mkAttribTerm unique sym children = do
     ks <- mapM getRelevant children'
     fs <- mapM getAffine   children'
     false <- mkRTerm' (Attrib False) []
-    k  <- foldM mkOr false ks
-    f  <- foldM mkOr false fs
+    k  <- foldM (simplifyOr mkOr) false ks
+    f  <- foldM (simplifyOr mkOr) false fs
     mkRTerm' Attribs [t, k, f]
   where
     mkRTerm' = mkRTerm unique
     getRelevant (Term _ _ cs _) = MV.read cs 1
     getAffine   (Term _ _ cs _) = MV.read cs 2
-    mkOr a b = do
-        a' <- fromRNode a
-        b' <- fromRNode b
-        mkOr' a' b'
-      where
-        mkOr' (Left (Term _ (Attrib True)  _ _)) _ = return a
-        mkOr' (Left (Term _ (Attrib False) _ _)) _ = return b
-        mkOr' _ (Left (Term _ (Attrib True)  _ _)) = return b
-        mkOr' _ (Left (Term _ (Attrib False) _ _)) = return a
-        mkOr' (Left  (Term ident _ _ _))     (Left  (Term ident' _ _ _))     | ident == ident' = return a
-        mkOr' (Right (Var  ident _ _ _ _ _)) (Right (Var  ident' _ _ _ _ _)) | ident == ident' = return a
-        mkOr' _ _ = mkRTerm' Or [a, b]
+    mkOr a b = mkRTerm' Or [a, b]
 
 mkAttribVar :: ST s ID -> String -> ST s (RNode s)
 mkAttribVar unique name = do
@@ -328,7 +378,10 @@ main = putStrLn $ runST $ do
             return $ "digraph {" ++ e ++ "}"
         Nothing -> do
             g2 <- showSubgraph "unify" =<< unifyTerm expr1 expr2
+            deloop unique expr1
+            deloop unique expr2
+            g3 <- showSubgraph "deloop" =<< unifyTerm expr1 expr2
             substitute =<< fromRTerm expr1
             substitute =<< fromRTerm expr2
-            g3 <- showSubgraph "substitute" =<< unifyTerm expr1 expr2
-            return $ intercalate "\n" ["digraph {", g1, g2, g3, "}"]
+            g4 <- showSubgraph "substitute" =<< unifyTerm expr1 expr2
+            return $ intercalate "\n" ["digraph {", g1, g2, g3, g4, "}"]

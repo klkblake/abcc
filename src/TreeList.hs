@@ -6,6 +6,7 @@ module TreeList
     , size
     , concat
     , cons
+    , fromList
     , toVector
     ) where
 
@@ -38,6 +39,9 @@ concat l r = Node l r (size l + size r)
 
 cons :: a -> TreeList a -> TreeList a
 cons x xs = singleton x `concat` xs
+
+fromList :: [a] -> TreeList a
+fromList = foldr cons empty
 
 toVector :: TreeList a -> Vector a
 toVector xs = runST $ MV.new (size xs) >>= (\v -> go v xs >> return v) >>= V.freeze
