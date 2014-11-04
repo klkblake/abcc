@@ -57,9 +57,11 @@ arity Attribs    = 3
 arity Or         = 2
 arity (Attrib _) = 0
 
+data Stage = New | Delooped | Substituted deriving Eq
+
 data VarType = Structural | Substructural deriving Eq
 
-data Term s = Term ID Symbol (MVector s (RNode s)) (STRef s Bool)
+data Term s = Term ID Symbol (MVector s (RNode s)) (STRef s Stage)
 
 data Var s = Var ID String VarType (STRef s (Maybe (Var s))) (STRef s (TreeList (RNode s))) (STRef s Int)
 
@@ -67,11 +69,14 @@ newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
 
 instance GraphViz (Term s) where
     type State (Term s) = s
-    toNode (Term ident sym children doneRef) = Node ident label labelledChildren
+    toNode (Term ident sym children stageRef) = Node ident label labelledChildren
       where
         label = do
-            done <- readSTRef doneRef
-            return $ show sym ++ if done then " ✓" else ""
+            stage <- readSTRef stageRef
+            return $ show sym ++ case stage of
+                                     New -> ""
+                                     Delooped -> " ✓"
+                                     Substituted -> " ✓✓"
         labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> (V.mapM fromRNode =<< V.freeze children)
 
 instance GraphViz (Var s) where
@@ -89,7 +94,7 @@ instance GraphViz (Var s) where
             (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map toNode <$> (mapM fromRNode =<< V.toList . TL.toVector <$> readSTRef terms)
 
 mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Term s)
-mkTerm unique sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef False
+mkTerm unique sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef New
 
 mkVar :: ST s ID -> String -> VarType -> ST s (Var s)
 mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef 1
@@ -118,20 +123,6 @@ fromRVar v = do
 
 replaceNode :: RNode s -> Either (Term s) (Var s) -> ST s ()
 replaceNode (RNode ref) node = writeSTRef ref node
-
-substitute :: Term s -> ST s ()
-substitute (Term _ _ children doneRef) = do
-    done <- readSTRef doneRef
-    unless done $ do
-        writeSTRef doneRef True
-        V.sequence_ . V.imap go =<< V.mapM fromRNode =<< V.freeze children
-  where
-    go _ (Left term') = substitute term'
-    go i (Right var) = do
-        Var _ _ _ _ terms _ <- rep var
-        ts <- TL.toVector <$> readSTRef terms
-        when (V.length ts == 1) $ MV.write children i $ ts V.! 0
-        V.mapM_ substitute =<< V.mapM fromRTerm ts
 
 add :: Queue (Var s) -> Var s -> RNode s -> ST s (Queue (Var s))
 add queue v@(Var _ _ ty _ termsRef _) t = do
@@ -265,6 +256,20 @@ unify unique t_list = do
                 case res of
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
+
+substitute :: Term s -> ST s ()
+substitute (Term _ _ children stageRef) = do
+    stage <- readSTRef stageRef
+    unless (stage == Substituted) $ do
+        writeSTRef stageRef Substituted
+        V.sequence_ . V.imap go =<< V.mapM fromRNode =<< V.freeze children
+  where
+    go _ (Left term') = substitute term'
+    go i (Right var) = do
+        Var _ _ _ _ terms _ <- rep var
+        ts <- TL.toVector <$> readSTRef terms
+        when (V.length ts == 1) $ MV.write children i $ ts V.! 0
+        V.mapM_ substitute =<< V.mapM fromRTerm ts
 
 mkAttribTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (RNode s)
 mkAttribTerm unique sym children = do
