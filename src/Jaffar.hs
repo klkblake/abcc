@@ -80,7 +80,7 @@ instance GraphViz (Var s) where
       where
         label = do
             varCount <- readSTRef varCountRef
-            return $ sym ++ " (" ++ show varCount ++ ")" ++ if ty == Structural then "" else " (sub)"
+            return $ sym ++ " (" ++ show varCount ++ ")" ++ if ty == Structural then "" else " kf"
         labelledChildren = do
             rep' <- readSTRef repRef
             let repEdge = case rep' of
