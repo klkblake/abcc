@@ -9,6 +9,7 @@ module Main where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
+import Data.Functor.Identity
 import Data.List
 import qualified Data.Map.Strict as M
 import Data.STRef
@@ -371,7 +372,7 @@ mkAttribVar unique name relevant affine = do
     mkAttrib (Just a) _      = mkRTerm unique (Attrib a) []
     mkAttrib Nothing  suffix = mkRVar unique (name ++ suffix) Substructural
 
-opType :: ST s ID -> Op t -> ST s (RNode s, RNode s)
+opType :: ST s ID -> UntypedOp -> ST s (RNode s, RNode s)
 opType unique opcode = op opcode
   where
     mkAttribTerm' sym children = mkAttribTerm unique sym Nothing Nothing children
@@ -380,12 +381,19 @@ opType unique opcode = op opcode
         (b'', _)    <- b' vars
         return (a'', b'')
     infixr 1 ~>
-    a' .* b' = \vars -> do
+    resolveVars action = \a' b' vars -> do
         (a'', vars')  <- a' vars
         (b'', vars'') <- b' vars'
-        t <- mkAttribTerm' Product [a'', b'']
-        return (t, vars'')
+        r <- action a'' b''
+        return (r, vars'')
+    (.*) = resolveVars $ \a' b' -> mkAttribTerm' Product [a', b']
     infixr 7 .*
+    mkBlock = resolveVars $ \a' b' -> mkAttribTerm unique Block (Just False) (Just False) [a', b']
+    mkBlock' a' b' vars = do
+        let a'' = \vars -> return (a', vars)
+        let b'' = \vars -> return (b', vars)
+        (r, _) <- mkBlock a'' b'' M.empty
+        return (r, vars)
     unit = \vars -> (, vars) <$> mkAttribTerm' Unit []
 
     var  v = var' v Nothing Nothing
@@ -400,8 +408,18 @@ opType unique opcode = op opcode
     c = var "c"
     d = var "d"
     e = var "e"
+    s = var "s"
     xDrop = var' "x" (Just False) Nothing
     xCopy = var' "x" Nothing (Just False)
+
+    op (LitBlock block) = do
+        tys <- mapM (opType unique . runIdentity) block
+        case tys of
+            [] -> s ~> mkBlock a a .* s
+            _  -> do
+                let (a', _)  = head tys
+                    (_,  b') = last tys
+                s ~> mkBlock' a' b' .* s
 
     op AssocL = a .* b .* c ~> (a .* b) .* c
     op AssocR = (a .* b) .* c ~> a .* b .* c
@@ -422,7 +440,7 @@ main = putStrLn $ runST $ do
         term sym children = mkAttribTerm unique sym Nothing Nothing children
     let showTerm label xs = showSubgraph label =<< mkTerm unique (Sealed label) xs
         errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
-    exprs <- mapM (opType unique) [Intro1, AssocR, Swap, AssocL, Elim1]
+    exprs <- mapM (opType unique) [Intro1, AssocR, Swap, AssocL, Elim1, LitBlock [], LitBlock $ map Identity [AssocL, AssocR]]
     let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
     g1 <- showTerm "initial" flatExprs
     let unifyPair (Just err) _      = return $ Just err
