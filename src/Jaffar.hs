@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilies, TupleSections #-}
 module Main where
 
 -- Implementation of the algorithm described in "Efficient Unification over
@@ -10,10 +10,13 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
 import Data.List
+import qualified Data.Map.Strict as M
 import Data.STRef
 import qualified Data.Vector as V
 import Data.Vector.Mutable (MVector)
 import qualified Data.Vector.Mutable as MV
+
+import Op
 
 import GraphViz
 import TreeList (TreeList)
@@ -346,28 +349,72 @@ substitute (Term _ _ children stageRef) = do
         when (V.length ts == 1) $ MV.write children i $ ts V.! 0
         V.mapM_ substitute =<< V.mapM fromRTerm ts
 
-mkAttribTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (RNode s)
-mkAttribTerm unique sym children = do
+mkAttribTerm :: ST s ID -> Symbol -> Maybe Bool -> Maybe Bool -> [RNode s] -> ST s (RNode s)
+mkAttribTerm unique sym relevant affine children = do
     t <- mkRTerm' sym children
     children' <- mapM fromRTerm children
-    ks <- mapM getRelevant children'
-    fs <- mapM getAffine   children'
     false <- mkRTerm' (Attrib False) []
-    k  <- foldM (simplifyOr mkOr) false ks
-    f  <- foldM (simplifyOr mkOr) false fs
+    k  <- mkAttrib children' false relevant getRelevant
+    f  <- mkAttrib children' false affine getAffine
     mkRTerm' Attribs [t, k, f]
   where
     mkRTerm' = mkRTerm unique
     getRelevant (Term _ _ cs _) = MV.read cs 1
     getAffine   (Term _ _ cs _) = MV.read cs 2
+    mkAttrib _         _     (Just a) _   = mkRTerm' (Attrib a) []
+    mkAttrib children' false Nothing  get = foldM (simplifyOr mkOr) false =<< mapM get children'
     mkOr a b = mkRTerm' Or [a, b]
 
-mkAttribVar :: ST s ID -> String -> ST s (RNode s)
-mkAttribVar unique name = do
+mkAttribVar :: ST s ID -> String -> Maybe Bool -> Maybe Bool -> ST s (RNode s)
+mkAttribVar unique name relevant affine = do
     v <- mkRVar unique name Structural
-    k <- mkRVar unique (name ++ "_k") Substructural
-    f <- mkRVar unique (name ++ "_f") Substructural
+    k <- mkAttrib relevant "_k"
+    f <- mkAttrib affine   "_f"
     mkRTerm unique Attribs [v, k, f]
+  where
+    mkAttrib (Just a) _      = mkRTerm unique (Attrib a) []
+    mkAttrib Nothing  suffix = mkRVar unique (name ++ suffix) Substructural
+
+opType :: ST s ID -> Op t -> ST s (RNode s, RNode s)
+opType unique opcode = op opcode
+  where
+    mkAttribTerm' sym children = mkAttribTerm unique sym Nothing Nothing children
+    a' ~> b' = do
+        (a'', vars) <- a' M.empty
+        (b'', _)    <- b' vars
+        return (a'', b'')
+    infixr 1 ~>
+    a' .* b' = \vars -> do
+        (a'', vars')  <- a' vars
+        (b'', vars'') <- b' vars'
+        t <- mkAttribTerm' Product [a'', b'']
+        return (t, vars'')
+    infixr 7 .*
+    unit = \vars -> (, vars) <$> mkAttribTerm' Unit []
+
+    var  v = var' v Nothing Nothing
+    var' v relevant affine = \vars ->
+        case M.lookup v vars of
+            Just v' -> return (v', vars)
+            Nothing -> do
+                v' <- mkAttribVar unique v relevant affine
+                return (v', M.insert v v' vars)
+    a = var "a"
+    b = var "b"
+    c = var "c"
+    d = var "d"
+    e = var "e"
+    xDrop = var' "x" (Just False) Nothing
+    xCopy = var' "x" Nothing (Just False)
+
+    op AssocL = a .* b .* c ~> (a .* b) .* c
+    op AssocR = (a .* b) .* c ~> a .* b .* c
+    op Swap   = a .* b .* c ~> b .* a .* c
+    op SwapD  = a .* b .* c .* d ~> a .* c .* b .* d
+    op Intro1 = a ~> a .* unit
+    op Elim1  = a .* unit ~> a
+    op Drop   = xDrop .* e ~> e
+    op Copy   = xCopy .* e ~> xCopy .* xCopy .* e
 
 main :: IO ()
 main = putStrLn $ runST $ do
@@ -375,27 +422,24 @@ main = putStrLn $ runST $ do
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-        varNode v = mkAttribVar unique v
-        term sym children = mkAttribTerm unique sym children
-    let unifyTerm x y = mkTerm unique (Sealed "unify") [x, y]
+        varNode v = mkAttribVar unique v Nothing Nothing
+        term sym children = mkAttribTerm unique sym Nothing Nothing children
+    let showTerm label xs = showSubgraph label =<< mkTerm unique (Sealed label) xs
         errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
-    x <- varNode "x"
-    z <- varNode "z"
-    txx <- term Product [x, x]
-    expr1 <- term Product =<< sequence [term Product [txx, z], return txx]
-    expr2 <- term Product =<< sequence [term Product [z, z], term Product [z, x]]
-    g1 <- showSubgraph "initial" =<< unifyTerm expr1 expr2
-    err <- unify unique =<< V.mapM fromRTerm (V.fromList [expr1, expr2])
+    exprs <- mapM (opType unique) [Intro1, AssocR, Swap, AssocL, Elim1]
+    let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
+    g1 <- showTerm "initial" flatExprs
+    let unifyPair (Just err) _      = return $ Just err
+        unifyPair Nothing    (a, b) = unify unique =<< V.mapM fromRTerm (V.fromList [a, b])
+    err <- foldM unifyPair Nothing . zip (map snd exprs) . map fst $ tail exprs
     case err of
         Just (t1, t2) -> do
             e <- showSubgraph "error" =<< errorTerm t1 t2
             return $ "digraph {" ++ e ++ "}"
         Nothing -> do
-            g2 <- showSubgraph "unify" =<< unifyTerm expr1 expr2
-            deloop unique expr1
-            deloop unique expr2
-            g3 <- showSubgraph "deloop" =<< unifyTerm expr1 expr2
-            substitute =<< fromRTerm expr1
-            substitute =<< fromRTerm expr2
-            g4 <- showSubgraph "substitute" =<< unifyTerm expr1 expr2
+            g2 <- showTerm "unify" flatExprs
+            mapM_ (deloop unique) flatExprs
+            g3 <- showTerm "deloop" flatExprs
+            mapM_ substitute =<< mapM fromRTerm flatExprs
+            g4 <- showTerm "substitute" flatExprs
             return $ intercalate "\n" ["digraph {", g1, g2, g3, g4, "}"]
