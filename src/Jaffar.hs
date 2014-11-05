@@ -76,11 +76,7 @@ instance GraphViz (Term s) where
       where
         label = do
             stage <- readSTRef stageRef
-            return $ show sym ++ case stage of
-                                     New -> ""
-                                     DeloopSeen  -> " ✓"
-                                     Delooped    -> " ✓✓"
-                                     Substituted -> " ✓✓✓"
+            return $ show sym
         labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> (V.mapM fromRNode =<< V.freeze children)
 
 instance GraphViz (Var s) where
