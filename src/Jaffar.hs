@@ -286,7 +286,10 @@ deloop unique node = do
                     children' <- V.freeze children
                     V.mapM_ (deloop unique) children'
                     case sym of
-                        Or -> replaceNode node =<< fromRNode =<< simplifyOr (const . const $ return node) (children' V.! 0) (children' V.! 1)
+                        Or -> do
+                            a <- derefVar $ children' V.! 0
+                            b <- derefVar $ children' V.! 1
+                            replaceNode node =<< fromRNode =<< simplifyOr (const . const $ return node) a b
                         _  -> return ()
                     writeSTRef stageRef Delooped
                 DeloopSeen -> case sym of
@@ -300,14 +303,25 @@ deloop unique node = do
             ts' <- TL.toVector <$> readSTRef terms
             (terms', vars) <- V.foldM splitVars ([], []) ts'
             terms'' <- mapM fromRTerm terms'
-            writeSTRef terms $ case terms'' of
-                                   Term _ (Attrib a) _ _:_ -> do
-                                       if all (matchingAttrib a) terms''
-                                           then TL.singleton $ head terms'
-                                           else TL.fromList terms'
-                                   _ -> TL.fromList terms'
+            writeSTRef terms =<< case terms'' of
+                                     [] -> TL.singleton <$> mkRTerm unique (Attrib False) []
+                                     Term _ (Attrib a) _ _:_ -> return $
+                                         if all (matchingAttrib a) terms''
+                                             then TL.singleton $ head terms'
+                                             else TL.fromList terms'
+                                     _ -> return $ TL.fromList terms'
             mapM_ (mergeVar v) vars
   where
+    derefVar n = do
+        n' <- fromRNode n
+        case n' of
+            Left _ -> return n
+            Right v -> do
+                Var _ _ _ _ terms _ <- rep v
+                terms' <- readSTRef terms
+                return $ if TL.size terms' == 1
+                             then TL.toVector terms' V.! 0
+                             else n
     splitVars (terms, vars) node' = do
         n <- fromRNode node'
         return $ case n of
