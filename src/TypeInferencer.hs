@@ -113,7 +113,9 @@ instance GraphViz (Var s) where
         toNode' = Node ident <$> label <*> labelledChildren
         label = do
             varCount <- readSTRef varCountRef
-            return $ sym ++ " (" ++ show varCount ++ ")" ++ if ty == Structural then "" else " kf"
+            return $ sym ++ " (" ++ show varCount ++ ")" ++ case ty of
+                                                                Structural    -> ""
+                                                                Substructural -> " kf"
         labelledChildren = do
             rep' <- readSTRef repRef
             let repEdge = case rep' of
@@ -336,14 +338,16 @@ deloop unique node = do
                                   _  -> return ()
                 _ -> return ()
         Right var -> do
-            v@(Var _ _ _ _ terms _) <- rep var
+            v@(Var _ _ ty _ terms _) <- rep var
             ts <- TL.toVector <$> readSTRef terms
             V.mapM_ (deloop unique) ts
             ts' <- TL.toVector <$> readSTRef terms
             (terms', vars) <- V.foldM splitVars ([], []) ts'
             terms'' <- mapM fromRTerm terms'
             writeSTRef terms =<< case terms'' of
-                                     [] -> TL.singleton <$> mkRTerm unique (Attrib False) []
+                                     [] -> case ty of
+                                               Structural    -> return TL.empty
+                                               Substructural -> TL.singleton <$> mkRTerm unique (Attrib False) []
                                      Term _ (Attrib a) _ _:_ -> return $
                                          if all (matchingAttrib a) terms''
                                              then TL.singleton $ head terms'
