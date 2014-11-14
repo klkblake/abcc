@@ -1,5 +1,8 @@
 {-# LANGUAGE TypeFamilies, TupleSections #-}
-module Main where
+module Main
+    ( inferTypes
+    , main
+    ) where
 
 -- Implementation of the algorithm described in "Efficient Unification over
 -- Infinite Types" by Joxan Jaffar. Runs in O(n*F(n)) time, where F(n) is
@@ -531,15 +534,15 @@ opType unique = flip evalStateT M.empty . op
 
     op ApplyTail = error "To be removed."
 
-main :: IO ()
-main = putStrLn $ runST $ do
+inferTypes :: [UntypedOp] -> String
+inferTypes ops = runST $ do
     counter <- newSTRef (0 :: Int)
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
     let showTerm label xs = showSubgraph label =<< mkTerm unique (Sealed label) xs
         errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
-    exprs <- mapM (opType unique) [LitText "This is a text literal", DebugPrintText, Drop]
+    exprs <- mapM (opType unique) ops
     let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
     g1 <- showTerm "initial" flatExprs
     let unifyPair (Just err) _      = return $ Just err
@@ -556,3 +559,6 @@ main = putStrLn $ runST $ do
             mapM_ substitute =<< mapM fromRTerm flatExprs
             g4 <- showTerm "substitute" flatExprs
             return $ intercalate "\n" ["digraph {", g1, g2, g3, g4, "}"]
+
+main :: IO ()
+main = putStrLn $ inferTypes [LitText "This is a text literal", DebugPrintText, Drop]
