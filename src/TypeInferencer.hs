@@ -12,7 +12,6 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
 import Control.Monad.State
-import Data.Functor.Identity
 import Data.List
 import qualified Data.Map.Strict as M
 import Data.STRef
@@ -383,8 +382,8 @@ mkAttribVar unique name relevant affine = do
     mkAttrib (Just a) _      = mkRTerm unique (Attrib a) []
     mkAttrib Nothing  suffix = mkRVar unique (name ++ suffix) Substructural
 
-opType :: ST s ID -> UntypedOp -> ST s (RNode s, RNode s)
-opType unique = flip evalStateT M.empty . op
+opType :: ST s ID -> RawOp -> ST s (RNode s, RNode s)
+opType unique = flip evalStateT M.empty . blockOrOp
   where
     mkRTerm' sym children = lift $ mkRTerm unique sym children
     mkAttribTerm' sym children = lift $ mkAttribTerm unique sym Nothing Nothing children
@@ -394,7 +393,7 @@ opType unique = flip evalStateT M.empty . op
         b'' <- b'
         action a'' b''
 
-    (~>) = liftM2 $ (,)
+    (~>) = liftM2 (,)
     (.*) = seq2 $ \a' b' -> mkAttribTerm' Product [a', b']
     (.+) = seq2 $ \a' b' -> mkAttribTerm' Sum [a', b']
     infixr 1 ~>
@@ -452,14 +451,16 @@ opType unique = flip evalStateT M.empty . op
                                        else [t, k, true]
         return b1 .* e ~> return b2 .* e
 
-    op (LitBlock block) = do
-        tys <- lift $ mapM (opType unique . runIdentity) block
+    blockOrOp (LitBlock block) = do
+        tys <- lift $ mapM (opType unique) block
         case tys of
             [] -> s ~> mkBlockNew a a .* s
             _  -> do
                 let (a', _)  = head tys
                     (_,  b') = last tys
                 s ~> mkBlockNew (return a') (return b') .* s
+    blockOrOp (Op op') = op op'
+
     op (LitText _) = do
         text <- mkText
         e ~> return text .* e
@@ -533,7 +534,7 @@ opType unique = flip evalStateT M.empty . op
 
     op ApplyTail = error "To be removed."
 
-inferTypes :: [UntypedOp] -> String
+inferTypes :: [RawOp] -> String
 inferTypes ops = runST $ do
     counter <- newSTRef (0 :: Int)
     let unique = do

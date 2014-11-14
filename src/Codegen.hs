@@ -4,7 +4,6 @@ import Control.Monad.State
 import Data.Bits
 import Data.Char
 import Data.Function
-import Data.Functor.Identity
 import Data.List
 import qualified Data.Map.Lazy as Map
 import Numeric
@@ -27,14 +26,14 @@ emit op = modify $ \(CodegenState bs ts c) -> CodegenState (Map.adjust (++ op) c
 emitOp :: String -> Codegen ()
 emitOp op = emit $ "\tv = " ++ op ++ "(v);\n"
 
-emitBlock :: [UntypedOp] -> Codegen Int
+emitBlock :: [RawOp] -> Codegen Int
 emitBlock b = do
     CodegenState bs ts c <- get
     let n = Map.size bs
     put $ CodegenState (Map.insert n [] bs) ts n
     -- Detect tail calls
     case reverse b of
-        (Elim1:Apply:b') -> mapM_ compileOp . reverse $ ApplyTail:b'
+        (Op Elim1:Op Apply:b') -> mapM_ compileOp . reverse $ Op ApplyTail:b'
         _ -> mapM_ compileOp b
     modify $ \(CodegenState bs' ts' _) -> CodegenState bs' ts' c
     return n
@@ -75,47 +74,49 @@ emitText t = do
     insertTextNode n ref text textNode =
         modify $ \(CodegenState bs ts c) -> CodegenState bs (Map.insert t (n, (ref, (text, textNode))) ts) c
 
-compileOp :: UntypedOp -> Codegen ()
-compileOp (LitBlock b) = emitBlock (map runIdentity b) >>= \n -> emit $ "\tv = pair((Any) &block_" ++ show n ++ ", v);\n"
-compileOp (LitText  t) = emitText  t >>= \(n, _) -> emit $ "\tv = pair(TAG((Any) &text[" ++ show n ++ "], SUM_LEFT), v);\n"
-compileOp AssocL         = emitOp "assocl"
-compileOp AssocR         = emitOp "assocr"
-compileOp Swap           = emitOp "swap"
-compileOp SwapD          = emitOp "swapd"
-compileOp Intro1         = emitOp "intro1"
-compileOp Elim1          = emitOp "elim1"
-compileOp Drop           = emitOp "drop"
-compileOp Copy           = emitOp "copy"
-compileOp Apply          = emitOp "apply"
-compileOp ApplyTail      = emitOp "apply_tail"
-compileOp Compose        = emitOp "compose"
-compileOp Quote          = emitOp "quote"
-compileOp Relevant       = return ()
-compileOp Affine         = return ()
-compileOp IntroNum       = emitOp "introNum"
-compileOp (Digit d)      = emit $ "\tv = digit(" ++ show d ++ ", v);\n"
-compileOp Add            = emitOp "add"
-compileOp Multiply       = emitOp "multiply"
-compileOp Inverse        = emitOp "inverse"
-compileOp Negate         = emitOp "negate"
-compileOp Divmod         = emitOp "divmod"
-compileOp AssocLS        = emitOp "assocls"
-compileOp AssocRS        = emitOp "assocrs"
-compileOp SwapS          = emitOp "swaps"
-compileOp SwapDS         = emitOp "swapds"
-compileOp Intro0         = emitOp "intro0"
-compileOp Elim0          = emitOp "elim0"
-compileOp CondApply      = emitOp "condapply"
-compileOp Distrib        = emitOp "distrib"
-compileOp Factor         = emitOp "factor"
-compileOp Merge          = emitOp "merge"
-compileOp Assert         = emitOp "assert"
-compileOp Greater        = emitOp "greater"
-compileOp (Sealer   _)   = return ()
-compileOp (Unsealer _)   = return ()
-compileOp AssertEQ       = emitOp "assert_eq"
-compileOp DebugPrintRaw  = emitOp "debug_print_raw"
-compileOp DebugPrintText = emitOp "debug_print_text"
+compileOp :: RawOp -> Codegen ()
+compileOp (LitBlock b) = emitBlock b >>= \n -> emit $ "\tv = pair((Any) &block_" ++ show n ++ ", v);\n"
+compileOp (Op op) = go op
+  where
+    go (LitText  t) = emitText  t >>= \(n, _) -> emit $ "\tv = pair(TAG((Any) &text[" ++ show n ++ "], SUM_LEFT), v);\n"
+    go AssocL         = emitOp "assocl"
+    go AssocR         = emitOp "assocr"
+    go Swap           = emitOp "swap"
+    go SwapD          = emitOp "swapd"
+    go Intro1         = emitOp "intro1"
+    go Elim1          = emitOp "elim1"
+    go Drop           = emitOp "drop"
+    go Copy           = emitOp "copy"
+    go Apply          = emitOp "apply"
+    go ApplyTail      = emitOp "apply_tail"
+    go Compose        = emitOp "compose"
+    go Quote          = emitOp "quote"
+    go Relevant       = return ()
+    go Affine         = return ()
+    go IntroNum       = emitOp "introNum"
+    go (Digit d)      = emit $ "\tv = digit(" ++ show d ++ ", v);\n"
+    go Add            = emitOp "add"
+    go Multiply       = emitOp "multiply"
+    go Inverse        = emitOp "inverse"
+    go Negate         = emitOp "negate"
+    go Divmod         = emitOp "divmod"
+    go AssocLS        = emitOp "assocls"
+    go AssocRS        = emitOp "assocrs"
+    go SwapS          = emitOp "swaps"
+    go SwapDS         = emitOp "swapds"
+    go Intro0         = emitOp "intro0"
+    go Elim0          = emitOp "elim0"
+    go CondApply      = emitOp "condapply"
+    go Distrib        = emitOp "distrib"
+    go Factor         = emitOp "factor"
+    go Merge          = emitOp "merge"
+    go Assert         = emitOp "assert"
+    go Greater        = emitOp "greater"
+    go (Sealer   _)   = return ()
+    go (Unsealer _)   = return ()
+    go AssertEQ       = emitOp "assert_eq"
+    go DebugPrintRaw  = emitOp "debug_print_raw"
+    go DebugPrintText = emitOp "debug_print_text"
 
 genC :: Map.Map Int String -> Map.Map String (Int, (String, (String, String))) -> String
 genC bs ts = let ts' = map (snd . snd) . sortFst . map snd . Map.toList $ ts
@@ -126,7 +127,7 @@ genC bs ts = let ts' = map (snd . snd) . sortFst . map snd . Map.toList $ ts
     genTextNodes ts' = "\"_text_nodes:\\n\"\n" ++ concat ts' ++ "\".popsection\\n\"\n);\n"
     genBlocks n b = "\nAny block_" ++ show n ++ "(Any v) {\n" ++ b ++ "\treturn v;\n}\n"
 
-compile :: [UntypedOp] -> Either String String
+compile :: [RawOp] -> Either String String
 compile ops = case runStateT (emitBlock ops) $ CodegenState Map.empty Map.empty 0  of
                   Right (_, cgs) -> Right $ genC (blocks cgs) (textNodes cgs)
                   Left err -> Left err
