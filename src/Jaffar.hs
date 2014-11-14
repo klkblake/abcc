@@ -9,6 +9,7 @@ module Main where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
+import Control.Monad.State
 import Data.Functor.Identity
 import Data.List
 import qualified Data.Map.Strict as M
@@ -381,45 +382,43 @@ mkAttribVar unique name relevant affine = do
     mkAttrib Nothing  suffix = mkRVar unique (name ++ suffix) Substructural
 
 opType :: ST s ID -> UntypedOp -> ST s (RNode s, RNode s)
-opType unique = op
+opType unique = flip evalStateT M.empty . op
   where
-    mkRTerm' = mkRTerm unique
-    mkAttribTerm' sym = mkAttribTerm unique sym Nothing Nothing
-    exact x' vars = return (x', vars)
-    eval  x' = fst <$> x' M.empty
-    a' ~> b' = do
-        (a'', vars) <- a' M.empty
-        (b'', _)    <- b' vars
-        return (a'', b'')
+    mkRTerm' sym children = lift $ mkRTerm unique sym children
+    mkAttribTerm' sym children = lift $ mkAttribTerm unique sym Nothing Nothing children
+    eval x' = lift $ evalStateT x' M.empty
+    seq2 action a' b' = do
+        a'' <- a'
+        b'' <- b'
+        action a'' b''
+
+    (~>) = liftM2 $ (,)
+    (.*) = seq2 $ \a' b' -> mkAttribTerm' Product [a', b']
+    (.+) = seq2 $ \a' b' -> mkAttribTerm' Sum [a', b']
     infixr 1 ~>
-    resolveVars action a' b' vars = do
-        (a'', vars')  <- a' vars
-        (b'', vars'') <- b' vars'
-        r <- action a'' b''
-        return (r, vars'')
-    (.*) = resolveVars $ \a' b' -> mkAttribTerm' Product [a', b']
     infixr 7 .*
-    (.+) = resolveVars $ \a' b' -> mkAttribTerm' Sum [a', b']
     infixr 6 .+
-    mkBlock rel aff = resolveVars $ \a' b' -> mkAttribTerm unique Block rel aff [a', b']
+    mkBlock rel aff = seq2 $ \a' b' -> lift $ mkAttribTerm unique Block rel aff [a', b']
     mkBlockAny = mkBlock Nothing Nothing
     mkBlockNew = mkBlock (Just False) (Just False)
-    unit vars = (, vars) <$> mkAttribTerm' Unit []
-    num  vars = (, vars) <$> mkAttribTerm' Num []
-    sealed seal v vars = do
-        (v', vars') <- v vars
-        (, vars') <$> mkAttribTerm' (Sealed seal) [v']
-    void' v vars = do
-        (v', vars') <- v vars
-        (, vars') <$> mkAttribTerm' Void [v']
+    unit = mkAttribTerm' Unit []
+    num  = mkAttribTerm' Num []
+    sealed seal v = do
+        v' <- v
+        mkAttribTerm' (Sealed seal) [v']
+    void' v = do
+        v' <- v
+        mkAttribTerm' Void [v']
 
     var  v = var' v Nothing Nothing
-    var' v relevant affine vars =
+    var' v relevant affine = do
+        vars <- get
         case M.lookup v vars of
-            Just v' -> return (v', vars)
+            Just v' -> return v'
             Nothing -> do
-                v' <- mkAttribVar unique v relevant affine
-                return (v', M.insert v v' vars)
+                v' <- lift $ mkAttribVar unique v relevant affine
+                modify $ M.insert v v'
+                return v'
 
     a = var "a"
     b = var "b"
@@ -435,25 +434,23 @@ opType unique = op
     xCopy = var' "x" Nothing (Just False)
     
     opMark relevant = do
-        x' <- eval x
-        y' <- eval y
-        b1 <- mkAttribTerm' Block [x', y']
-        t <- getType b1
-        (k, f) <- getAttribs b1
+        b1 <- eval $ mkBlockAny x y
+        t      <- lift $ getType b1
+        (k, f) <- lift $ getAttribs b1
         true <- mkRTerm' (Attrib True) []
         b2   <- mkRTerm' Attribs $ if relevant
                                        then [t, true, f]
                                        else [t, k, true]
-        exact b1 .* e ~> exact b2 .* e
+        return b1 .* e ~> return b2 .* e
 
     op (LitBlock block) = do
-        tys <- mapM (opType unique . runIdentity) block
+        tys <- lift $ mapM (opType unique . runIdentity) block
         case tys of
             [] -> s ~> mkBlockNew a a .* s
             _  -> do
                 let (a', _)  = head tys
                     (_,  b') = last tys
-                s ~> mkBlockNew (exact a') (exact b') .* s
+                s ~> mkBlockNew (return a') (return b') .* s
 
     op AssocL = a .* b .* c ~> (a .* b) .* c
     op AssocR = (a .* b) .* c ~> a .* b .* c
@@ -469,23 +466,23 @@ opType unique = op
         x' <- eval x
         y' <- eval y
         z' <- eval z
-        b1 <- eval $ mkBlockAny (exact x') (exact y')
-        b2 <- eval $ mkBlockAny (exact y') (exact z')
-        (b1k, b1f) <- getAttribs b1
-        (b2k, b2f) <- getAttribs b2
+        b1 <- eval $ mkBlockAny (return x') (return y')
+        b2 <- eval $ mkBlockAny (return y') (return z')
+        (b1k, b1f) <- lift $ getAttribs b1
+        (b2k, b2f) <- lift $ getAttribs b2
         k <- mkRTerm' Or [b1k, b2k]
         f <- mkRTerm' Or [b1f, b2f]
         t <- mkRTerm' Block [x', z']
         r <- mkRTerm' Attribs [t, k, f]
-        exact b1 .* exact b2 .* e ~> exact r .* e
+        return b1 .* return b2 .* e ~> return r .* e
     op Quote = do
         x' <- eval x
         s' <- eval s
-        (k, f) <- getAttribs x'
+        (k, f) <- lift $ getAttribs x'
         p <- mkAttribTerm' Product [x', s']
         t <- mkRTerm' Block [s', p]
         b' <- mkRTerm' Attribs [t, k, f]
-        exact x' .* e ~> exact b' .* e
+        return x' .* e ~> return b' .* e
     op Relevant = opMark True
     op Affine = opMark False
 
