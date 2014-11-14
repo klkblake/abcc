@@ -7,7 +7,7 @@ module Main where
 -- this time complexity!
 
 import Control.Applicative
-import Control.Monad
+import Control.Monad hiding (void)
 import Control.Monad.ST
 import Data.Functor.Identity
 import Data.List
@@ -125,6 +125,18 @@ fromRVar v = do
 matchingAttrib :: Bool -> Term s -> Bool
 matchingAttrib a (Term _ (Attrib a') _ _) = a == a'
 matchingAttrib _ _ = False
+
+getType :: RNode s -> ST s (RNode s)
+getType node = do
+    (Term _ _ cs _) <- fromRTerm node
+    MV.read cs 0
+
+getAttribs :: RNode s -> ST s (RNode s, RNode s)
+getAttribs node = do
+    (Term _ _ cs _) <- fromRTerm node
+    k <- MV.read cs 1
+    f <- MV.read cs 2
+    return (k, f)
 
 replaceNode :: RNode s -> Either (Term s) (Var s) -> ST s ()
 replaceNode (RNode ref) node = writeSTRef ref node
@@ -349,17 +361,15 @@ substitute (Term _ _ children stageRef) = do
 mkAttribTerm :: ST s ID -> Symbol -> Maybe Bool -> Maybe Bool -> [RNode s] -> ST s (RNode s)
 mkAttribTerm unique sym relevant affine children = do
     t <- mkRTerm' sym children
-    children' <- mapM fromRTerm children
     false <- mkRTerm' (Attrib False) []
-    k  <- mkAttrib children' false relevant getRelevant
-    f  <- mkAttrib children' false affine getAffine
+    (ks, fs) <- unzip <$> mapM getAttribs children
+    k  <- mkAttrib false relevant ks
+    f  <- mkAttrib false affine   fs
     mkRTerm' Attribs [t, k, f]
   where
     mkRTerm' = mkRTerm unique
-    getRelevant (Term _ _ cs _) = MV.read cs 1
-    getAffine   (Term _ _ cs _) = MV.read cs 2
-    mkAttrib _         _     (Just a) _   = mkRTerm' (Attrib a) []
-    mkAttrib children' false Nothing  get = foldM (simplifyOr mkOr) false =<< mapM get children'
+    mkAttrib _     (Just a) _   = mkRTerm' (Attrib a) []
+    mkAttrib false Nothing  attrs = foldM (simplifyOr mkOr) false attrs
     mkOr a b = mkRTerm' Or [a, b]
 
 mkAttribVar :: ST s ID -> String -> Maybe Bool -> Maybe Bool -> ST s (RNode s)
@@ -375,7 +385,10 @@ mkAttribVar unique name relevant affine = do
 opType :: ST s ID -> UntypedOp -> ST s (RNode s, RNode s)
 opType unique opcode = op opcode
   where
+    mkRTerm' = mkRTerm unique
     mkAttribTerm' sym children = mkAttribTerm unique sym Nothing Nothing children
+    exact x' = \vars -> return (x', vars)
+    eval  x' = fst <$> x' M.empty
     a' ~> b' = do
         (a'', vars) <- a' M.empty
         (b'', _)    <- b' vars
@@ -388,13 +401,19 @@ opType unique opcode = op opcode
         return (r, vars'')
     (.*) = resolveVars $ \a' b' -> mkAttribTerm' Product [a', b']
     infixr 7 .*
-    mkBlock = resolveVars $ \a' b' -> mkAttribTerm unique Block (Just False) (Just False) [a', b']
-    mkBlock' a' b' vars = do
-        let a'' = \vars -> return (a', vars)
-        let b'' = \vars -> return (b', vars)
-        (r, _) <- mkBlock a'' b'' M.empty
-        return (r, vars)
+    (.+) = resolveVars $ \a' b' -> mkAttribTerm' Sum [a', b']
+    infixr 6 .+
+    mkBlock rel aff = resolveVars $ \a' b' -> mkAttribTerm unique Block rel aff [a', b']
+    mkBlockAny = mkBlock Nothing Nothing
+    mkBlockNew = mkBlock (Just False) (Just False)
     unit = \vars -> (, vars) <$> mkAttribTerm' Unit []
+    num = \vars -> (, vars) <$> mkAttribTerm' Num []
+    sealed seal v = \vars -> do
+        (v', vars') <- v vars
+        (, vars') <$> mkAttribTerm' (Sealed seal) [v']
+    void v = \vars -> do
+        (v', vars') <- v vars
+        (, vars') <$> mkAttribTerm' Void [v']
 
     var  v = var' v Nothing Nothing
     var' v relevant affine = \vars ->
@@ -409,17 +428,21 @@ opType unique opcode = op opcode
     d = var "d"
     e = var "e"
     s = var "s"
+    x = var "x"
+    xp = var "x'"
+    y = var "y"
+    z = var "z"
     xDrop = var' "x" (Just False) Nothing
     xCopy = var' "x" Nothing (Just False)
 
     op (LitBlock block) = do
         tys <- mapM (opType unique . runIdentity) block
         case tys of
-            [] -> s ~> mkBlock a a .* s
+            [] -> s ~> mkBlockNew a a .* s
             _  -> do
                 let (a', _)  = head tys
                     (_,  b') = last tys
-                s ~> mkBlock' a' b' .* s
+                s ~> mkBlockNew (exact a') (exact b') .* s
 
     op AssocL = a .* b .* c ~> (a .* b) .* c
     op AssocR = (a .* b) .* c ~> a .* b .* c
@@ -430,14 +453,84 @@ opType unique opcode = op opcode
     op Drop   = xDrop .* e ~> e
     op Copy   = xCopy .* e ~> xCopy .* xCopy .* e
 
+    op Apply   = mkBlockAny x xp .* x .* e ~> xp .* e
+    op Compose = do
+        x' <- eval x
+        y' <- eval y
+        z' <- eval z
+        b1 <- eval $ mkBlockAny (exact x') (exact y')
+        b2 <- eval $ mkBlockAny (exact y') (exact z')
+        (b1k, b1f) <- getAttribs b1
+        (b2k, b2f) <- getAttribs b2
+        k <- mkRTerm' Or [b1k, b2k]
+        f <- mkRTerm' Or [b1f, b2f]
+        t <- mkRTerm' Block [x', z']
+        r <- mkRTerm' Attribs [t, k, f]
+        exact b1 .* exact b2 .* e ~> exact r .* e
+    op Quote = do
+        x' <- eval x
+        s' <- eval s
+        (k, f) <- getAttribs x'
+        p <- mkAttribTerm' Product [x', s']
+        t <- mkRTerm' Block [s', p]
+        b' <- mkRTerm' Attribs [t, k, f]
+        exact x' .* e ~> exact b' .* e
+    op Relevant = do
+        x' <- eval x
+        y' <- eval y
+        b1 <- mkAttribTerm' Block [x', y']
+        t <- getType b1
+        (_, f) <- getAttribs b1
+        true <- mkRTerm' (Attrib True) []
+        b2   <- mkRTerm' Attribs [t, true, f]
+        exact b1 .* e ~> exact b2 .* e
+    op Affine = do
+        x' <- eval x
+        y' <- eval y
+        b1 <- mkAttribTerm' Block [x', y']
+        t <- getType b1
+        (k, _) <- getAttribs b1
+        true <- mkRTerm' (Attrib True) []
+        b2   <- mkRTerm' Attribs [t, k, true]
+        exact b1 .* e ~> exact b2 .* e
+
+    op IntroNum  = e ~> num .* e
+    op (Digit _) = num .* e ~> num .* e
+
+    op Add      = num .* num .* e ~> num .* e
+    op Multiply = num .* num .* e ~> num .* e
+    op Inverse  = num .* e ~> num .* e
+    op Negate   = num .* e ~> num .* e
+    op Divmod   = num .* num .* e ~> num .* num .* e
+
+    op AssocLS = (a .+ b .+ c) .* e ~> ((a .+ b) .+ c) .* e
+    op AssocRS = ((a .+ b) .+ c) .* e ~> (a .+ b .+ c) .* e
+    op SwapS   = (a .+ b .+ c) .* e ~> (b .+ a .+ c) .* e
+    op SwapDS  = (a .+ b .+ c .+ d) .* e ~> (a .+ c .+ b .+ d) .* e
+    op Intro0  = a .* e ~> (a .+ void x) .* e
+    op Elim0   = (a .+ void x) .* e ~> a .* e
+
+    op CondApply = mkBlock Nothing (Just False) x xp .* (x .+ y) .* e ~> (xp .+ y) .* e
+    op Distrib   = a .* (b .+ c) .* e ~> (a .* b .+ a .* c) .* e
+    op Factor    = (a .* b .+ c .* d) .* e ~> (a .+ c) .* (b .+ d) .* e
+    op Merge     = (a .+ a) .* e ~> a .* e -- TODO add actual merged types
+    op Assert    = (a .+ b) .* e ~> b .* e
+
+    op Greater = num .* num .* e ~> (num .* num .+ num .* num) .* e
+
+    op (Sealer   seal) = a .* e ~> sealed seal a .* e
+    op (Unsealer seal) = sealed seal a .* e ~> a .* e
+
+    op AssertEQ = a .* b .* e ~> a .* b .* e
+    op DebugPrintRaw = a .* e ~> a .* e
+    op DebugPrintText = a .* e ~> a .* e -- TODO only accept text
+
 main :: IO ()
 main = putStrLn $ runST $ do
     counter <- newSTRef (0 :: Int)
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-        varNode v = mkAttribVar unique v Nothing Nothing
-        term sym children = mkAttribTerm unique sym Nothing Nothing children
     let showTerm label xs = showSubgraph label =<< mkTerm unique (Sealed label) xs
         errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
     exprs <- mapM (opType unique) [Intro1, AssocR, Swap, AssocL, Elim1, LitBlock [], LitBlock $ map Identity [AssocL, AssocR]]
