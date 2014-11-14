@@ -1,6 +1,7 @@
 {-# LANGUAGE TypeFamilies, TupleSections #-}
 module GraphViz
     ( ID
+    , Mode (..)
     , Node (..)
     , GraphViz (..)
     , showSubgraph
@@ -28,20 +29,22 @@ showNode prefix ident label = showID prefix ident . showLabel label . showChar '
 showEdge :: String -> ID -> ID -> String -> ShowS
 showEdge prefix from to label = showID prefix from . showString " -> " . showID prefix to . showLabel label . showChar '\n'
 
+data Mode = Verbose | Compact
+
 data Node s = Node ID String [(String, ST s (Node s))]
 
 class GraphViz g where
     type State g
-    toNode :: g -> ST (State g) (Node (State g))
+    toNode :: Mode -> g -> ST (State g) (Node (State g))
 
 instance (GraphViz a, GraphViz b, State a ~ State b) => GraphViz (Either a b) where
     type State (Either a b) = State a
-    toNode (Left  x) = toNode x
-    toNode (Right y) = toNode y
+    toNode mode (Left  x) = toNode mode x
+    toNode mode (Right y) = toNode mode y
 
-showSubgraph :: GraphViz g => String -> g -> ST (State g) String
-showSubgraph name g = do
-    node <- toNode g
+showSubgraph :: GraphViz g => Mode -> String -> g -> ST (State g) String
+showSubgraph mode name g = do
+    node <- toNode mode g
     ($ "") . (showString "subgraph {\n" .) . (. showString "\n}") <$> go IS.empty (Just (node, Q.empty))
   where
     go _ Nothing = return id
@@ -50,4 +53,4 @@ showSubgraph name g = do
         let seen' = IS.insert ident seen
         children' <- mapM (\(x, y) -> (x,) <$> y) children
         let chunk = showNode name ident label . foldr (\(l, Node ident' _ _) s -> showEdge name ident ident' l . s) id children'
-        fmap (chunk .) . go seen' . Q.pop . foldl' Q.push queue $map snd children'
+        fmap (chunk .) . go seen' . Q.pop . foldl' Q.push queue $ map snd children'

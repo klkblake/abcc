@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, TupleSections #-}
+{-# LANGUAGE TypeFamilies, TupleSections, FlexibleInstances, FlexibleContexts #-}
 module TypeInferencer
     ( inferTypes
     ) where
@@ -75,24 +75,51 @@ newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
 
 instance GraphViz (Term s) where
     type State (Term s) = s
-    toNode (Term ident sym children _) = Node ident label <$> labelledChildren
+    toNode mode (Term ident sym children _) =
+        case mode of
+            Verbose -> toNode'
+            Compact -> case sym of
+                           Attribs -> do
+                               t <- fromRNode =<< MV.read children 0
+                               k <- fromRNode =<< MV.read children 1
+                               f <- fromRNode =<< MV.read children 2
+                               Node _ label' labelledChildren' <- toNode mode t
+                               let (kl, kc) = case k of
+                                                  Left (Term _ (Attrib True)  _ _) -> ("k", [])
+                                                  Left (Term _ (Attrib False) _ _) -> ("", [])
+                                                  _ -> ("", [("k", toNode mode k)])
+                               let (fl, fc) = case f of
+                                                  Left (Term _ (Attrib True)  _ _) -> ("f", [])
+                                                  Left (Term _ (Attrib False) _ _) -> ("", [])
+                                                  _ -> ("", [("f", toNode mode f)])
+                               return $ Node ident (label' ++ " " ++ kl ++ fl) $ kc ++ fc ++ labelledChildren'
+                           _ -> toNode'
       where
+        toNode' = Node ident label <$> labelledChildren
         label = show sym
-        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> (V.mapM fromRNode =<< V.freeze children)
+        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map (toNode mode) . V.toList <$> (V.mapM fromRNode =<< V.freeze children)
 
 instance GraphViz (Var s) where
     type State (Var s) = s
-    toNode (Var ident sym ty repRef terms varCountRef) = Node ident <$> label <*> labelledChildren
+    toNode mode (Var ident sym ty repRef terms varCountRef) =
+        case mode of
+            Verbose -> toNode'
+            Compact -> do
+                rep' <- readSTRef repRef
+                case rep' of
+                    Just r -> toNode mode r
+                    Nothing -> toNode'
       where
+        toNode' = Node ident <$> label <*> labelledChildren
         label = do
             varCount <- readSTRef varCountRef
             return $ sym ++ " (" ++ show varCount ++ ")" ++ if ty == Structural then "" else " kf"
         labelledChildren = do
             rep' <- readSTRef repRef
             let repEdge = case rep' of
-                              Just r -> [("rep", toNode r)]
+                              Just r -> [("rep", toNode mode r)]
                               Nothing -> []
-            (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map toNode <$> (mapM fromRNode =<< V.toList . TL.toVector <$> readSTRef terms)
+            (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map (toNode mode) <$> (mapM fromRNode =<< V.toList . TL.toVector <$> readSTRef terms)
 
 mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Term s)
 mkTerm unique sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef New
@@ -540,7 +567,7 @@ inferTypes ops = runST $ do
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-    let showTerm label xs = showSubgraph label =<< mkTerm unique (Sealed label) xs
+    let showTerm label xs = showSubgraph Verbose label =<< mkTerm unique (Sealed label) xs
         errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
     exprs <- mapM (opType unique) ops
     let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
@@ -550,7 +577,7 @@ inferTypes ops = runST $ do
     err <- foldM unifyPair Nothing . zip (map snd exprs) . map fst $ tail exprs
     case err of
         Just (t1, t2) -> do
-            e <- showSubgraph "error" =<< errorTerm t1 t2
+            e <- showSubgraph Verbose "error" =<< errorTerm t1 t2
             return $ "digraph {" ++ e ++ "}"
         Nothing -> do
             g2 <- showTerm "unify" flatExprs
