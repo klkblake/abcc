@@ -7,7 +7,7 @@ module Main where
 -- this time complexity!
 
 import Control.Applicative
-import Control.Monad hiding (void)
+import Control.Monad
 import Control.Monad.ST
 import Data.Functor.Identity
 import Data.List
@@ -73,11 +73,9 @@ newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
 
 instance GraphViz (Term s) where
     type State (Term s) = s
-    toNode (Term ident sym children stageRef) = Node ident label labelledChildren
+    toNode (Term ident sym children _) = Node ident label labelledChildren
       where
-        label = do
-            stage <- readSTRef stageRef
-            return $ show sym
+        label = return $ show sym
         labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> (V.mapM fromRNode =<< V.freeze children)
 
 instance GraphViz (Var s) where
@@ -139,7 +137,7 @@ getAttribs node = do
     return (k, f)
 
 replaceNode :: RNode s -> Either (Term s) (Var s) -> ST s ()
-replaceNode (RNode ref) node = writeSTRef ref node
+replaceNode (RNode ref) = writeSTRef ref
 
 add :: Queue (Var s) -> Var s -> RNode s -> ST s (Queue (Var s))
 add queue v@(Var _ _ ty _ termsRef _) t = do
@@ -220,7 +218,7 @@ commonFrontier unique queue t_list = do
                     Or       -> fmap Right . genSubVar queue' i $ t:terms
                     Attrib a -> do
                         terms' <- mapM fromRTerm terms
-                        Right <$> if null $ filter (not . matchingAttrib a) terms'
+                        Right <$> if all (matchingAttrib a) terms'
                                       then return queue'
                                       else genSubVar queue' i $ t:terms
                     _ -> commonFrontier unique queue' . V.fromList =<< mapM fromRTerm (t:terms)
@@ -234,7 +232,7 @@ commonFrontier unique queue t_list = do
     genSubVar queue' i terms = do
         v <- mkRVar unique "attr" Substructural
         v' <- fromRVar v
-        queue'' <- foldM (\q -> add q v') queue' terms
+        queue'' <- foldM (`add` v') queue' terms
         let Term _ _ cs _ = t_list V.! 0
         MV.write cs i v
         return queue''
@@ -342,7 +340,7 @@ deloop unique node = do
     mergeVar v v' = do
             vr@(Var ident _ _ _ _ _) <- rep v
             vr'@(Var ident' _ _ _ _ _) <- rep v'
-            when (ident /= ident') $ merge Q.empty vr vr' >> return ()
+            when (ident /= ident') . void $ merge Q.empty vr vr'
 
 substitute :: Term s -> ST s ()
 substitute (Term _ _ children stageRef) = do
@@ -383,18 +381,18 @@ mkAttribVar unique name relevant affine = do
     mkAttrib Nothing  suffix = mkRVar unique (name ++ suffix) Substructural
 
 opType :: ST s ID -> UntypedOp -> ST s (RNode s, RNode s)
-opType unique opcode = op opcode
+opType unique = op
   where
     mkRTerm' = mkRTerm unique
-    mkAttribTerm' sym children = mkAttribTerm unique sym Nothing Nothing children
-    exact x' = \vars -> return (x', vars)
+    mkAttribTerm' sym = mkAttribTerm unique sym Nothing Nothing
+    exact x' vars = return (x', vars)
     eval  x' = fst <$> x' M.empty
     a' ~> b' = do
         (a'', vars) <- a' M.empty
         (b'', _)    <- b' vars
         return (a'', b'')
     infixr 1 ~>
-    resolveVars action = \a' b' vars -> do
+    resolveVars action a' b' vars = do
         (a'', vars')  <- a' vars
         (b'', vars'') <- b' vars'
         r <- action a'' b''
@@ -406,22 +404,23 @@ opType unique opcode = op opcode
     mkBlock rel aff = resolveVars $ \a' b' -> mkAttribTerm unique Block rel aff [a', b']
     mkBlockAny = mkBlock Nothing Nothing
     mkBlockNew = mkBlock (Just False) (Just False)
-    unit = \vars -> (, vars) <$> mkAttribTerm' Unit []
-    num = \vars -> (, vars) <$> mkAttribTerm' Num []
-    sealed seal v = \vars -> do
+    unit vars = (, vars) <$> mkAttribTerm' Unit []
+    num  vars = (, vars) <$> mkAttribTerm' Num []
+    sealed seal v vars = do
         (v', vars') <- v vars
         (, vars') <$> mkAttribTerm' (Sealed seal) [v']
-    void v = \vars -> do
+    void' v vars = do
         (v', vars') <- v vars
         (, vars') <$> mkAttribTerm' Void [v']
 
     var  v = var' v Nothing Nothing
-    var' v relevant affine = \vars ->
+    var' v relevant affine vars =
         case M.lookup v vars of
             Just v' -> return (v', vars)
             Nothing -> do
                 v' <- mkAttribVar unique v relevant affine
                 return (v', M.insert v v' vars)
+
     a = var "a"
     b = var "b"
     c = var "c"
@@ -434,6 +433,18 @@ opType unique opcode = op opcode
     z = var "z"
     xDrop = var' "x" (Just False) Nothing
     xCopy = var' "x" Nothing (Just False)
+    
+    opMark relevant = do
+        x' <- eval x
+        y' <- eval y
+        b1 <- mkAttribTerm' Block [x', y']
+        t <- getType b1
+        (k, f) <- getAttribs b1
+        true <- mkRTerm' (Attrib True) []
+        b2   <- mkRTerm' Attribs $ if relevant
+                                       then [t, true, f]
+                                       else [t, k, true]
+        exact b1 .* e ~> exact b2 .* e
 
     op (LitBlock block) = do
         tys <- mapM (opType unique . runIdentity) block
@@ -475,24 +486,8 @@ opType unique opcode = op opcode
         t <- mkRTerm' Block [s', p]
         b' <- mkRTerm' Attribs [t, k, f]
         exact x' .* e ~> exact b' .* e
-    op Relevant = do
-        x' <- eval x
-        y' <- eval y
-        b1 <- mkAttribTerm' Block [x', y']
-        t <- getType b1
-        (_, f) <- getAttribs b1
-        true <- mkRTerm' (Attrib True) []
-        b2   <- mkRTerm' Attribs [t, true, f]
-        exact b1 .* e ~> exact b2 .* e
-    op Affine = do
-        x' <- eval x
-        y' <- eval y
-        b1 <- mkAttribTerm' Block [x', y']
-        t <- getType b1
-        (k, _) <- getAttribs b1
-        true <- mkRTerm' (Attrib True) []
-        b2   <- mkRTerm' Attribs [t, k, true]
-        exact b1 .* e ~> exact b2 .* e
+    op Relevant = opMark True
+    op Affine = opMark False
 
     op IntroNum  = e ~> num .* e
     op (Digit _) = num .* e ~> num .* e
@@ -507,8 +502,8 @@ opType unique opcode = op opcode
     op AssocRS = ((a .+ b) .+ c) .* e ~> (a .+ b .+ c) .* e
     op SwapS   = (a .+ b .+ c) .* e ~> (b .+ a .+ c) .* e
     op SwapDS  = (a .+ b .+ c .+ d) .* e ~> (a .+ c .+ b .+ d) .* e
-    op Intro0  = a .* e ~> (a .+ void x) .* e
-    op Elim0   = (a .+ void x) .* e ~> a .* e
+    op Intro0  = a .* e ~> (a .+ void' x) .* e
+    op Elim0   = (a .+ void' x) .* e ~> a .* e
 
     op CondApply = mkBlock Nothing (Just False) x xp .* (x .+ y) .* e ~> (xp .+ y) .* e
     op Distrib   = a .* (b .+ c) .* e ~> (a .* b .+ a .* c) .* e
@@ -524,6 +519,8 @@ opType unique opcode = op opcode
     op AssertEQ = a .* b .* e ~> a .* b .* e
     op DebugPrintRaw = a .* e ~> a .* e
     op DebugPrintText = a .* e ~> a .* e -- TODO only accept text
+
+    op ApplyTail = error "To be removed."
 
 main :: IO ()
 main = putStrLn $ runST $ do
