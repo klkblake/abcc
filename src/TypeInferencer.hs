@@ -571,7 +571,7 @@ inferTypes ops = runST $ do
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-    let showTerm label xs = showSubgraph Verbose label =<< mkTerm unique (Sealed label) xs
+    let showTerm label xs = showSubgraph Compact label =<< mkTerm unique (Sealed label) xs
         errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
     exprs <- mapM (opType unique) ops
     let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
@@ -581,7 +581,7 @@ inferTypes ops = runST $ do
     err <- foldM unifyPair Nothing . zip (map snd exprs) . map fst $ tail exprs
     case err of
         Just (t1, t2) -> do
-            e <- showSubgraph Verbose "error" =<< errorTerm t1 t2
+            e <- showSubgraph Compact "error" =<< errorTerm t1 t2
             return $ "digraph {" ++ e ++ "}"
         Nothing -> do
             g2 <- showTerm "unify" flatExprs
