@@ -432,6 +432,13 @@ opType unique = flip evalStateT M.empty . op
     z = var "z"
     xDrop = var' "x" (Just False) Nothing
     xCopy = var' "x" Nothing (Just False)
+
+    mkText = do
+        v <- eval $ var' "L" (Just False) (Just False)
+        list <- eval $ num .* return v .+ unit
+        Var _ _ _ _ termRef _ <- lift $ fromRVar =<< getType v
+        lift $ writeSTRef termRef $ TL.singleton list
+        return v
     
     opMark relevant = do
         b1 <- eval $ mkBlockAny x y
@@ -451,6 +458,9 @@ opType unique = flip evalStateT M.empty . op
                 let (a', _)  = head tys
                     (_,  b') = last tys
                 s ~> mkBlockNew (return a') (return b') .* s
+    op (LitText _) = do
+        text <- mkText
+        e ~> return text .* e
 
     op AssocL = a .* b .* c ~> (a .* b) .* c
     op AssocR = (a .* b) .* c ~> a .* b .* c
@@ -515,7 +525,9 @@ opType unique = flip evalStateT M.empty . op
 
     op AssertEQ = a .* b .* e ~> a .* b .* e
     op DebugPrintRaw = a .* e ~> a .* e
-    op DebugPrintText = a .* e ~> a .* e -- TODO only accept text
+    op DebugPrintText = do
+        text <- mkText
+        return text .* e ~> return text .* e
 
     op ApplyTail = error "To be removed."
 
@@ -527,7 +539,7 @@ main = putStrLn $ runST $ do
             readSTRef counter
     let showTerm label xs = showSubgraph label =<< mkTerm unique (Sealed label) xs
         errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
-    exprs <- mapM (opType unique) [Intro1, AssocR, Swap, AssocL, Elim1, LitBlock [], LitBlock $ map Identity [AssocL, AssocR]]
+    exprs <- mapM (opType unique) [LitText "This is a text literal", DebugPrintText, Drop]
     let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
     g1 <- showTerm "initial" flatExprs
     let unifyPair (Just err) _      = return $ Just err
