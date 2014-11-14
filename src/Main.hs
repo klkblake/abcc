@@ -6,13 +6,8 @@ import System.Environment
 import System.IO
 import System.Exit
 
-import Type
-import Op
-
 import Parser
-import AddTypes
-import UnifyTypes
-import ResolveFlags
+import TypeInferencer
 import Codegen
 
 raise :: Monad m => State s a -> StateT s m a
@@ -33,10 +28,8 @@ doTypeCheck = do
     input <- getContents
     ops <- parse input
     case ops of
-        Just ops' -> case runStateT (raise (addTypes ops') >>= unifyTypes >>= resolveFlags >>= mapM reifyPTyped) emptyTCX of
-                         Left err -> putStrLn err >> exitFailure
-                         Right (ops'', tcx) -> putStrLn (showOps 0 ops'') >> print tcx
-        Nothing -> exitFailure
+        Just ops' -> putStrLn $ inferTypes ops'
+        Nothing   -> exitFailure
 
 main :: IO ()
 main = do

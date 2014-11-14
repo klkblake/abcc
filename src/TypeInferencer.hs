@@ -1,7 +1,6 @@
 {-# LANGUAGE TypeFamilies, TupleSections #-}
-module Main
+module TypeInferencer
     ( inferTypes
-    , main
     ) where
 
 -- Implementation of the algorithm described in "Efficient Unification over
@@ -559,6 +558,3 @@ inferTypes ops = runST $ do
             mapM_ substitute =<< mapM fromRTerm flatExprs
             g4 <- showTerm "substitute" flatExprs
             return $ intercalate "\n" ["digraph {", g1, g2, g3, g4, "}"]
-
-main :: IO ()
-main = putStrLn $ inferTypes [LitText "This is a text literal", DebugPrintText, Drop]
