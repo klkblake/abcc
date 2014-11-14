@@ -75,14 +75,14 @@ newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
 
 instance GraphViz (Term s) where
     type State (Term s) = s
-    toNode (Term ident sym children _) = Node ident label labelledChildren
+    toNode (Term ident sym children _) = Node ident label <$> labelledChildren
       where
-        label = return $ show sym
+        label = show sym
         labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map toNode . V.toList <$> (V.mapM fromRNode =<< V.freeze children)
 
 instance GraphViz (Var s) where
     type State (Var s) = s
-    toNode (Var ident sym ty repRef terms varCountRef) = Node ident label labelledChildren
+    toNode (Var ident sym ty repRef terms varCountRef) = Node ident <$> label <*> labelledChildren
       where
         label = do
             varCount <- readSTRef varCountRef
