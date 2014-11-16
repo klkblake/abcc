@@ -26,6 +26,7 @@ executable abcc
       , mmorph
       , vector
       , pipes
+      , multiarg
       , trifecta
       , ansi-wl-pprint
       , llvm-general-pure >=3.4 && <3.5
