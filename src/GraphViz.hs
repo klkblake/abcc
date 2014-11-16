@@ -46,7 +46,7 @@ instance (GraphViz a, GraphViz b, State a ~ State b) => GraphViz (Either a b) wh
 showSubgraph :: GraphViz g => Mode -> String -> g -> ST (State g) String
 showSubgraph mode name g = do
     node <- toNode mode g
-    ($ "") . (showString "subgraph {\n" .) . (. showString "\n}") <$> go IS.empty (Just (node, Q.empty))
+    ($ "") . (showString "subgraph {\n" .) . (. showChar '}') <$> go IS.empty (Just (node, Q.empty))
   where
     go _ Nothing = return id
     go seen (Just (Node ident _ _, queue)) | IS.member ident seen = go seen $ Q.pop queue
