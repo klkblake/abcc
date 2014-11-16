@@ -1,6 +1,7 @@
 {-# LANGUAGE TypeFamilies, TupleSections, FlexibleInstances, FlexibleContexts #-}
 module TypeInferencer
     ( inferTypes
+    , TIStage (..)
     ) where
 
 -- Implementation of the algorithm described in "Efficient Unification over
@@ -26,6 +27,12 @@ import TreeList (TreeList)
 import qualified TreeList as TL
 import Queue (Queue)
 import qualified Queue as Q
+
+data TIStage = TIInitial
+             | TIUnified
+             | TIResolved
+             | TISubstituted
+             deriving (Eq, Enum, Bounded, Show)
 
 data Symbol = Product
             | Sum
@@ -565,26 +572,29 @@ opType unique = flip evalStateT M.empty . blockOrOp
 
     op ApplyTail = error "To be removed."
 
-inferTypes :: [RawOp] -> Producer String (ST s) (Either String ())
-inferTypes ops = do
+inferTypes :: [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either String ())
+inferTypes logStages ops = do
     counter <- lift $ newSTRef (0 :: Int)
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-    let writeGraph label xs = yield =<< lift (showGraph Compact =<< mkTerm unique (Sealed label) xs)
+    let writeGraph stage xs =
+            when (stage `elem` logStages) $ do
+                graph <- lift (showGraph Compact =<< mkTerm unique (Sealed $ show stage) xs)
+                yield (stage, graph)
         errorTerm x y = lift $ showGraph Compact =<< mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
         unifyPair (Just err) _      = return $ Just err
         unifyPair Nothing    (a, b) = unify unique =<< V.mapM fromRTerm (V.fromList [a, b])
     exprs <- lift $ mapM (opType unique) ops
     let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
-    writeGraph "initial" flatExprs
+    writeGraph TIInitial flatExprs
     err <- lift $ foldM unifyPair Nothing . zip (map snd exprs) . map fst $ tail exprs
     case err of
         Just (t1, t2) -> Left <$> errorTerm t1 t2
         Nothing -> do
-            writeGraph "unify" flatExprs
+            writeGraph TIUnified flatExprs
             lift $ mapM_ (deloop unique) flatExprs
-            writeGraph "deloop" flatExprs
+            writeGraph TIResolved flatExprs
             lift $ mapM_ substitute =<< mapM fromRTerm flatExprs
-            writeGraph "substitute" flatExprs
+            writeGraph TISubstituted flatExprs
             return $ Right ()

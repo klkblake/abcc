@@ -31,7 +31,7 @@ doTypeCheck = do
     input <- getContents
     ops <- parse input
     case ops of
-        Just ops' -> print =<< runEffect (for (hoist stToIO $ inferTypes ops') $ lift . putStrLn)
+        Just ops' -> print =<< runEffect (for (hoist stToIO $ inferTypes [minBound .. maxBound] ops') $ lift . putStrLn . snd)
         Nothing   -> exitFailure
 
 main :: IO ()
