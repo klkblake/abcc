@@ -4,6 +4,7 @@ module GraphViz
     , Mode (..)
     , Node (..)
     , GraphViz (..)
+    , showGraph
     , showSubgraph
     ) where
 
@@ -54,3 +55,8 @@ showSubgraph mode name g = do
         children' <- mapM (\(x, y) -> (x,) <$> y) children
         let chunk = showNode name ident label . foldr (\(l, Node ident' _ _) s -> showEdge name ident ident' l . s) id children'
         fmap (chunk .) . go seen' . Q.pop . foldl' Q.push queue $ map snd children'
+
+showGraph :: GraphViz g => Mode -> String -> g -> ST (State g) String
+showGraph mode name g = do
+    sub <- showSubgraph mode name g
+    return $ "digraph {\n" ++ sub ++ "\n}"

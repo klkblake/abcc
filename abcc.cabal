@@ -23,7 +23,9 @@ executable abcc
       , containers
       , mtl
       , transformers
+      , mmorph
       , vector
+      , pipes
       , trifecta
       , ansi-wl-pprint
       , llvm-general-pure >=3.4 && <3.5

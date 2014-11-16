@@ -1,6 +1,9 @@
 module Main where
 
+import Control.Monad.Morph
+import Control.Monad.ST
 import Control.Monad.State
+import Pipes
 
 import System.Environment
 import System.IO
@@ -28,7 +31,7 @@ doTypeCheck = do
     input <- getContents
     ops <- parse input
     case ops of
-        Just ops' -> putStrLn $ inferTypes ops'
+        Just ops' -> print =<< runEffect (for (hoist stToIO $ inferTypes ops') $ lift . putStrLn)
         Nothing   -> exitFailure
 
 main :: IO ()

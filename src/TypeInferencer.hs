@@ -12,12 +12,12 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
 import Control.Monad.State
-import Data.List
 import qualified Data.Map.Strict as M
 import Data.STRef
 import qualified Data.Vector as V
 import Data.Vector.Mutable (MVector)
 import qualified Data.Vector.Mutable as MV
+import Pipes hiding ((~>))
 
 import Op
 
@@ -565,28 +565,26 @@ opType unique = flip evalStateT M.empty . blockOrOp
 
     op ApplyTail = error "To be removed."
 
-inferTypes :: [RawOp] -> String
-inferTypes ops = runST $ do
-    counter <- newSTRef (0 :: Int)
+inferTypes :: [RawOp] -> Producer String (ST s) (Either String ())
+inferTypes ops = do
+    counter <- lift $ newSTRef (0 :: Int)
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-    let showTerm label xs = showSubgraph Compact label =<< mkTerm unique (Sealed label) xs
+    let writeGraph label xs = yield =<< lift (showGraph Compact label =<< mkTerm unique (Sealed label) xs)
         errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
-    exprs <- mapM (opType unique) ops
-    let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
-    g1 <- showTerm "initial" flatExprs
-    let unifyPair (Just err) _      = return $ Just err
+        unifyPair (Just err) _      = return $ Just err
         unifyPair Nothing    (a, b) = unify unique =<< V.mapM fromRTerm (V.fromList [a, b])
-    err <- foldM unifyPair Nothing . zip (map snd exprs) . map fst $ tail exprs
+    exprs <- lift $ mapM (opType unique) ops
+    let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
+    writeGraph "initial" flatExprs
+    err <- lift $ foldM unifyPair Nothing . zip (map snd exprs) . map fst $ tail exprs
     case err of
-        Just (t1, t2) -> do
-            e <- showSubgraph Compact "error" =<< errorTerm t1 t2
-            return $ "digraph {" ++ e ++ "}"
+        Just (t1, t2) -> Left <$> lift (showGraph Compact "error" =<< errorTerm t1 t2)
         Nothing -> do
-            g2 <- showTerm "unify" flatExprs
-            mapM_ (deloop unique) flatExprs
-            g3 <- showTerm "deloop" flatExprs
-            mapM_ substitute =<< mapM fromRTerm flatExprs
-            g4 <- showTerm "substitute" flatExprs
-            return $ intercalate "\n" ["digraph {", g1, g2, g3, g4, "}"]
+            writeGraph "unify" flatExprs
+            lift $ mapM_ (deloop unique) flatExprs
+            writeGraph "deloop" flatExprs
+            lift $ mapM_ substitute =<< mapM fromRTerm flatExprs
+            writeGraph "substitute" flatExprs
+            return $ Right ()
