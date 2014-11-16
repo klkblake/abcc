@@ -571,8 +571,8 @@ inferTypes ops = do
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-    let writeGraph label xs = yield =<< lift (showGraph Compact label =<< mkTerm unique (Sealed label) xs)
-        errorTerm x y = mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
+    let writeGraph label xs = yield =<< lift (showGraph Compact =<< mkTerm unique (Sealed label) xs)
+        errorTerm x y = lift $ showGraph Compact =<< mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
         unifyPair (Just err) _      = return $ Just err
         unifyPair Nothing    (a, b) = unify unique =<< V.mapM fromRTerm (V.fromList [a, b])
     exprs <- lift $ mapM (opType unique) ops
@@ -580,7 +580,7 @@ inferTypes ops = do
     writeGraph "initial" flatExprs
     err <- lift $ foldM unifyPair Nothing . zip (map snd exprs) . map fst $ tail exprs
     case err of
-        Just (t1, t2) -> Left <$> lift (showGraph Compact "error" =<< errorTerm t1 t2)
+        Just (t1, t2) -> Left <$> errorTerm t1 t2
         Nothing -> do
             writeGraph "unify" flatExprs
             lift $ mapM_ (deloop unique) flatExprs

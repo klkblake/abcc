@@ -5,7 +5,6 @@ module GraphViz
     , Node (..)
     , GraphViz (..)
     , showGraph
-    , showSubgraph
     ) where
 
 import Control.Applicative
@@ -18,17 +17,17 @@ import qualified Queue as Q
 
 type ID = Int
 
-showID :: String -> ID -> ShowS
-showID prefix ident = showString prefix . showChar '_' . showInt ident
+showID :: ID -> ShowS
+showID ident = showString "node_" . showInt ident
 
 showLabel :: String -> ShowS
 showLabel label = showString " [label=\"" . showString label . showString "\"]"
 
-showNode :: String -> ID -> String -> ShowS
-showNode prefix ident label = showID prefix ident . showLabel label . showChar '\n'
+showNode :: ID -> String -> ShowS
+showNode ident label = showID ident . showLabel label . showChar '\n'
 
-showEdge :: String -> ID -> ID -> String -> ShowS
-showEdge prefix from to label = showID prefix from . showString " -> " . showID prefix to . showLabel label . showChar '\n'
+showEdge :: ID -> ID -> String -> ShowS
+showEdge from to label = showID from . showString " -> " . showID to . showLabel label . showChar '\n'
 
 data Mode = Verbose | Compact
 
@@ -43,20 +42,15 @@ instance (GraphViz a, GraphViz b, State a ~ State b) => GraphViz (Either a b) wh
     toNode mode (Left  x) = toNode mode x
     toNode mode (Right y) = toNode mode y
 
-showSubgraph :: GraphViz g => Mode -> String -> g -> ST (State g) String
-showSubgraph mode name g = do
+showGraph :: GraphViz g => Mode -> g -> ST (State g) String
+showGraph mode g = do
     node <- toNode mode g
-    ($ "") . (showString "subgraph {\n" .) . (. showChar '}') <$> go IS.empty (Just (node, Q.empty))
+    ($ "") . (showString "digraph {\n" .) . (. showChar '}') <$> go IS.empty (Just (node, Q.empty))
   where
     go _ Nothing = return id
     go seen (Just (Node ident _ _, queue)) | IS.member ident seen = go seen $ Q.pop queue
     go seen (Just (Node ident label children, queue)) = do
         let seen' = IS.insert ident seen
         children' <- mapM (\(x, y) -> (x,) <$> y) children
-        let chunk = showNode name ident label . foldr (\(l, Node ident' _ _) s -> showEdge name ident ident' l . s) id children'
+        let chunk = showNode ident label . foldr (\(l, Node ident' _ _) s -> showEdge ident ident' l . s) id children'
         fmap (chunk .) . go seen' . Q.pop . foldl' Q.push queue $ map snd children'
-
-showGraph :: GraphViz g => Mode -> String -> g -> ST (State g) String
-showGraph mode name g = do
-    sub <- showSubgraph mode name g
-    return $ "digraph {\n" ++ sub ++ "\n}"
