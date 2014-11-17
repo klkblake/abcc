@@ -84,7 +84,9 @@ doTypeCheck opts = do
         Just ops' -> do
             let dump = map fst $ optDump opts
             res <- runEffect (for (hoist stToIO $ inferTypes dump ops') $ lift . writeGraph)
-            print res
+            case res of
+                Left err -> putStrLn err >> exitFailure
+                Right _ -> return ()
         Nothing   -> exitFailure
   where
     writeGraph (stage, graph) = writeFile (fromJust . lookup stage $ optDump opts) graph
