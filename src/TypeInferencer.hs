@@ -76,7 +76,7 @@ data VarType = Structural | Substructural deriving Eq
 
 data Term s = Term ID Symbol (MVector s (RNode s)) (STRef s Stage)
 
-data Var s = Var ID String VarType (STRef s (Maybe (Var s))) (STRef s (TreeList (RNode s))) (STRef s Int)
+data Var s = Var ID String VarType (STRef s (Maybe (Var s))) (STRef s (TreeList (RNode s))) (STRef s (TreeList (RNode s, RNode s))) (STRef s Int)
 
 newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
 
@@ -108,7 +108,7 @@ instance GraphViz (Term s) where
 
 instance GraphViz (Var s) where
     type State (Var s) = s
-    toNode mode (Var ident sym ty repRef terms varCountRef) =
+    toNode mode (Var ident sym ty repRef terms mergesRef varCountRef) =
         case mode of
             Verbose -> toNode'
             Compact -> do
@@ -128,13 +128,19 @@ instance GraphViz (Var s) where
             let repEdge = case rep' of
                               Just r -> [("rep", toNode mode r)]
                               Nothing -> []
-            (repEdge ++) . zip (map (('#':) . show) [1 :: Int ..]) . map (toNode mode) <$> (mapM fromRNode =<< V.toList . TL.toVector <$> readSTRef terms)
+            termEdges <- zip numbers <$> (mapM fromRNode' =<< V.toList . TL.toVector <$> readSTRef terms)
+            (mergesLeft, mergesRight) <- unzip . V.toList . TL.toVector <$> readSTRef mergesRef
+            mergesLeftEdges  <- zip (map ("ML" ++) numbers) <$> mapM fromRNode' mergesLeft
+            mergesRightEdges <- zip (map ("MR" ++) numbers) <$> mapM fromRNode' mergesRight
+            return $ repEdge ++ termEdges ++ mergesLeftEdges ++ mergesRightEdges
+        numbers = map (('#':) . show) [1 :: Int ..]
+        fromRNode' rn = toNode mode <$> fromRNode rn
 
 mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Term s)
 mkTerm unique sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef New
 
 mkVar :: ST s ID -> String -> VarType -> ST s (Var s)
-mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef 1
+mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> newSTRef 1
 
 toRNode :: Either (Term s) (Var s) -> ST s (RNode s)
 toRNode node = RNode <$> newSTRef node
@@ -178,7 +184,7 @@ replaceNode :: RNode s -> Either (Term s) (Var s) -> ST s ()
 replaceNode (RNode ref) = writeSTRef ref
 
 add :: Queue (Var s) -> Var s -> RNode s -> ST s (Queue (Var s))
-add queue v@(Var _ _ ty _ termsRef _) t = do
+add queue v@(Var _ _ ty _ termsRef _ _) t = do
     ts <- readSTRef termsRef
     writeSTRef termsRef $ TL.cons t ts
     return $ if TL.size ts == 1 && ty == Structural
@@ -186,7 +192,7 @@ add queue v@(Var _ _ ty _ termsRef _) t = do
                  else queue
 
 merge :: Queue (Var s) -> Var s -> Var s -> ST s (Queue (Var s))
-merge queue v1@(Var _ _ _ _ _ varCountRef1) v2@(Var _ _ _ _ _ varCountRef2) = do
+merge queue v1@(Var _ _ _ _ _ _ varCountRef1) v2@(Var _ _ _ _ _ _ varCountRef2) = do
     r1 <- readSTRef varCountRef1
     r2 <- readSTRef varCountRef2
     let vc = r1 + r2
@@ -194,11 +200,14 @@ merge queue v1@(Var _ _ _ _ _ varCountRef1) v2@(Var _ _ _ _ _ varCountRef2) = do
         then go vc v1 v2
         else go vc v2 v1
   where
-    go vc bigV@(Var _ _ ty _ bigTermsRef bigVarCountRef) (Var _ _ _ repRef termsRef varCountRef) = do
-        bigTerms <- readSTRef bigTermsRef
-        terms    <- readSTRef termsRef
+    go vc bigV@(Var _ _ ty _ bigTermsRef bigMergesRef bigVarCountRef) (Var _ _ _ repRef termsRef mergesRef varCountRef) = do
+        bigTerms  <- readSTRef bigTermsRef
+        terms     <- readSTRef termsRef
+        bigMerges <- readSTRef bigMergesRef
+        merges    <- readSTRef mergesRef
         let bigTerms' = bigTerms `TL.concat` terms
         writeSTRef bigTermsRef bigTerms'
+        writeSTRef bigMergesRef $ bigMerges `TL.concat` merges
         writeSTRef repRef (Just bigV)
         writeSTRef termsRef TL.empty
         writeSTRef varCountRef 0
@@ -212,12 +221,12 @@ rep v = do
     r <- findRep v
     setRep r v
   where
-    findRep v'@(Var _ _ _ repRef _ _) = do
+    findRep v'@(Var _ _ _ repRef _ _ _) = do
         r <- readSTRef repRef
         case r of
             Just r' -> findRep r'
             Nothing -> return v'
-    setRep r (Var _ _ _ repRef _ _) = do
+    setRep r (Var _ _ _ repRef _ _ _) = do
         r' <- readSTRef repRef
         case r' of
             Just r'' -> writeSTRef repRef (Just r) >> setRep r r''
@@ -281,8 +290,8 @@ commonFrontier unique queue t_list = do
         tj <- MV.read cj i
         MV.write c0 i tj
         MV.write cj i t0
-    processVars v@(Var ident _ _ _ _ _) queue' var = do
-        v2@(Var ident2 _ _ _ _ _) <- rep =<< fromRVar var
+    processVars v@(Var ident _ _ _ _ _ _) queue' var = do
+        v2@(Var ident2 _ _ _ _ _ _) <- rep =<< fromRVar var
         if ident /= ident2
             then merge queue' v v2
             else return queue'
@@ -296,7 +305,7 @@ unify unique t_list = do
         Right queue -> go $ Q.pop queue
   where
     go Nothing = return Nothing
-    go (Just (Var _ _ _ _ termsRef _, queue')) = do
+    go (Just (Var _ _ _ _ termsRef _ _, queue')) = do
         terms <- readSTRef termsRef
         if TL.size terms < 2
             then go $ Q.pop queue'
@@ -319,7 +328,7 @@ simplifyOr f a b = do
     go _ (Left (Term _ (Attrib True)  _ _)) = return b
     go _ (Left (Term _ (Attrib False) _ _)) = return a
     go (Left  (Term ident _ _ _))     (Left  (Term ident' _ _ _))     | ident == ident' = return a
-    go (Right (Var  ident _ _ _ _ _)) (Right (Var  ident' _ _ _ _ _)) | ident == ident' = return a
+    go (Right (Var  ident _ _ _ _ _ _)) (Right (Var  ident' _ _ _ _ _ _)) | ident == ident' = return a
     go _ _ = f a b
 
 deloop :: ST s ID -> RNode s -> ST s ()
@@ -345,7 +354,7 @@ deloop unique node = do
                                   _  -> return ()
                 _ -> return ()
         Right var -> do
-            v@(Var _ _ ty _ terms _) <- rep var
+            v@(Var _ _ ty _ terms _ _) <- rep var
             ts <- TL.toVector <$> readSTRef terms
             V.mapM_ (deloop unique) ts
             ts' <- TL.toVector <$> readSTRef terms
@@ -367,7 +376,7 @@ deloop unique node = do
         case n' of
             Left _ -> return n
             Right v -> do
-                Var _ _ _ _ terms _ <- rep v
+                Var _ _ _ _ terms _ _ <- rep v
                 terms' <- readSTRef terms
                 return $ if TL.size terms' == 1
                              then TL.toVector terms' V.! 0
@@ -378,8 +387,8 @@ deloop unique node = do
                      Left  _ -> (node':terms, vars)
                      Right v -> (terms, v:vars)
     mergeVar v v' = do
-            vr@(Var ident _ _ _ _ _) <- rep v
-            vr'@(Var ident' _ _ _ _ _) <- rep v'
+            vr@(Var ident _ _ _ _ _ _) <- rep v
+            vr'@(Var ident' _ _ _ _ _ _) <- rep v'
             when (ident /= ident') . void $ merge Q.empty vr vr'
 
 substitute :: Term s -> ST s ()
@@ -391,7 +400,7 @@ substitute (Term _ _ children stageRef) = do
   where
     go _ (Left term') = substitute term'
     go i (Right var) = do
-        Var _ _ _ _ terms _ <- rep var
+        Var _ _ _ _ terms _ _ <- rep var
         ts <- TL.toVector <$> readSTRef terms
         when (V.length ts == 1) $ MV.write children i $ ts V.! 0
         V.mapM_ substitute =<< V.mapM fromRTerm ts
@@ -475,7 +484,7 @@ opType unique = flip evalStateT M.empty . blockOrOp
     mkText = do
         v <- eval $ var' "L" (Just False) (Just False)
         list <- eval $ num .* return v .+ unit
-        Var _ _ _ _ termRef _ <- lift $ fromRVar =<< getType v
+        Var _ _ _ _ termRef _ _ <- lift $ fromRVar =<< getType v
         lift $ writeSTRef termRef $ TL.singleton list
         return v
     
@@ -556,7 +565,13 @@ opType unique = flip evalStateT M.empty . blockOrOp
     op CondApply = mkBlock Nothing (Just False) x xp .* (x .+ y) .* e ~> (xp .+ y) .* e
     op Distrib   = a .* (b .+ c) .* e ~> (a .* b .+ a .* c) .* e
     op Factor    = (a .* b .+ c .* d) .* e ~> (a .+ c) .* (b .+ d) .* e
-    op Merge     = (a .+ a) .* e ~> a .* e -- TODO add actual merged types
+    op Merge     = do
+        a' <- eval a
+        b' <- eval b
+        c' <- eval c
+        Var _ _ _ _ _ mergesRef _ <- lift $ fromRVar =<< getType c'
+        lift . writeSTRef mergesRef $ TL.singleton (a', b')
+        (return a' .+ return b') .* e ~> return c' .* e
     op Assert    = (a .+ b) .* e ~> b .* e
 
     op Greater = num .* num .* e ~> (num .* num .+ num .* num) .* e
