@@ -587,7 +587,20 @@ opType unique = flip evalStateT M.empty . blockOrOp
 
     op ApplyTail = error "To be removed."
 
-inferTypes :: [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either String ())
+unifyAll :: ST s ID -> [(RNode s, RNode s)] -> ST s (Maybe (Int, Term s, Term s, Term s, Term s))
+unifyAll unique pairs = go pairs 1
+  where
+    go ((a, b):ps) i = do
+        res <- unify unique =<< V.mapM fromRTerm (V.fromList [a, b])
+        case res of
+            Just (x, y) -> do
+                a' <- fromRTerm a
+                b' <- fromRTerm b
+                return $ Just (i, a', b', x, y)
+            Nothing -> go ps $ i + 1
+    go [] _ = return Nothing
+
+inferTypes :: [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String, String) ())
 inferTypes logStages ops = do
     counter <- lift $ newSTRef (0 :: Int)
     let unique = do
@@ -598,14 +611,15 @@ inferTypes logStages ops = do
                 graph <- lift (showGraph Compact =<< mkTerm unique (Sealed $ show stage) xs)
                 yield (stage, graph)
         errorTerm x y = lift $ showGraph Compact =<< mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
-        unifyPair (Just err) _      = return $ Just err
-        unifyPair Nothing    (a, b) = unify unique =<< V.mapM fromRTerm (V.fromList [a, b])
     exprs <- lift $ mapM (opType unique) ops
     let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
     writeGraph TIInitial flatExprs
-    err <- lift $ foldM unifyPair Nothing . zip (map snd exprs) . map fst $ tail exprs
+    err <- lift $ unifyAll unique . zip (map snd exprs) . map fst $ tail exprs
     case err of
-        Just (t1, t2) -> Left <$> errorTerm t1 t2
+        Just (i, a, b, x, y) -> do
+            outer <- errorTerm a b
+            inner <- errorTerm x y
+            return $ Left (i, outer, inner)
         Nothing -> do
             writeGraph TIUnified flatExprs
             lift $ mapM_ (deloop unique) flatExprs

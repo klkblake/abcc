@@ -85,7 +85,13 @@ doTypeCheck opts = do
             let dump = map fst $ optDump opts
             res <- runEffect (for (hoist stToIO $ inferTypes dump ops') $ lift . writeGraph)
             case res of
-                Left err -> putStrLn err >> exitFailure
+                Left (i, outer, inner) -> do
+                    putStrLn $ "Failed while unifying index " ++ show i
+                    putStrLn $ "Could not unify:"
+                    putStrLn inner
+                    putStrLn $ "While unifying:"
+                    putStrLn outer
+                    exitFailure
                 Right _ -> return ()
         Nothing   -> exitFailure
   where
