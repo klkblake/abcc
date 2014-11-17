@@ -61,20 +61,25 @@ parseOp = do
     op <- anyChar
     maybe (unexpected $ show op) return $ lookup op opcodes
 
-parseCap :: Parser FlatOp
+parseCap :: Parser (Maybe FlatOp)
 parseCap = between (char '{') (char '}') $ char ':' *> parseSealer
                                        <|> char '.' *> parseUnsealer
                                        <|> char '&' *> parseAnnotation 
   where
-    parseSealer = Sealer <$> parseCapText
-    parseUnsealer = Unsealer <$> parseCapText
+    parseSealer = Just . Sealer <$> parseCapText
+    parseUnsealer = Just . Unsealer <$> parseCapText
     parseAnnotation = do
         cap <- parseCapText
         case cap of
-            "≡"                -> return AssertEQ
-            "debug print raw"  -> return DebugPrintRaw
-            "debug print text" -> return DebugPrintText
-            _                  -> fail $ "Unrecognised capability: " ++ show cap
+            "≡"                          -> return $ Just AssertEQ
+            "static"                     -> return Nothing
+            "asynch"                     -> return Nothing
+            "compile"                    -> return Nothing
+            "debug print raw"            -> return $ Just DebugPrintRaw
+            "debug print text"           -> return $ Just DebugPrintText
+            _ | "todo:" `isPrefixOf` cap -> return Nothing
+            _ | "TODO:" `isPrefixOf` cap -> return Nothing
+            _                            -> fail $ "Unrecognised capability: " ++ show cap
     parseCapText = many $ noneOf "{}\n"
 
 parseText :: Parser String
@@ -87,8 +92,9 @@ parseBlock = between (char '[') (char ']') parse'
 
 parse' :: Parser [RawOp]
 parse' = catMaybes <$> many ( oneOf " \n" *> return Nothing
+                          <|> fmap Op <$> parseCap
                           <|> Just <$> ( LitBlock <$> parseBlock
-                                     <|> Op <$> (parseCap <|> LitText <$> parseText <|> try parseOp)
+                                     <|> Op <$> (LitText <$> parseText <|> try parseOp)
                                        )
                             )
 
