@@ -75,6 +75,10 @@ parseCap = between (char '{') (char '}') $ char ':' *> parseSealer
             "static"                     -> return Nothing
             "asynch"                     -> return Nothing
             "compile"                    -> return Nothing
+            "isolated"                   -> return Nothing
+            "pure"                       -> return Nothing
+            "safe"                       -> return Nothing
+            "lazy"                       -> return Nothing
             "debug print raw"            -> return $ Just DebugPrintRaw
             "debug print text"           -> return $ Just DebugPrintText
             _ | "todo:" `isPrefixOf` cap -> return Nothing
