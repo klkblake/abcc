@@ -39,7 +39,6 @@ data Symbol = Product
             | Block
             | Num
             | Unit
-            | Void
             | Sealed String
             | Attribs
             | Or
@@ -52,7 +51,6 @@ instance Show Symbol where
     show Block         = "[ -> ]"
     show Num           = "N"
     show Unit          = "1"
-    show Void          = "0"
     show (Sealed seal) = '{' : seal ++ "}"
     show Attribs       = "tkf"
     show Or            = "∨"
@@ -64,7 +62,6 @@ arity Sum        = 2
 arity Block      = 2
 arity Num        = 0
 arity Unit       = 0
-arity Void       = 0
 arity (Sealed _) = 1
 arity Attribs    = 3
 arity Or         = 2
@@ -72,11 +69,11 @@ arity (Attrib _) = 0
 
 data Stage = New | DeloopSeen | Delooped | Substituted deriving Eq
 
-data VarType = Structural | Substructural deriving Eq
+data VarType = Structural | Substructural | Void deriving Eq
 
 data Term s = Term ID Symbol (MVector s (RNode s)) (STRef s Stage)
 
-data Var s = Var ID String VarType (STRef s (Maybe (Var s))) (STRef s (TreeList (RNode s))) (STRef s (TreeList (RNode s, RNode s))) (STRef s Int)
+data Var s = Var ID String (STRef s VarType) (STRef s (Maybe (Var s))) (STRef s (TreeList (RNode s))) (STRef s (TreeList (RNode s, RNode s))) (STRef s Int)
 
 newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
 
@@ -108,7 +105,7 @@ instance GraphViz (Term s) where
 
 instance GraphViz (Var s) where
     type State (Var s) = s
-    toNode mode (Var ident sym ty repRef terms mergesRef varCountRef) =
+    toNode mode (Var ident sym tyRef repRef terms mergesRef varCountRef) =
         case mode of
             Verbose -> toNode'
             Compact -> do
@@ -119,10 +116,12 @@ instance GraphViz (Var s) where
       where
         toNode' = Node ident <$> label <*> labelledChildren
         label = do
+            ty <- readSTRef tyRef
             varCount <- readSTRef varCountRef
             return $ sym ++ " (" ++ show varCount ++ ")" ++ case ty of
                                                                 Structural    -> ""
                                                                 Substructural -> " kf"
+                                                                Void          -> " void"
         labelledChildren = do
             rep' <- readSTRef repRef
             let repEdge = case rep' of
@@ -140,7 +139,7 @@ mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Term s)
 mkTerm unique sym children = Term <$> unique <*> pure sym <*> V.thaw (V.fromList children) <*> newSTRef New
 
 mkVar :: ST s ID -> String -> VarType -> ST s (Var s)
-mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> newSTRef 1
+mkVar unique v ty = Var <$> unique <*> pure v <*> newSTRef ty <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> newSTRef 1
 
 toRNode :: Either (Term s) (Var s) -> ST s (RNode s)
 toRNode node = RNode <$> newSTRef node
@@ -184,10 +183,11 @@ replaceNode :: RNode s -> Either (Term s) (Var s) -> ST s ()
 replaceNode (RNode ref) = writeSTRef ref
 
 add :: Queue (Var s) -> Var s -> RNode s -> ST s (Queue (Var s))
-add queue v@(Var _ _ ty _ termsRef _ _) t = do
+add queue v@(Var _ _ tyRef _ termsRef _ _) t = do
+    ty <- readSTRef tyRef
     ts <- readSTRef termsRef
     writeSTRef termsRef $ TL.cons t ts
-    return $ if TL.size ts == 1 && ty == Structural
+    return $ if TL.size ts == 1 && ty /= Substructural
                  then Q.push queue v
                  else queue
 
@@ -200,19 +200,22 @@ merge queue v1@(Var _ _ _ _ _ _ varCountRef1) v2@(Var _ _ _ _ _ _ varCountRef2) 
         then go vc v1 v2
         else go vc v2 v1
   where
-    go vc bigV@(Var _ _ ty _ bigTermsRef bigMergesRef bigVarCountRef) (Var _ _ _ repRef termsRef mergesRef varCountRef) = do
+    go vc bigV@(Var _ _ bigTyRef _ bigTermsRef bigMergesRef bigVarCountRef) (Var _ _ tyRef repRef termsRef mergesRef varCountRef) = do
+        bigTy     <- readSTRef bigTyRef
+        ty        <- readSTRef tyRef
         bigTerms  <- readSTRef bigTermsRef
         terms     <- readSTRef termsRef
         bigMerges <- readSTRef bigMergesRef
         merges    <- readSTRef mergesRef
         let bigTerms' = bigTerms `TL.concat` terms
+        writeSTRef bigTyRef $ if ty == Void then ty else bigTy
         writeSTRef bigTermsRef bigTerms'
         writeSTRef bigMergesRef $ bigMerges `TL.concat` merges
         writeSTRef repRef (Just bigV)
         writeSTRef termsRef TL.empty
         writeSTRef varCountRef 0
         writeSTRef bigVarCountRef vc
-        return $ if TL.size bigTerms <= 1 && TL.size bigTerms' >= 2 && ty == Structural
+        return $ if TL.size bigTerms <= 1 && TL.size bigTerms' >= 2 && ty /= Substructural
                      then Q.push queue bigV
                      else queue
 
@@ -354,7 +357,8 @@ deloop unique node = do
                                   _  -> return ()
                 _ -> return ()
         Right var -> do
-            v@(Var _ _ ty _ terms _ _) <- rep var
+            v@(Var _ _ tyRef _ terms _ _) <- rep var
+            ty <- readSTRef tyRef
             ts <- TL.toVector <$> readSTRef terms
             V.mapM_ (deloop unique) ts
             ts' <- TL.toVector <$> readSTRef terms
@@ -364,6 +368,7 @@ deloop unique node = do
                                      [] -> case ty of
                                                Structural    -> return TL.empty
                                                Substructural -> TL.singleton <$> mkRTerm unique (Attrib False) []
+                                               Void          -> return TL.empty
                                      Term _ (Attrib a) _ _:_ -> return $
                                          if all (matchingAttrib a) terms''
                                              then TL.singleton $ head terms'
@@ -419,9 +424,9 @@ mkAttribTerm unique sym relevant affine children = do
     mkAttrib false Nothing  attrs = foldM (simplifyOr mkOr) false attrs
     mkOr a b = mkRTerm' Or [a, b]
 
-mkAttribVar :: ST s ID -> String -> Maybe Bool -> Maybe Bool -> ST s (RNode s)
-mkAttribVar unique name relevant affine = do
-    v <- mkRVar unique name Structural
+mkAttribVar :: ST s ID -> String -> VarType -> Maybe Bool -> Maybe Bool -> ST s (RNode s)
+mkAttribVar unique name ty relevant affine = do
+    v <- mkRVar unique name ty
     k <- mkAttrib relevant "_k"
     f <- mkAttrib affine   "_f"
     mkRTerm unique Attribs [v, k, f]
@@ -454,9 +459,7 @@ opType unique = flip evalStateT M.empty . blockOrOp
     sealed seal v = do
         v' <- v
         mkAttribTerm' (Sealed seal) [v']
-    void' v = do
-        v' <- v
-        mkAttribTerm' Void [v']
+    void' = lift $ mkAttribVar unique "0" Void Nothing Nothing
 
     var  v = var' v Nothing Nothing
     var' v relevant affine = do
@@ -464,7 +467,7 @@ opType unique = flip evalStateT M.empty . blockOrOp
         case M.lookup v vars of
             Just v' -> return v'
             Nothing -> do
-                v' <- lift $ mkAttribVar unique v relevant affine
+                v' <- lift $ mkAttribVar unique v Structural relevant affine
                 modify $ M.insert v v'
                 return v'
 
@@ -559,8 +562,8 @@ opType unique = flip evalStateT M.empty . blockOrOp
     op AssocRS = ((a .+ b) .+ c) .* e ~> (a .+ b .+ c) .* e
     op SwapS   = (a .+ b .+ c) .* e ~> (b .+ a .+ c) .* e
     op SwapDS  = (a .+ b .+ c .+ d) .* e ~> (a .+ c .+ b .+ d) .* e
-    op Intro0  = a .* e ~> (a .+ void' x) .* e
-    op Elim0   = (a .+ void' x) .* e ~> a .* e
+    op Intro0  = a .* e ~> (a .+ void') .* e
+    op Elim0   = (a .+ void') .* e ~> a .* e
 
     op CondApply = mkBlock Nothing (Just False) x xp .* (x .+ y) .* e ~> (xp .+ y) .* e
     op Distrib   = a .* (b .+ c) .* e ~> (a .* b .+ a .* c) .* e
