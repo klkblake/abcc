@@ -27,6 +27,7 @@ executable abcc
       , vector
       , pipes
       , multiarg
+      , hashtables
       , trifecta
       , ansi-wl-pprint
       , llvm-general-pure >=3.4 && <3.5

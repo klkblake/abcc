@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, TupleSections, FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, TupleSections, FlexibleInstances, FlexibleContexts, RecursiveDo #-}
 module TypeInferencer
     ( inferTypes
     , TIStage (..)
@@ -13,6 +13,7 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
 import Control.Monad.State
+import qualified Data.HashTable.ST.Basic as H
 import qualified Data.Map.Strict as M
 import Data.STRef
 import qualified Data.Vector as V
@@ -21,6 +22,7 @@ import qualified Data.Vector.Mutable as MV
 import Pipes hiding ((~>))
 
 import Op
+import qualified Type as T
 
 import GraphViz
 import TreeList (TreeList)
@@ -411,6 +413,49 @@ substitute (Term _ _ children stageRef) = do
         when (ty /= Void && V.length ts == 1) $ MV.write children i $ ts V.! 0
         V.mapM_ substitute =<< V.mapM fromRTerm ts
 
+purify :: Term s -> ST s T.Type
+purify root = flip go root =<< H.new
+  where
+    go seen (Term ident Attribs children _) = do
+        purified <- H.lookup seen ident
+        case purified of
+            Just ty -> return ty
+            Nothing -> do
+                node <- fromRNode =<< MV.read children 0
+                Term _ (Attrib k) _ _ <- fromRTerm =<< MV.read children 1
+                Term _ (Attrib f) _ _ <- fromRTerm =<< MV.read children 2
+                let tType = T.Type ident k f
+                case node of
+                    Left (Term _ sym children' _) -> do
+                        rec let ty = tType $ case sym of
+                                                 Product     -> T.Product (cs V.! 0) (cs V.! 1)
+                                                 Sum         -> T.Sum     (cs V.! 0) (cs V.! 1)
+                                                 Block       -> T.Block   (cs V.! 0) (cs V.! 1)
+                                                 Num         -> T.Num
+                                                 Unit        -> T.Unit
+                                                 Sealed seal -> T.Sealed seal $ cs V.! 0
+                                                 _ -> error "Illegal term type in purify"
+                            H.insert seen ident ty
+                            cs <- V.mapM (go seen <=< fromRTerm) =<< V.freeze children'
+                        return ty
+                    Right var -> do
+                        Var ident' _ tyRef _ terms _ _ <- rep var
+                        vty <- readSTRef tyRef
+                        case vty of
+                            Void -> do
+                                ts <- TL.toVector <$> readSTRef terms
+                                rec let ty = tType $ T.Void v
+                                    H.insert seen ident ty
+                                    v <- if V.null ts
+                                             then return $ T.Type ident' k f T.Opaque
+                                             else go seen =<< fromRTerm (ts V.! 0)
+                                return ty
+                            _ -> do
+                                let ty = tType T.Opaque
+                                H.insert seen ident ty
+                                return ty
+    go _ (Term _ _ _ _) = error "Attempted to purify non-Attribs term"
+
 mkAttribTerm :: ST s ID -> Symbol -> Maybe Bool -> Maybe Bool -> [RNode s] -> ST s (RNode s)
 mkAttribTerm unique sym relevant affine children = do
     t <- mkRTerm' sym children
@@ -604,7 +649,7 @@ unifyAll unique pairs = go pairs 1
             Nothing -> go ps $ i + 1
     go [] _ = return Nothing
 
-inferTypes :: [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String, String) ())
+inferTypes :: [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String, String) [T.Type])
 inferTypes logStages ops = do
     counter <- lift $ newSTRef (0 :: Int)
     let unique = do
@@ -630,4 +675,5 @@ inferTypes logStages ops = do
             writeGraph TIResolved flatExprs
             lift $ mapM_ substitute =<< mapM fromRTerm flatExprs
             writeGraph TISubstituted flatExprs
-            return $ Right ()
+            pureExprs <- mapM (lift . (purify <=< fromRTerm)) flatExprs
+            return $ Right pureExprs

@@ -92,7 +92,7 @@ doTypeCheck opts = do
                     putStrLn $ "While unifying:"
                     putStrLn outer
                     exitFailure
-                Right _ -> return ()
+                Right exprs -> mapM_ print exprs
         Nothing   -> exitFailure
   where
     writeGraph (stage, graph) = writeFile (fromJust . lookup stage $ optDump opts) graph
