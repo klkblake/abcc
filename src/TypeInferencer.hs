@@ -359,7 +359,7 @@ deloop unique node = do
                                   _  -> return ()
                 _ -> return ()
         Right var -> do
-            v@(Var _ _ tyRef _ terms _ _) <- rep var
+            v@(Var _ sym tyRef _ terms _ _) <- rep var
             ty <- readSTRef tyRef
             ts <- TL.toVector <$> readSTRef terms
             V.mapM_ (deloop unique) ts
@@ -371,11 +371,9 @@ deloop unique node = do
                                                Structural    -> return TL.empty
                                                Substructural -> TL.singleton <$> mkRTerm unique (Attrib False) []
                                                Void          -> return TL.empty
-                                     Term _ (Attrib a) _ _:_ -> return $
-                                         if all (matchingAttrib a) terms''
-                                             then TL.singleton $ head terms'
-                                             else TL.fromList terms'
-                                     _ -> return $ TL.fromList terms'
+                                     [_] -> return . TL.singleton $ head terms'
+                                     Term _ (Attrib a) _ _:_ | all (matchingAttrib a) terms'' -> return . TL.singleton $ head terms'
+                                     _ -> error $ "variable " ++ sym ++ " has multiple values "
             mapM_ (mergeVar v) vars
   where
     derefVar n = do
