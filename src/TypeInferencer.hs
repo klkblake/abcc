@@ -534,7 +534,7 @@ opType unique = flip evalStateT M.empty . blockOrOp
         v <- eval $ var' "L" (Just False) (Just False)
         list <- eval $ num .* return v .+ unit
         Var _ _ _ _ termRef _ _ <- lift $ fromRVar =<< getType v
-        lift $ writeSTRef termRef $ TL.singleton list
+        lift $ writeSTRef termRef . TL.singleton =<< getType list
         return v
     
     opMark relevant = do
