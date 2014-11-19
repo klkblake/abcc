@@ -86,8 +86,8 @@ doTypeCheck opts = do
             res <- runEffect (for (hoist stToIO $ inferTypes dump ops') $ lift . writeGraph)
             case res of
                 Left (i, graph) -> do
-                    putStrLn $ "Failed while unifying index " ++ show i
-                    putStrLn $ "Run this through dot (from the GraphViz package):"
+                    putStrLn $ "# Failed while unifying index " ++ show i
+                    putStrLn $ "# Run this error though dot (from the GraphViz package) for more info"
                     putStrLn graph
                     exitFailure
                 Right exprs -> mapM_ print exprs

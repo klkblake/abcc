@@ -4,6 +4,7 @@ module GraphViz
     , Mode (..)
     , Node (..)
     , GraphViz (..)
+    , Graph (..)
     , showGraph
     , showSubgraph
     ) where
@@ -12,24 +13,11 @@ import Control.Applicative
 import Control.Monad.ST
 import qualified Data.IntSet as IS
 import Data.List
-import Data.Maybe
 import Numeric
 
 import qualified Queue as Q
 
 type ID = Int
-
-showID :: String -> ID -> ShowS
-showID prefix ident = showString prefix . showChar '_' . showInt ident
-
-showLabel :: String -> ShowS
-showLabel label = showString " [label=\"" . showString label . showString "\"]"
-
-showNode :: String -> ID -> String -> ShowS
-showNode prefix ident label = showID prefix ident . showLabel label . showChar '\n'
-
-showEdge :: String -> ID -> ID -> String -> ShowS
-showEdge prefix from to label = showID prefix from . showString " -> " . showID prefix to . showLabel label . showChar '\n'
 
 data Mode = Verbose | Compact
 
@@ -44,15 +32,23 @@ instance (GraphViz a, GraphViz b, State a ~ State b) => GraphViz (Either a b) wh
     toNode mode (Left  x) = toNode mode x
     toNode mode (Right y) = toNode mode y
 
-showSubgraph :: GraphViz g => Mode -> String -> Maybe String -> g -> ST (State g) String
-showSubgraph mode prefix graphLabel g = do
-    node <- toNode mode g
-    body <- go IS.empty (Just (node, Q.empty))
-    return . showString "subgraph cluster_" . showString prefix . showString "{\n" . body $ showString gl "}"
+data Graph s = Graph String String [Graph s] [Node s]
+
+showID :: String -> ID -> ShowS
+showID prefix ident = showString prefix . showChar '_' . showInt ident
+
+showLabel :: String -> ShowS
+showLabel label = showString " [label=\"" . showString label . showString "\"]"
+
+showNode :: String -> ID -> String -> ShowS
+showNode prefix ident label = showID prefix ident . showLabel label . showChar '\n'
+
+showEdge :: String -> ID -> ID -> String -> ShowS
+showEdge prefix from to label = showID prefix from . showString " -> " . showID prefix to . showLabel label . showChar '\n'
+
+showNodes :: String -> Node s -> ST s String
+showNodes prefix node = ($ "") <$> go IS.empty (Just (node, Q.empty))
   where
-    gl = case graphLabel of
-             Nothing  -> ""
-             Just gl' -> "label=\"" ++ gl' ++ "\"\nlabelloc=top\nlabeljust=center\n"
     go _ Nothing = return id
     go seen (Just (Node ident _ _, queue)) | IS.member ident seen = go seen $ Q.pop queue
     go seen (Just (Node ident label children, queue)) = do
@@ -61,7 +57,14 @@ showSubgraph mode prefix graphLabel g = do
         let chunk = showNode prefix ident label . foldr (\(l, Node ident' _ _) s -> showEdge prefix ident ident' l . s) id children'
         fmap (chunk .) . go seen' . Q.pop . foldl' Q.push queue $ map snd children'
 
-showGraph :: GraphViz g => Mode -> g -> ST (State g) String
-showGraph mode g = do
-    g' <- showSubgraph mode "node" Nothing g
-    return . showString "digraph {\n" $ showString g' "}"
+showSubgraph :: Graph s -> ST s String
+showSubgraph (Graph prefix label graphs nodes) = do
+    body1 <- concat <$> mapM showSubgraph graphs
+    body2 <- concat <$> mapM (showNodes prefix) nodes
+    return . showString "subgraph cluster_" . showString prefix . showString "{\n" . showString body1 . showString body2 . showString "label=\"" $ showString label "\"\nlabelloc=top\nlabeljust=center\n}"
+
+showGraph :: Graph s -> ST s String
+showGraph (Graph prefix label graphs nodes) = do
+    body1 <- concat <$> mapM showSubgraph graphs
+    body2 <- concat <$> mapM (showNodes prefix) nodes
+    return . showString "digraph {\n" . showString body1 . showString body2 . showString "label=\"" $ showString label "\"\nlabelloc=top\nlabeljust=center\n}"

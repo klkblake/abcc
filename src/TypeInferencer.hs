@@ -657,9 +657,14 @@ inferTypes logStages ops = do
             readSTRef counter
     let writeGraph stage xs =
             when (stage `elem` logStages) $ do
-                graph <- lift (showGraph Compact =<< mkTerm unique (Sealed $ show stage) xs)
+                rootID <- lift unique
+                let root = Node rootID (show stage) . zip (map (('#':) . show) [1 :: Int ..]) $ map (toNode Compact <=< fromRTerm) xs
+                graph <- lift $ showGraph $ Graph "node" "" [] [root]
                 yield (stage, graph)
-        errorTerm prefix label x y = lift $ showSubgraph Compact prefix (Just label) =<< mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
+        errorTerm prefix label x y = lift $ do
+            x' <- toNode Compact x
+            y' <- toNode Compact y
+            return $ Graph prefix label [] [x', y']
     exprs <- lift $ mapM (opType unique) ops
     let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
     writeGraph TIInitial flatExprs
@@ -668,7 +673,7 @@ inferTypes logStages ops = do
         Just (i, a, b, x, y) -> do
             inner <- errorTerm "inner" "Could not unify:" x y
             outer <- errorTerm "outer" "While trying to unify:" a b
-            let graph = "digraph {\n" ++ inner ++ "\n" ++ outer ++ "\n}"
+            graph <- lift . showGraph $ Graph "" ("Unification failure at opcode index " ++ show i) [inner, outer] []
             return $ Left (i, graph)
         Nothing -> do
             writeGraph TIUnified flatExprs
