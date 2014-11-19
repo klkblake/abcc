@@ -3,7 +3,7 @@ module Main where
 import Control.Monad.Morph
 import Control.Monad.ST
 import Data.Maybe
-import Multiarg hiding (parse)
+import Multiarg hiding (parse, mode, Mode)
 import Pipes
 
 import System.IO
@@ -12,6 +12,7 @@ import System.Exit
 import Parser
 import TypeInferencer
 import Codegen
+import GraphViz
 
 helpText :: String -> String
 helpText prog = unlines [ prog ++ " - A compiler for Awelon Bytecode"
@@ -22,15 +23,18 @@ helpText prog = unlines [ prog ++ " - A compiler for Awelon Bytecode"
                         , "\t--typecheck              Run the typechecker instead of the compiler"
                         , "\t--dump-<stage>[=FILE]    Dump the internal state of the typechecker at a particular stage to a GraphViz file"
                         , "\t\tStages:"
-                        , "\t\tinitial        After the opcodes have had types assigned to them"
-                        , "\t\tunified        After the inputs and outputs of adjacent opcodes have been unified"
-                        , "\t\tresolved       After the substructural attributes have been resolved"
-                        , "\t\tsubstituted    After the variables have been eliminated from the terms"
+                        , "\t\t  initial        After the opcodes have had types assigned to them"
+                        , "\t\t  unified        After the inputs and outputs of adjacent opcodes have been unified"
+                        , "\t\t  resolved       After the substructural attributes have been resolved"
+                        , "\t\t  substituted    After the variables have been eliminated from the terms"
+                        , "\t--dump-all               Equivalent to specifying all of the above --dump-<stage> flags"
+                        , "\t--verbose-graphs         Output graphs that more accurately reflect the type inferencer state"
                         ]
 
 data Flag = TypeCheck
           | Dump TIStage (Maybe FilePath)
           | DumpAll
+          | VerboseGraphs
           deriving (Eq, Show)
 
 flagSpecs :: [OptSpec Flag]
@@ -41,17 +45,22 @@ flagSpecs =
     , OptSpec ["dump-resolved"]    [] . OptionalArg $ return . Dump TIResolved
     , OptSpec ["dump-substituted"] [] . OptionalArg $ return . Dump TISubstituted
     , OptSpec ["dump-all"]         [] $ NoArg DumpAll
+    , OptSpec ["verbose-graphs"]   [] $ NoArg VerboseGraphs
     ]
 
-data Options = Options { optDump :: [(TIStage, String)] }
-             deriving Show
+data Options = Options { optDump :: [(TIStage, String)]
+                       , optGraphMode :: Mode
+                       }
 
 processFlags :: [Flag] -> Options
 processFlags flags =
      let fs = if DumpAll `elem` flags
                   then ($ flags) . foldr1 (.) $ map addIfMissing [minBound .. maxBound]
                   else flags
-     in Options $ mapMaybe processDump fs
+         mode = if VerboseGraphs `elem` flags
+                    then Verbose
+                    else Compact
+     in Options (mapMaybe processDump fs) mode
   where
     addIfMissing stage fs = if any (isDump stage) fs
                                 then fs
@@ -83,7 +92,7 @@ doTypeCheck opts = do
     case ops of
         Just ops' -> do
             let dump = map fst $ optDump opts
-            res <- runEffect (for (hoist stToIO $ inferTypes dump ops') $ lift . writeGraph)
+            res <- runEffect (for (hoist stToIO $ inferTypes (optGraphMode opts) dump ops') $ lift . writeGraph)
             case res of
                 Left (i, graph) -> do
                     hPutStrLn stderr $ "# Failed while unifying index " ++ show i

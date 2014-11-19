@@ -649,8 +649,8 @@ unifyAll unique pairs = go pairs 1
             Nothing -> go ps $ i + 1
     go [] _ = return Nothing
 
-inferTypes :: [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String) [T.Type])
-inferTypes logStages ops = do
+inferTypes :: Mode -> [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String) [T.Type])
+inferTypes mode logStages ops = do
     counter <- lift $ newSTRef (0 :: Int)
     let unique = do
             modifySTRef' counter (+1)
@@ -658,12 +658,12 @@ inferTypes logStages ops = do
     let writeGraph stage xs =
             when (stage `elem` logStages) $ do
                 rootID <- lift unique
-                let root = Node rootID (show stage) . zip (map (('#':) . show) [1 :: Int ..]) $ map (toNode Compact <=< fromRTerm) xs
+                let root = Node rootID (show stage) . zip (map (('#':) . show) [1 :: Int ..]) $ map (toNode mode <=< fromRTerm) xs
                 graph <- lift $ showGraph $ Graph "node" "" [] [root]
                 yield (stage, graph)
         errorTerm prefix label x y = lift $ do
-            x' <- toNode Compact x
-            y' <- toNode Compact y
+            x' <- toNode mode x
+            y' <- toNode mode y
             return $ Graph prefix label [] [x', y']
     exprs <- lift $ mapM (opType unique) ops
     let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
