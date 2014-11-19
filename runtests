@@ -1,5 +1,5 @@
 #!/bin/bash
 trap exit SIGINT
-for t in $(ao test | grep pass | sed "s/.*test/test/" | tr '\n' ' '); do
+for t in $(ao list "test.*"); do
 	./runabc $t > /dev/null || echo "Test $t failed"
 done

@@ -294,7 +294,7 @@ OP21(apply, applyBlock(v0, v1));
 
 OP(apply_tail, applyBlock(v0, v1));
 
-OP21(compose, compBlock(v1, v0));
+OP21(compose, compBlock(v0, v1));
 
 OP1(quote, sum(v0, BLOCK_QUOTE));
 

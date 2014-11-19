@@ -1,5 +1,0 @@
-package abcc
-
-executable = abcc
-main = main
-sourcedir = src
