@@ -405,9 +405,10 @@ substitute (Term _ _ children stageRef) = do
   where
     go _ (Left term') = substitute term'
     go i (Right var) = do
-        Var _ _ _ _ terms _ _ <- rep var
+        Var _ _ tyRef _ terms _ _ <- rep var
+        ty <- readSTRef tyRef
         ts <- TL.toVector <$> readSTRef terms
-        when (V.length ts == 1) $ MV.write children i $ ts V.! 0
+        when (ty /= Void && V.length ts == 1) $ MV.write children i $ ts V.! 0
         V.mapM_ substitute =<< V.mapM fromRTerm ts
 
 mkAttribTerm :: ST s ID -> Symbol -> Maybe Bool -> Maybe Bool -> [RNode s] -> ST s (RNode s)
