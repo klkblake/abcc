@@ -27,6 +27,7 @@ executable abcc
       , vector
       , pipes
       , multiarg
+      , process
       , hashtables
       , trifecta
       , ansi-wl-pprint

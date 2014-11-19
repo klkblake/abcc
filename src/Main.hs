@@ -1,18 +1,21 @@
 module Main where
 
+import Control.Monad
 import Control.Monad.Morph
 import Control.Monad.ST
 import Data.Maybe
 import Multiarg hiding (parse, mode, Mode)
 import Pipes
 
-import System.IO
 import System.Exit
+import System.IO
+import System.Process
+
+import GraphViz
 
 import Parser
 import TypeInferencer
 import Codegen
-import GraphViz
 
 helpText :: String -> String
 helpText prog = unlines [ prog ++ " - A compiler for Awelon Bytecode"
@@ -98,6 +101,13 @@ doTypeCheck opts = do
                     hPutStrLn stderr $ "# Failed while unifying index " ++ show i
                     hPutStrLn stderr $ "# Run this error though dot (from the GraphViz package) for more info"
                     hPutStrLn stderr graph
+                    isTerm <- hIsTerminalDevice stderr
+                    when isTerm $ do
+                        (Just hin, _, _, ph) <- createProcess (proc "dot" ["-Tx11"]){ std_in = CreatePipe }
+                        hPutStrLn hin graph
+                        hClose hin
+                        _ <- waitForProcess ph
+                        return ()
                     exitFailure
                 Right exprs -> mapM_ print exprs
         Nothing   -> exitFailure
