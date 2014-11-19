@@ -649,7 +649,7 @@ unifyAll unique pairs = go pairs 1
             Nothing -> go ps $ i + 1
     go [] _ = return Nothing
 
-inferTypes :: [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String, String) [T.Type])
+inferTypes :: [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String) [T.Type])
 inferTypes logStages ops = do
     counter <- lift $ newSTRef (0 :: Int)
     let unique = do
@@ -659,16 +659,17 @@ inferTypes logStages ops = do
             when (stage `elem` logStages) $ do
                 graph <- lift (showGraph Compact =<< mkTerm unique (Sealed $ show stage) xs)
                 yield (stage, graph)
-        errorTerm x y = lift $ showGraph Compact =<< mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
+        errorTerm prefix label x y = lift $ showSubgraph Compact prefix (Just label) =<< mkTerm unique (Sealed "Could not unify") =<< mapM (toRNode . Left) [x, y]
     exprs <- lift $ mapM (opType unique) ops
     let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
     writeGraph TIInitial flatExprs
     err <- lift $ unifyAll unique . zip (map snd exprs) . map fst $ tail exprs
     case err of
         Just (i, a, b, x, y) -> do
-            outer <- errorTerm a b
-            inner <- errorTerm x y
-            return $ Left (i, outer, inner)
+            inner <- errorTerm "inner" "Could not unify:" x y
+            outer <- errorTerm "outer" "While trying to unify:" a b
+            let graph = "digraph {\n" ++ inner ++ "\n" ++ outer ++ "\n}"
+            return $ Left (i, graph)
         Nothing -> do
             writeGraph TIUnified flatExprs
             lift $ mapM_ (deloop unique) flatExprs
