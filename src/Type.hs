@@ -27,7 +27,7 @@ instance Show RawType where
     show ty = evalState (showRawType 0 ty "") (IS.empty, IM.empty, 0)
 
 variables :: [String]
-variables = concat . iterate (\vs -> concat $ map (\v -> map (v:) vs) ['a'..'z']) $ map (:[]) ['a'..'z']
+variables = concat . iterate (\vs -> concatMap (\v -> map (v:) vs) ['a'..'z']) $ map (:[]) ['a'..'z']
 
 showType :: Int -> Type -> State (IS.IntSet, IM.IntMap Int, Int) String
 showType prec (Type ident rel aff ty) = do

@@ -99,7 +99,7 @@ doTypeCheck opts = do
             case res of
                 Left (i, graph) -> do
                     hPutStrLn stderr $ "# Failed while unifying index " ++ show i
-                    hPutStrLn stderr $ "# Run this error though dot (from the GraphViz package) for more info"
+                    hPutStrLn stderr   "# Run this error though dot (from the GraphViz package) for more info"
                     hPutStrLn stderr graph
                     isTerm <- hIsTerminalDevice stderr
                     when isTerm $ do

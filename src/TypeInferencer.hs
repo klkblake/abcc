@@ -454,7 +454,7 @@ purify root = flip go root =<< H.new
                                 let ty = tType T.Opaque
                                 H.insert seen ident ty
                                 return ty
-    go _ (Term _ _ _ _) = error "Attempted to purify non-Attribs term"
+    go _ _ = error "Attempted to purify non-Attribs term"
 
 mkAttribTerm :: ST s ID -> Symbol -> Maybe Bool -> Maybe Bool -> [RNode s] -> ST s (RNode s)
 mkAttribTerm unique sym relevant affine children = do
