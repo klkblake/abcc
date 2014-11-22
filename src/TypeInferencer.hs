@@ -454,18 +454,19 @@ purify root = flip go root =<< H.new
                                 return ty
     go _ _ = error "Attempted to purify non-Attribs term"
 
-mkAttribTerm :: ST s ID -> Symbol -> Maybe Bool -> Maybe Bool -> [RNode s] -> ST s (RNode s)
+mkAttribTerm :: ST s ID -> Symbol -> Either [RNode s] Bool -> Either [RNode s] Bool -> [RNode s] -> ST s (RNode s)
 mkAttribTerm unique sym relevant affine children = do
     t <- mkRTerm' sym children
     false <- mkRTerm' (Attrib False) []
-    (ks, fs) <- unzip <$> mapM getAttribs children
-    k  <- mkAttrib false relevant ks
-    f  <- mkAttrib false affine   fs
+    k <- mkAttrib false relevant "k" fst
+    f <- mkAttrib false affine   "f" snd
     mkRTerm' Attribs [t, k, f]
   where
     mkRTerm' = mkRTerm unique
-    mkAttrib _     (Just a) _   = mkRTerm' (Attrib a) []
-    mkAttrib false Nothing  attrs = foldM (simplifyOr mkOr) false attrs
+    mkAttrib false attrib name extract = case attrib of
+              Left  [] -> mkRVar unique name Substructural
+              Left  as -> foldM (simplifyOr mkOr) false =<< map extract <$> mapM getAttribs as
+              Right a  -> mkRTerm' (Attrib a) []
     mkOr a b = mkRTerm' Or [a, b]
 
 mkAttribVar :: ST s ID -> String -> VarType -> Maybe Bool -> Maybe Bool -> ST s (RNode s)
@@ -479,27 +480,36 @@ mkAttribVar unique name ty relevant affine = do
     mkAttrib Nothing  suffix = mkRVar unique (name ++ suffix) Substructural
 
 opType :: ST s ID -> RawOp -> ST s (RNode s, RNode s)
-opType unique = flip evalStateT M.empty . blockOrOp
+opType unique = flip evalStateT (False, M.empty) . blockOrOp
   where
     mkRTerm' sym children = lift $ mkRTerm unique sym children
-    mkAttribTerm' sym children = lift $ mkAttribTerm unique sym Nothing Nothing children
-    eval x' = lift $ evalStateT x' M.empty
+    mkAttribTerm' sym children = do
+        onRight <- gets fst
+        lift $ if onRight
+                   then mkAttribTerm unique sym (Left children) (Left children) children
+                   else mkAttribTerm unique sym (Left [])       (Left [])       children
+    eval x' = lift $ evalStateT x' (False, M.empty)
     seq2 action a' b' = do
         a'' <- a'
         b'' <- b'
         action a'' b''
 
-    (~>) = liftM2 (,)
+    a' ~> b' = do
+        modify $ \(_, vars) -> (False, vars)
+        a'' <- a'
+        modify $ \(_, vars) -> (True, vars)
+        b'' <- b'
+        return (a'', b'')
     (.*) = seq2 $ \a' b' -> mkAttribTerm' Product [a', b']
     (.+) = seq2 $ \a' b' -> mkAttribTerm' Sum [a', b']
     infixr 1 ~>
     infixr 7 .*
     infixr 6 .+
     mkBlock rel aff = seq2 $ \a' b' -> lift $ mkAttribTerm unique Block rel aff [a', b']
-    mkBlockAny = mkBlock Nothing Nothing
-    mkBlockNew = mkBlock (Just False) (Just False)
-    unit = mkAttribTerm' Unit []
-    num  = mkAttribTerm' Num []
+    mkBlockAny = seq2 $ \a' b' -> mkAttribTerm' Block [a', b']
+    mkBlockNew = mkBlock (Right False) (Right False)
+    unit = lift $ mkAttribTerm unique Unit (Right False) (Right False) []
+    num  = lift $ mkAttribTerm unique Num  (Right False) (Right False) []
     sealed seal v = do
         v' <- v
         mkAttribTerm' (Sealed seal) [v']
@@ -507,12 +517,12 @@ opType unique = flip evalStateT M.empty . blockOrOp
 
     var  v = var' v Nothing Nothing
     var' v relevant affine = do
-        vars <- get
+        (onRight, vars) <- get
         case M.lookup v vars of
             Just v' -> return v'
             Nothing -> do
                 v' <- lift $ mkAttribVar unique v Structural relevant affine
-                modify $ M.insert v v'
+                put (onRight, M.insert v v' vars)
                 return v'
 
     a = var "a"
@@ -575,21 +585,8 @@ opType unique = flip evalStateT M.empty . blockOrOp
         z' <- eval z
         b1 <- eval $ mkBlockAny (return x') (return y')
         b2 <- eval $ mkBlockAny (return y') (return z')
-        (b1k, b1f) <- lift $ getAttribs b1
-        (b2k, b2f) <- lift $ getAttribs b2
-        k <- mkRTerm' Or [b1k, b2k]
-        f <- mkRTerm' Or [b1f, b2f]
-        t <- mkRTerm' Block [x', z']
-        r <- mkRTerm' Attribs [t, k, f]
-        return b1 .* return b2 .* e ~> return r .* e
-    op Quote = do
-        x' <- eval x
-        s' <- eval s
-        (k, f) <- lift $ getAttribs x'
-        p <- mkAttribTerm' Product [x', s']
-        t <- mkRTerm' Block [s', p]
-        b' <- mkRTerm' Attribs [t, k, f]
-        return x' .* e ~> return b' .* e
+        return b1 .* return b2 .* e ~> mkBlock (Left [b1, b2]) (Left [b1, b2]) (return x') (return z') .* e
+    op Quote = x .* e ~> mkBlockAny s (x .* s) .* e
     op Relevant = opMark True
     op Affine = opMark False
 
@@ -609,7 +606,7 @@ opType unique = flip evalStateT M.empty . blockOrOp
     op Intro0  = a .* e ~> (a .+ void') .* e
     op Elim0   = (a .+ void') .* e ~> a .* e
 
-    op CondApply = mkBlock Nothing (Just False) x xp .* (x .+ y) .* e ~> (xp .+ y) .* e
+    op CondApply = mkBlock (Left []) (Right False) x xp .* (x .+ y) .* e ~> (xp .+ y) .* e
     op Distrib   = a .* (b .+ c) .* e ~> (a .* b .+ a .* c) .* e
     op Factor    = (a .* b .+ c .* d) .* e ~> (a .+ c) .* (b .+ d) .* e
     op Merge     = do
