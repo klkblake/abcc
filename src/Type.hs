@@ -74,7 +74,7 @@ showRawType _ (Void a) kf = do
 
 showRawType prec (Sealed seal a) _ = do
     a' <- showType 9 a
-    return . paren (prec > 8) $ "Sealed \"" ++ seal ++ "\"" ++ a'
+    return . paren (prec > 8) $ "Sealed \"" ++ seal ++ "\" " ++ a'
 
 showRawType _ Opaque kf = return $ "■" ++ kf
 
