@@ -411,44 +411,42 @@ substitute (Term _ _ children stageRef) = do
         when (ty /= Void && V.length ts == 1) $ MV.write children i $ ts V.! 0
         V.mapM_ substitute =<< V.mapM fromRTerm ts
 
-purify :: Term s -> ST s T.Type
-purify root = flip go root =<< H.new
-  where
-    go seen (Term ident Attribs children _) = do
-        purified <- H.lookup seen ident
-        case purified of
-            Just ty -> return ty
-            Nothing -> do
-                node <- fromRNode =<< MV.read children 0
-                Term _ (Attrib k) _ _ <- fromRTerm =<< MV.read children 1
-                Term _ (Attrib f) _ _ <- fromRTerm =<< MV.read children 2
-                let tType = T.Type ident k f
-                case node of
-                    Left (Term _ sym children' _) -> do
-                        rec let ty = tType $ rawType sym cs
-                            H.insert seen ident ty
-                            cs <- V.mapM (go seen <=< fromRTerm) =<< V.freeze children'
-                        return ty
-                    Right var -> do
-                        Var ident' _ tyRef _ terms _ _ <- rep var
-                        vty <- readSTRef tyRef
-                        case vty of
-                            Void -> do
-                                ts <- TL.toVector <$> readSTRef terms
-                                rec let ty = tType . T.Void $ T.Type ident' k f v
-                                    H.insert seen ident ty
-                                    v <- if V.null ts
-                                             then return T.Opaque
-                                             else do
-                                                 Term _ sym children' _ <- fromRTerm (ts V.! 0)
-                                                 cs <- V.mapM (go seen <=< fromRTerm) =<< V.freeze children'
-                                                 return $ rawType sym cs
-                                return ty
-                            _ -> do
-                                let ty = tType T.Opaque
+purify :: H.HashTable s Int T.Type -> Term s -> ST s T.Type
+purify seen (Term ident Attribs children _) = do
+    purified <- H.lookup seen ident
+    case purified of
+        Just ty -> return ty
+        Nothing -> do
+            node <- fromRNode =<< MV.read children 0
+            Term _ (Attrib k) _ _ <- fromRTerm =<< MV.read children 1
+            Term _ (Attrib f) _ _ <- fromRTerm =<< MV.read children 2
+            let tType = T.Type ident k f
+            case node of
+                Left (Term _ sym children' _) -> do
+                    rec let ty = tType $ rawType sym cs
+                        H.insert seen ident ty
+                        cs <- V.mapM (purify seen <=< fromRTerm) =<< V.freeze children'
+                    return ty
+                Right var -> do
+                    Var ident' _ tyRef _ terms _ _ <- rep var
+                    vty <- readSTRef tyRef
+                    case vty of
+                        Void -> do
+                            ts <- TL.toVector <$> readSTRef terms
+                            rec let ty = tType . T.Void $ T.Type ident' k f v
                                 H.insert seen ident ty
-                                return ty
-    go _ (Term _ sym _ _) = error $ "Attempted to purify non-Attribs term " ++ show sym
+                                v <- if V.null ts
+                                         then return T.Opaque
+                                         else do
+                                             Term _ sym children' _ <- fromRTerm (ts V.! 0)
+                                             cs <- V.mapM (purify seen <=< fromRTerm) =<< V.freeze children'
+                                             return $ rawType sym cs
+                            return ty
+                        _ -> do
+                            let ty = tType T.Opaque
+                            H.insert seen ident ty
+                            return ty
+  where
     rawType Product       cs = T.Product (cs V.! 0) (cs V.! 1)
     rawType Sum           cs = T.Sum     (cs V.! 0) (cs V.! 1)
     rawType Block         cs = T.Block   (cs V.! 0) (cs V.! 1)
@@ -456,6 +454,7 @@ purify root = flip go root =<< H.new
     rawType Unit          _  = T.Unit
     rawType (Sealed seal) cs = T.Sealed seal $ cs V.! 0
     rawType _             _  = error "Illegal term type in purify"
+purify _ (Term _ sym _ _) = error $ "Attempted to purify non-Attribs term " ++ show sym
 
 mkAttribTerm :: ST s ID -> Symbol -> Either [RNode s] Bool -> Either [RNode s] Bool -> [RNode s] -> ST s (RNode s)
 mkAttribTerm unique sym relevant affine children = do
@@ -666,6 +665,7 @@ inferTypes mode logStages ops = do
     exprs <- lift $ mapM (opType unique) ops
     let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
     writeGraph TIInitial flatExprs
+    -- TODO this skips the contents of blocks
     err <- lift $ unifyAll unique . zip (map snd exprs) . map fst $ tail exprs
     case err of
         Just (i, a, b, x, y) -> do
@@ -679,5 +679,6 @@ inferTypes mode logStages ops = do
             writeGraph TIResolved flatExprs
             lift $ mapM_ substitute =<< mapM fromRTerm flatExprs
             writeGraph TISubstituted flatExprs
-            pureExprs <- mapM (lift . (purify <=< fromRTerm)) flatExprs
+            seen <- lift H.new
+            pureExprs <- mapM (lift . (purify seen <=< fromRTerm)) flatExprs
             return $ Right pureExprs
