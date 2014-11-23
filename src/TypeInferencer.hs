@@ -452,7 +452,7 @@ purify root = flip go root =<< H.new
                                 let ty = tType T.Opaque
                                 H.insert seen ident ty
                                 return ty
-    go _ _ = error "Attempted to purify non-Attribs term"
+    go _ (Term _ sym _ _) = error $ "Attempted to purify non-Attribs term " ++ show sym
 
 mkAttribTerm :: ST s ID -> Symbol -> Either [RNode s] Bool -> Either [RNode s] Bool -> [RNode s] -> ST s (RNode s)
 mkAttribTerm unique sym relevant affine children = do
@@ -620,8 +620,8 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
 
     op Greater = num .* num .* e ~> (num .* num .+ num .* num) .* e
 
-    op (Sealer   seal) = a .* e ~> sealed seal a .* e
-    op (Unsealer seal) = sealed seal a .* e ~> a .* e
+    op (Sealer   seal) = a ~> sealed seal a
+    op (Unsealer seal) = sealed seal a ~> a
 
     op AssertEQ = a .* b .* e ~> a .* b .* e
     op DebugPrintRaw = a .* e ~> a .* e
