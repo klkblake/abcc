@@ -425,14 +425,7 @@ purify root = flip go root =<< H.new
                 let tType = T.Type ident k f
                 case node of
                     Left (Term _ sym children' _) -> do
-                        rec let ty = tType $ case sym of
-                                                 Product     -> T.Product (cs V.! 0) (cs V.! 1)
-                                                 Sum         -> T.Sum     (cs V.! 0) (cs V.! 1)
-                                                 Block       -> T.Block   (cs V.! 0) (cs V.! 1)
-                                                 Num         -> T.Num
-                                                 Unit        -> T.Unit
-                                                 Sealed seal -> T.Sealed seal $ cs V.! 0
-                                                 _ -> error "Illegal term type in purify"
+                        rec let ty = tType $ rawType sym cs
                             H.insert seen ident ty
                             cs <- V.mapM (go seen <=< fromRTerm) =<< V.freeze children'
                         return ty
@@ -442,17 +435,27 @@ purify root = flip go root =<< H.new
                         case vty of
                             Void -> do
                                 ts <- TL.toVector <$> readSTRef terms
-                                rec let ty = tType $ T.Void v
+                                rec let ty = tType . T.Void $ T.Type ident' k f v
                                     H.insert seen ident ty
                                     v <- if V.null ts
-                                             then return $ T.Type ident' k f T.Opaque
-                                             else go seen =<< fromRTerm (ts V.! 0)
+                                             then return T.Opaque
+                                             else do
+                                                 Term _ sym children' _ <- fromRTerm (ts V.! 0)
+                                                 cs <- V.mapM (go seen <=< fromRTerm) =<< V.freeze children'
+                                                 return $ rawType sym cs
                                 return ty
                             _ -> do
                                 let ty = tType T.Opaque
                                 H.insert seen ident ty
                                 return ty
     go _ (Term _ sym _ _) = error $ "Attempted to purify non-Attribs term " ++ show sym
+    rawType Product       cs = T.Product (cs V.! 0) (cs V.! 1)
+    rawType Sum           cs = T.Sum     (cs V.! 0) (cs V.! 1)
+    rawType Block         cs = T.Block   (cs V.! 0) (cs V.! 1)
+    rawType Num           _  = T.Num
+    rawType Unit          _  = T.Unit
+    rawType (Sealed seal) cs = T.Sealed seal $ cs V.! 0
+    rawType _             _  = error "Illegal term type in purify"
 
 mkAttribTerm :: ST s ID -> Symbol -> Either [RNode s] Bool -> Either [RNode s] Bool -> [RNode s] -> ST s (RNode s)
 mkAttribTerm unique sym relevant affine children = do
