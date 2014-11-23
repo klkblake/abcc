@@ -633,18 +633,20 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
 
     op ApplyTail = error "To be removed."
 
-unifyAll :: ST s ID -> [(RNode s, RNode s)] -> ST s (Maybe (Int, Term s, Term s, Term s, Term s))
-unifyAll unique pairs = go pairs 1
+unifyAll :: ST s ID -> [RawOp] -> ST s (Either (Int, Term s, Term s, Term s, Term s) [RNode s])
+unifyAll _      []    = return $ Right []
+unifyAll unique (opcode:opcodes) = go 0 [] opcodes . snd =<< opType unique opcode
   where
-    go ((a, b):ps) i = do
+    go i tys (op:ops) a = do
+        (b, a') <- opType unique op
         res <- unify unique =<< V.mapM fromRTerm (V.fromList [a, b])
         case res of
             Just (x, y) -> do
-                a' <- fromRTerm a
+                a'' <- fromRTerm a
                 b' <- fromRTerm b
-                return $ Just (i, a', b', x, y)
-            Nothing -> go ps $ i + 1
-    go [] _ = return Nothing
+                return $ Left (i, a'', b', x, y)
+            Nothing -> go (i + 1) (a:tys) ops a'
+    go _ tys [] _ = return . Right $ reverse tys
 
 inferTypes :: Mode -> [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String) [T.Type])
 inferTypes mode logStages ops = do
@@ -662,23 +664,20 @@ inferTypes mode logStages ops = do
             x' <- toNode mode x
             y' <- toNode mode y
             return $ Graph prefix label [] [x', y']
-    exprs <- lift $ mapM (opType unique) ops
-    let flatExprs = concatMap (\(a, b) -> [a, b]) exprs
-    writeGraph TIInitial flatExprs
     -- TODO this skips the contents of blocks
-    err <- lift $ unifyAll unique . zip (map snd exprs) . map fst $ tail exprs
-    case err of
-        Just (i, a, b, x, y) -> do
+    res <- lift $ unifyAll unique ops
+    case res of
+        Left (i, a, b, x, y) -> do
             inner <- errorTerm "inner" "Could not unify:" x y
             outer <- errorTerm "outer" "While trying to unify:" a b
             graph <- lift . showGraph $ Graph "" ("Unification failure at opcode index " ++ show i) [inner, outer] []
             return $ Left (i, graph)
-        Nothing -> do
-            writeGraph TIUnified flatExprs
-            lift $ mapM_ (deloop unique) flatExprs
-            writeGraph TIResolved flatExprs
-            lift $ mapM_ substitute =<< mapM fromRTerm flatExprs
-            writeGraph TISubstituted flatExprs
+        Right tys -> do
+            writeGraph TIUnified tys
+            lift $ mapM_ (deloop unique) tys
+            writeGraph TIResolved tys
+            lift $ mapM_ substitute =<< mapM fromRTerm tys
+            writeGraph TISubstituted tys
             seen <- lift H.new
-            pureExprs <- mapM (lift . (purify seen <=< fromRTerm)) flatExprs
+            pureExprs <- mapM (lift . (purify seen <=< fromRTerm)) tys
             return $ Right pureExprs
