@@ -73,9 +73,9 @@ data Stage = New | DeloopSeen | Delooped | Substituted deriving Eq
 
 data VarType = Structural | Substructural | Void deriving Eq
 
-data Term s = Term ID Symbol (MVector s (RNode s)) (STRef s Stage)
+data Term s = Term {-# UNPACK #-} !ID Symbol {-# UNPACK #-} !(MVector s (RNode s)) {-# UNPACK #-} !(STRef s Stage)
 
-data Var s = Var ID String (STRef s VarType) (STRef s (Maybe (Var s))) (STRef s (TreeList (RNode s))) (STRef s (TreeList (RNode s, RNode s))) (STRef s Int)
+data Var s = Var {-# UNPACK #-} !ID String {-# UNPACK #-} !(STRef s VarType) {-# UNPACK #-} !(STRef s (Maybe (Var s))) {-# UNPACK #-} !(STRef s (TreeList (RNode s))) {-# UNPACK #-} !(STRef s (TreeList (RNode s, RNode s))) {-# UNPACK #-} !(STRef s Int)
 
 newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
 
