@@ -12,72 +12,72 @@ import GraphViz hiding (State)
 data Type = Type ID Bool Bool RawType
 
 data RawType = Product Type Type
-           | Sum Type Type
-           | Block Type Type
-           | Num
-           | Unit
-           | Void Type
-           | Sealed String Type
-           | Opaque
+             | Sum Type Type
+             | Block Type Type
+             | Num
+             | Unit
+             | Void Type
+             | Sealed String Type
+             | Opaque
 
 instance Show Type where
-    show ty = evalState (showType 0 ty) (IS.empty, IM.empty, 0)
+    show ty = evalState (showsType 0 ty) (IS.empty, IM.empty, 0) ""
 
 instance Show RawType where
-    show ty = evalState (showRawType 0 ty "") (IS.empty, IM.empty, 0)
+    show ty = evalState (showsRawType 0 ty id) (IS.empty, IM.empty, 0) ""
 
 variables :: [String]
 variables = concat . iterate (\vs -> concatMap (\v -> map (v:) vs) ['a'..'z']) $ map (:[]) ['a'..'z']
 
-showType :: Int -> Type -> State (IS.IntSet, IM.IntMap Int, Int) String
-showType prec (Type ident rel aff ty) = do
+showsType :: Int -> Type -> State (IS.IntSet, IM.IntMap Int, Int) ShowS
+showsType prec (Type ident rel aff ty) = do
     (seen, _, _) <- get
     if IS.member ident seen
         then do
             (_, joins, joinCount) <- get
             put (seen, IM.insert ident joinCount joins, joinCount + 1)
-            return $ variables !! joinCount
+            return . showString $ variables !! joinCount
         else do
-            let k = if rel then "k" else ""
-            let f = if aff then "f" else ""
+            let k = if rel then showChar 'k' else id
+            let f = if aff then showChar 'f' else id
             modify $ \(seen', joins, joinCount) -> (IS.insert ident seen', joins, joinCount)
-            ty' <- showRawType prec ty $ k ++ f
+            ty' <- showsRawType prec ty $ k . f
             modify $ \(seen', joins, joinCount) -> (IS.delete ident seen', joins, joinCount)
             (_, joins, _) <- get
             case IM.lookup ident joins of
-                Just v  -> return . paren (prec > 0) $ "μ" ++ variables !! v ++ ". " ++ ty'
+                Just v  -> return . paren (prec > 0) $ showChar 'μ' . showString (variables !! v) . showString  ". " . ty'
                 Nothing -> return ty'
 
-showRawType :: Int -> RawType -> String -> State (IS.IntSet, IM.IntMap Int, Int) String
-showRawType prec (Product a b) _ = do
-    a' <- showType 8 a
-    b' <- showType 7 b
-    return . paren (prec > 7) $ a' ++ " * " ++ b'
+showsRawType :: Int -> RawType -> ShowS -> State (IS.IntSet, IM.IntMap Int, Int) ShowS
+showsRawType prec (Product a b) _ = do
+    a' <- showsType 8 a
+    b' <- showsType 7 b
+    return . paren (prec > 7) $ a' . showString " * " . b'
 
-showRawType prec (Sum a b) _ = do
-    a' <- showType 7 a
-    b' <- showType 6 b
-    return . paren (prec > 6) $ a' ++ " + " ++ b'
+showsRawType prec (Sum a b) _ = do
+    a' <- showsType 7 a
+    b' <- showsType 6 b
+    return . paren (prec > 6) $ a' . showString " + " . b'
 
-showRawType _ (Block a b) kf = do
-    a' <- showType 0 a
-    b' <- showType 0 b
-    return $ "[" ++ a' ++ " -> " ++ b' ++ "]" ++ kf
+showsRawType _ (Block a b) kf = do
+    a' <- showsType 0 a
+    b' <- showsType 0 b
+    return $ showChar '[' . a' . showString " -> " . b' . showChar ']' . kf
 
-showRawType _ Num _ = return "N"
-showRawType _ Unit _ = return "1"
-showRawType _ (Void (Type _ _ _ Opaque)) kf = return $ "0" ++ kf
+showsRawType _ Num  _ = return $ showChar 'N'
+showsRawType _ Unit _ = return $ showChar '1'
+showsRawType _ (Void (Type _ _ _ Opaque)) kf = return $ showChar '0' . kf
 
-showRawType _ (Void a) kf = do
-    a' <- showType 0 a
-    return $ "0<" ++ a' ++ ">" ++ kf
+showsRawType _ (Void a) kf = do
+    a' <- showsType 0 a
+    return $ showString "0<" . a' . showChar '>' . kf
 
-showRawType prec (Sealed seal a) _ = do
-    a' <- showType 9 a
-    return . paren (prec > 8) $ "Sealed \"" ++ seal ++ "\" " ++ a'
+showsRawType prec (Sealed seal a) _ = do
+    a' <- showsType 9 a
+    return . paren (prec > 8) $ showString "Sealed \"" . showString seal . showString "\" " . a'
 
-showRawType _ Opaque kf = return $ "■" ++ kf
+showsRawType _ Opaque kf = return $ showChar '■' . kf
 
-paren :: Bool -> String -> String
-paren True  x = "(" ++ x ++ ")"
+paren :: Bool -> ShowS -> ShowS
+paren True  x = showChar '(' . x . showChar ')'
 paren False x = x
