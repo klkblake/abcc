@@ -1,6 +1,9 @@
 {-# LANGUAGE StandaloneDeriving, UndecidableInstances #-}
 module Op where
 
+import InterList
+import Type
+
 data Op f = LitBlock (f (Op f))
           | Op FlatOp
 
@@ -48,3 +51,5 @@ data FlatOp = LitText String
 deriving instance Show (f (Op f)) => Show (Op f)
 
 type RawOp = Op []
+
+type TyOp = Op (InterList Type)

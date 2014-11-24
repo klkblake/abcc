@@ -25,6 +25,7 @@ import Op
 import qualified Type as T
 
 import GraphViz
+import qualified InterList as IL
 import TreeList (TreeList)
 import qualified TreeList as TL
 import Queue (Queue)
@@ -633,11 +634,18 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
 
     op ApplyTail = error "To be removed."
 
-unifyAll :: ST s ID -> [RawOp] -> ST s (Either (Int, Term s, Term s, Term s, Term s) [RNode s])
-unifyAll _      []    = return $ Right []
-unifyAll unique (opcode:opcodes) = go 0 [] opcodes . snd =<< opType unique opcode
+unifyAll :: ST s ID -> [RawOp] -> ST s (Either (Int, Term s, Term s, Term s, Term s) (IL.InterList (RNode s) RawOp))
+unifyAll unique []    = Right . IL.empty <$> mkAttribVar unique "a" Structural (Just False) (Just False)
+unifyAll unique (opcode:opcodes) = do
+    (a, b) <- opType unique opcode
+    go 0 (IL.empty a) opcodes b
   where
-    go i tys (op:ops) a = do
+    {-go i tyOps (LitBlock bops:ops) a = do
+        btys <- unifyAll unique bops
+        case btys of
+            Left  err   -> return $ Left err
+            Right btys' -> -}
+    go i tyOps (op:ops) a = do
         (b, a') <- opType unique op
         res <- unify unique =<< V.mapM fromRTerm (V.fromList [a, b])
         case res of
@@ -645,8 +653,8 @@ unifyAll unique (opcode:opcodes) = go 0 [] opcodes . snd =<< opType unique opcod
                 a'' <- fromRTerm a
                 b' <- fromRTerm b
                 return $ Left (i, a'', b', x, y)
-            Nothing -> go (i + 1) (a:tys) ops a'
-    go _ tys [] _ = return . Right $ reverse tys
+            Nothing -> go (i + 1) (IL.cons a op tyOps) ops a'
+    go _ tyOps [] _ = return . Right $ IL.reverse tyOps
 
 inferTypes :: Mode -> [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String) [T.Type])
 inferTypes mode logStages ops = do
@@ -672,7 +680,8 @@ inferTypes mode logStages ops = do
             outer <- errorTerm "outer" "While trying to unify:" a b
             graph <- lift . showGraph $ Graph "" ("Unification failure at opcode index " ++ show i) [inner, outer] []
             return $ Left (i, graph)
-        Right tys -> do
+        Right tyOps -> do
+            let tys = IL.outerList tyOps
             writeGraph TIUnified tys
             lift $ mapM_ (deloop unique) tys
             writeGraph TIResolved tys
