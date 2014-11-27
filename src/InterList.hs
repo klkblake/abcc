@@ -2,6 +2,7 @@ module InterList where
 
 data InterList a b = Empty a
                    | Cons a b (InterList a b)
+                   deriving Show
 
 empty :: a -> InterList a b
 empty = Empty
@@ -20,4 +21,4 @@ reverse :: InterList a b -> InterList a b
 reverse il = go (Empty . head $ outerList il) il
   where
     go il' (Empty _)       = il'
-    go il' (Cons  _ y xys) = Cons (head $ outerList xys) y il'
+    go il' (Cons  _ y xys) = go (Cons (head $ outerList xys) y il') xys
