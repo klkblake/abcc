@@ -482,7 +482,9 @@ mkAttribVar unique name ty relevant affine = do
     mkAttrib (Just a) _      = mkRTerm unique (Attrib a) []
     mkAttrib Nothing  suffix = mkRVar unique (name ++ suffix) Substructural
 
-opType :: ST s ID -> RawOp -> ST s (RNode s, RNode s)
+type RNodeIL s = IL.InterList (RNode s)
+
+opType :: ST s ID -> Op (RNodeIL s) -> ST s (RNode s, RNode s)
 opType unique = flip evalStateT (False, M.empty) . blockOrOp
   where
     mkRTerm' sym children = lift $ mkRTerm unique sym children
@@ -559,13 +561,8 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
         return b1 .* e ~> return b2 .* e
 
     blockOrOp (LitBlock block) = do
-        tys <- lift $ mapM (opType unique) block
-        case tys of
-            [] -> s ~> mkBlockNew a a .* s
-            _  -> do
-                let (a', _)  = head tys
-                    (_,  b') = last tys
-                s ~> mkBlockNew (return a') (return b') .* s
+        let tys = IL.outerList block
+        s ~> mkBlockNew (return $ head tys) (return $ last tys) .* s
     blockOrOp (Op op') = op op'
 
     op (LitText _) = do
@@ -634,27 +631,38 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
 
     op ApplyTail = error "To be removed."
 
-unifyAll :: ST s ID -> [RawOp] -> ST s (Either (Int, Term s, Term s, Term s, Term s) (IL.InterList (RNode s) RawOp))
-unifyAll unique []    = Right . IL.empty <$> mkAttribVar unique "a" Structural (Just False) (Just False)
+unifyBlock :: ST s ID -> RawOp -> ST s (Either (Int, Term s, Term s, Term s, Term s) (Op (RNodeIL s)))
+unifyBlock _      (Op op) = return . Right $ Op op
+unifyBlock unique (LitBlock bops) = do
+    btyOps <- unifyAll unique bops
+    return $ case btyOps of
+                 Left  err     -> Left err
+                 Right btyOps' -> Right $ LitBlock btyOps'
+
+unifyAll :: ST s ID -> [RawOp] -> ST s (Either (Int, Term s, Term s, Term s, Term s) (RNodeIL s (Op (RNodeIL s))))
+unifyAll unique [] = Right . IL.empty <$> mkAttribVar unique "a" Structural (Just False) (Just False)
 unifyAll unique (opcode:opcodes) = do
-    (a, b) <- opType unique opcode
-    go 0 (IL.empty a) opcodes b
+    op <- unifyBlock unique opcode
+    case op of
+        Left  err -> return $ Left err
+        Right op' -> do
+            (a, b) <- opType unique op'
+            go 0 (IL.empty a) op' opcodes b
   where
-    {-go i tyOps (LitBlock bops:ops) a = do
-        btys <- unifyAll unique bops
-        case btys of
-            Left  err   -> return $ Left err
-            Right btys' -> -}
-    go i tyOps (op:ops) a = do
-        (b, a') <- opType unique op
-        res <- unify unique =<< V.mapM fromRTerm (V.fromList [a, b])
-        case res of
-            Just (x, y) -> do
-                a'' <- fromRTerm a
-                b' <- fromRTerm b
-                return $ Left (i, a'', b', x, y)
-            Nothing -> go (i + 1) (IL.cons a op tyOps) ops a'
-    go _ tyOps [] _ = return . Right $ IL.reverse tyOps
+    go i tyOps lop (rop:ops) a = do
+        rop' <- unifyBlock unique rop
+        case rop' of
+            Left err -> return $ Left err
+            Right rop'' -> do
+                (b, a') <- opType unique rop''
+                res <- unify unique =<< V.mapM fromRTerm (V.fromList [a, b])
+                case res of
+                    Just (x, y) -> do
+                        a'' <- fromRTerm a
+                        b'  <- fromRTerm b
+                        return $ Left (i, a'', b', x, y)
+                    Nothing -> go (i + 1) (IL.cons a lop tyOps) rop'' ops a'
+    go _ tyOps op [] a = return . Right . IL.reverse $ IL.cons a op tyOps
 
 inferTypes :: Mode -> [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String) [T.Type])
 inferTypes mode logStages ops = do
