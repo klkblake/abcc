@@ -247,10 +247,11 @@ splitNodes = V.foldM splitNode ([], []) . V.indexed
                      Left  _ -> (n:ls, rs)
                      Right _ -> (ls, (i, n):rs)
 
-commonFrontier :: ST s ID -> Queue (Var s) -> V.Vector (Term s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
+commonFrontier :: ST s ID -> Queue (Var s) -> V.Vector (RNode s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
 commonFrontier unique queue t_list = do
-    let t@(Term _ sym _ _) = t_list V.! 0
-    case checkEqual t t_list of
+    t@(Term _ sym _ _) <- fromRTerm $ t_list V.! 0
+    ts <- V.mapM fromRTerm t_list
+    case checkEqual t ts of
         Just err -> return $ Left err
         Nothing  -> foldM goChild (Right queue) [0 .. arity sym - 1]
   where
@@ -274,24 +275,26 @@ commonFrontier unique queue t_list = do
                         Right <$> if all (matchingAttrib a) terms'
                                       then return queue'
                                       else genSubVar queue' i $ t:terms
-                    _ -> commonFrontier unique queue' . V.fromList =<< mapM fromRTerm (t:terms)
+                    _ -> commonFrontier unique queue' . V.fromList $ t:terms
             (terms, (j, var):vars) -> do
                 swapChild i j
                 v <- rep =<< fromRVar var
                 queue''  <- foldM (processVars  v) queue' $ map snd vars
                 queue''' <- foldM (processTerms v) queue'' terms
                 return $ Right queue'''
-    ithChildren i = V.forM t_list $ \(Term _ _ children _) -> MV.read children i
+    ithChildren i = V.forM t_list $ \t -> do
+        (Term _ _ children _) <- fromRTerm t
+        MV.read children i
     genSubVar queue' i terms = do
         v <- mkRVar unique "attr" Substructural
         v' <- fromRVar v
         queue'' <- foldM (`add` v') queue' terms
-        let Term _ _ cs _ = t_list V.! 0
+        Term _ _ cs _ <- fromRTerm $ t_list V.! 0
         MV.write cs i v
         return queue''
     swapChild i j = do
-        let Term _ _ c0 _ = t_list V.! 0
-            Term _ _ cj _ = t_list V.! j
+        Term _ _ c0 _ <- fromRTerm $ t_list V.! 0
+        Term _ _ cj _ <- fromRTerm $ t_list V.! j
         t0 <- MV.read c0 i
         tj <- MV.read cj i
         MV.write c0 i tj
@@ -303,7 +306,7 @@ commonFrontier unique queue t_list = do
             else return queue'
     processTerms v queue' = add queue' v
 
-unify :: ST s ID -> V.Vector (Term s) -> ST s (Maybe (Term s, Term s))
+unify :: ST s ID -> V.Vector (RNode s) -> ST s (Maybe (Term s, Term s))
 unify unique t_list = do
     res <- commonFrontier unique Q.empty t_list
     case res of
@@ -318,7 +321,7 @@ unify unique t_list = do
             else do
                 let t = TL.toVector terms
                 writeSTRef termsRef . TL.singleton $ t V.! 0
-                res <- commonFrontier unique queue' =<< V.mapM fromRTerm t
+                res <- commonFrontier unique queue' t
                 case res of
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
@@ -655,7 +658,7 @@ unifyAll unique (opcode:opcodes) = do
             Left err -> return $ Left err
             Right rop'' -> do
                 (b, a') <- opType unique rop''
-                res <- unify unique =<< V.mapM fromRTerm (V.fromList [a, b])
+                res <- unify unique $ V.fromList [a, b]
                 case res of
                     Just (x, y) -> do
                         a'' <- fromRTerm a
