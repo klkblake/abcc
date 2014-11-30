@@ -1,0 +1,22 @@
+#!/bin/bash
+R3RIGHT='\([rwz^QF]\)'
+R3LEFT='\([lwz$o+*Q?D>]\)'
+REPLACE=(
+	"zwz/wzw"
+	"lr/ww"
+	"lwwr/zz"
+	"${R3RIGHT}ww/\1"
+	"ww${R3LEFT}/\1"
+	"wlzrw/lzr"
+	"zzw/wzz"
+	"zzz/z"
+)
+SCRIPT=""
+for R in "${REPLACE[@]}"; do
+	SCRIPT="$SCRIPT;s/$R/g"
+done
+SCRIPT="$SCRIPT;$SCRIPT"
+SCRIPT="$SCRIPT;$SCRIPT"
+SCRIPT="$SCRIPT;$SCRIPT"
+SCRIPT="$SCRIPT;$SCRIPT"
+sed -e "$SCRIPT"
