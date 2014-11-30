@@ -14,6 +14,7 @@ import System.Process
 import GraphViz
 
 import Parser
+import PeepholePre
 import TypeInferencer
 import Codegen
 
@@ -24,6 +25,7 @@ helpText prog = unlines [ prog ++ " - A compiler for Awelon Bytecode"
                         , ""
                         , "Options:"
                         , "\t--typecheck              Run the typechecker instead of the compiler"
+                        , "\t--peephole-pre           Run the pre-typechecker peephole optimiser"
                         , "\t--dump-<stage>[=FILE]    Dump the internal state of the typechecker at a particular stage to a GraphViz file"
                         , "\t\tStages:"
                         , "\t\t  initial        After the opcodes have had types assigned to them"
@@ -35,6 +37,7 @@ helpText prog = unlines [ prog ++ " - A compiler for Awelon Bytecode"
                         ]
 
 data Flag = TypeCheck
+          | PeepholePre
           | Dump TIStage (Maybe FilePath)
           | DumpAll
           | VerboseGraphs
@@ -43,6 +46,7 @@ data Flag = TypeCheck
 flagSpecs :: [OptSpec Flag]
 flagSpecs =
     [ OptSpec ["typecheck"]        [] (NoArg TypeCheck)
+    , OptSpec ["peephole-pre"]     [] (NoArg PeepholePre)
     , OptSpec ["dump-initial"]     [] . OptionalArg $ return . Dump TIInitial
     , OptSpec ["dump-unified"]     [] . OptionalArg $ return . Dump TIUnified
     , OptSpec ["dump-resolved"]    [] . OptionalArg $ return . Dump TIResolved
@@ -88,6 +92,14 @@ doCompile = do
                                   exitFailure
         Nothing -> exitFailure
 
+doPeepholePre :: IO ()
+doPeepholePre = do
+    input <- getContents
+    ops <- parse input
+    case fmap peepholePre ops of
+        Just ops' -> putStr $ show ops'
+        Nothing   -> exitFailure
+
 doTypeCheck :: Options -> IO ()
 doTypeCheck opts = do
     input <- getContents
@@ -117,6 +129,9 @@ doTypeCheck opts = do
 main :: IO ()
 main = do
     flags <- simpleHelp helpText flagSpecs Intersperse . const . Left $ ErrorMsg "Positional arguments are not allowed"
-    if TypeCheck `elem` flags
-        then doTypeCheck $ processFlags flags
-        else doCompile
+    if PeepholePre `elem` flags
+        then doPeepholePre
+        else
+            if TypeCheck `elem` flags
+                then doTypeCheck $ processFlags flags
+                else doCompile
