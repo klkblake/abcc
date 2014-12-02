@@ -13,50 +13,6 @@ import Text.Trifecta.Delta
 
 import Op
 
-opcodeMapping :: [(Char, FlatOp)]
-opcodeMapping = [ ('l', AssocL)
-                , ('r', AssocR)
-                , ('w', Swap)
-                , ('z', SwapD)
-                , ('v', Intro1)
-                , ('c', Elim1)
-                , ('%', Drop)
-                , ('^', Copy)
-                , ('$', Apply)
-                , ('o', Compose)
-                , ('\'', Quote)
-                , ('k', Relevant)
-                , ('f', Affine)
-                , ('#', IntroNum)
-                , ('0', Digit 0)
-                , ('1', Digit 1)
-                , ('2', Digit 2)
-                , ('3', Digit 3)
-                , ('4', Digit 4)
-                , ('5', Digit 5)
-                , ('6', Digit 6)
-                , ('7', Digit 7)
-                , ('8', Digit 8)
-                , ('9', Digit 9)
-                , ('+', Add)
-                , ('*', Multiply)
-                , ('/', Inverse)
-                , ('-', Negate)
-                , ('Q', Divmod)
-                , ('L', AssocLS)
-                , ('R', AssocRS)
-                , ('W', SwapS)
-                , ('Z', SwapDS)
-                , ('V', Intro0)
-                , ('C', Elim0)
-                , ('?', CondApply)
-                , ('D', Distrib)
-                , ('F', Factor)
-                , ('M', Merge)
-                , ('K', Assert)
-                , ('>', Greater)
-                ]
-
 opcodes :: IM.IntMap FlatOp
 opcodes = IM.fromList $ map (\(code, op) -> (fromEnum code, op)) opcodeMapping
 

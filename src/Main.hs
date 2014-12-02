@@ -97,7 +97,7 @@ doPeepholePre = do
     input <- getContents
     ops <- parse input
     case fmap peepholePre ops of
-        Just ops' -> putStr $ show ops'
+        Just ops' -> mapM_ (putStr . show) ops' >> putStrLn ""
         Nothing   -> exitFailure
 
 doTypeCheck :: Options -> IO ()
