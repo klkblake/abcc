@@ -106,8 +106,9 @@ doTypeCheck opts = do
     ops <- parse input
     case ops of
         Just ops' -> do
+            let ops'' = peepholePre ops'
             let dump = map fst $ optDump opts
-            res <- runEffect (for (hoist stToIO $ inferTypes (optGraphMode opts) dump ops') $ lift . writeGraph)
+            res <- runEffect (for (hoist stToIO $ inferTypes (optGraphMode opts) dump ops'') $ lift . writeGraph)
             case res of
                 Left (i, graph) -> do
                     hPutStrLn stderr $ "# Failed while unifying index " ++ show i
