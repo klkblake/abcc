@@ -16,9 +16,7 @@ import Control.Monad.State
 import qualified Data.HashTable.ST.Basic as H
 import qualified Data.Map.Strict as M
 import Data.STRef
-import Data.Vector (Vector)
 import qualified Data.Vector as V
-import qualified Data.Vector.Mutable as MV
 import Pipes hiding ((~>))
 
 import Op
@@ -26,6 +24,8 @@ import qualified Type as T
 
 import GraphViz
 import qualified InterList as IL
+import ShortList (ShortList)
+import qualified ShortList as SL
 import TreeList (TreeList)
 import qualified TreeList as TL
 import Queue (Queue)
@@ -74,7 +74,7 @@ data Stage = New | DeloopSeen | Delooped | Substituted deriving Eq
 
 data VarType = Structural | Substructural | Void deriving Eq
 
-data Term s = Term {-# UNPACK #-} !ID Symbol {-# UNPACK #-} !(Vector (RNode s)) {-# UNPACK #-} !(STRef s Stage)
+data Term s = Term {-# UNPACK #-} !ID Symbol {-# UNPACK #-} !(ShortList (RNode s)) {-# UNPACK #-} !(STRef s Stage)
 
 data Var s = Var {-# UNPACK #-} !ID String {-# UNPACK #-} !(STRef s VarType) {-# UNPACK #-} !(STRef s (Maybe (Var s))) {-# UNPACK #-} !(STRef s (TreeList (RNode s))) {-# UNPACK #-} !(STRef s (TreeList (RNode s, RNode s))) {-# UNPACK #-} !(STRef s Int)
 
@@ -87,9 +87,7 @@ instance GraphViz (Term s) where
             Verbose -> toNode'
             Compact -> case sym of
                            Attribs -> do
-                               t <- fromRNode $ children V.! 0
-                               k <- fromRNode $ children V.! 1
-                               f <- fromRNode $ children V.! 2
+                               [t, k, f] <- mapM fromRNode $ SL.toList children
                                Node _ label' labelledChildren' <- toNode mode t
                                let (kl, kc) = case k of
                                                   Left (Term _ (Attrib True)  _ _) -> ("k", [])
@@ -104,7 +102,7 @@ instance GraphViz (Term s) where
       where
         toNode' = Node ident label <$> labelledChildren
         label = show sym
-        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map (toNode mode) . V.toList <$> V.mapM fromRNode children
+        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map (toNode mode) <$> mapM fromRNode (SL.toList children)
 
 instance GraphViz (Var s) where
     type State (Var s) = s
@@ -139,7 +137,7 @@ instance GraphViz (Var s) where
         fromRNode' rn = toNode mode <$> fromRNode rn
 
 mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Term s)
-mkTerm unique sym children = Term <$> unique <*> pure sym <*> pure (V.fromList children) <*> newSTRef New
+mkTerm unique sym children = Term <$> unique <*> pure sym <*> pure (SL.fromList children) <*> newSTRef New
 
 mkVar :: ST s ID -> String -> VarType -> ST s (Var s)
 mkVar unique v ty = Var <$> unique <*> pure v <*> newSTRef ty <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> newSTRef 1
@@ -173,12 +171,12 @@ matchingAttrib _ _ = False
 getType :: RNode s -> ST s (RNode s)
 getType node = do
     (Term _ _ cs _) <- fromRTerm node
-    return $ cs V.! 0
+    return $ cs SL.! 0
 
 getAttribs :: RNode s -> ST s (RNode s, RNode s)
 getAttribs node = do
     (Term _ _ cs _) <- fromRTerm node
-    return (cs V.! 1, cs V.! 2)
+    return (cs SL.! 1, cs SL.! 2)
 
 replaceNode :: RNode s -> Either (Term s) (Var s) -> ST s ()
 replaceNode (RNode ref) = writeSTRef ref
@@ -282,22 +280,22 @@ commonFrontier unique queue t_list = do
                 return $ Right queue'''
     ithChildren i = V.forM t_list $ \t -> do
         (Term _ _ children _) <- fromRTerm t
-        return $ children V.! i
+        return $ children SL.! i
     genSubVar queue' i terms = do
         v <- mkRVar unique "attr" Substructural
         v' <- fromRVar v
         queue'' <- foldM (`add` v') queue' terms
         let t = t_list V.! 0
         Term ident sym cs stage <- fromRTerm t
-        replaceNode t . Left $ Term ident sym (V.modify (\c -> MV.write c i v) cs) stage
+        replaceNode t . Left $ Term ident sym (SL.update i v cs) stage
         return queue''
     swapChild i j = do
         let t0 = t_list V.! 0
             tj = t_list V.! j
         Term ident0 sym0 c0 stage0 <- fromRTerm t0
         Term identj symj cj stagej <- fromRTerm tj
-        replaceNode t0 . Left $ Term ident0 sym0 (V.modify (\c -> MV.write c i $ cj V.! i) c0) stage0
-        replaceNode tj . Left $ Term identj symj (V.modify (\c -> MV.write c i $ c0 V.! i) cj) stagej
+        replaceNode t0 . Left $ Term ident0 sym0 (SL.update i (cj SL.! i) c0) stage0
+        replaceNode tj . Left $ Term identj symj (SL.update i (c0 SL.! i) cj) stagej
     processVars v@(Var ident _ _ _ _ _ _) queue' var = do
         v2@(Var ident2 _ _ _ _ _ _) <- rep =<< fromRVar var
         if ident /= ident2
@@ -348,11 +346,10 @@ deloop unique node = do
             case stage of
                 New -> do
                     writeSTRef stageRef DeloopSeen
-                    V.mapM_ (deloop unique) children
+                    mapM_ (deloop unique) $ SL.toList children
                     case sym of
                         Or -> do
-                            a <- derefVar $ children V.! 0
-                            b <- derefVar $ children V.! 1
+                            [a, b] <- mapM derefVar $ SL.toList children
                             replaceNode node =<< fromRNode =<< simplifyOr (const . const $ return node) a b
                         _  -> return ()
                     writeSTRef stageRef Delooped
@@ -404,9 +401,9 @@ substitute term = do
     stage <- readSTRef stageRef
     unless (stage == Substituted) $ do
         writeSTRef stageRef Substituted
-        V.sequence_ $ V.imap go children
+        mapM_ go . zip [0..] $ SL.toList children
   where
-    go i node = do
+    go (i, node) = do
         node' <- fromRNode node
         case node' of
             Left  _   -> substitute node
@@ -415,7 +412,7 @@ substitute term = do
                 Var _ _ tyRef _ terms _ _ <- rep var
                 ty <- readSTRef tyRef
                 ts <- TL.toVector <$> readSTRef terms
-                when (ty /= Void && V.length ts == 1) . replaceNode term . Left $ Term ident sym (V.modify (\c -> MV.write c i $ ts V.! 0) children) stage
+                when (ty /= Void && V.length ts == 1) . replaceNode term . Left $ Term ident sym (SL.update i (ts V.! 0) children) stage
                 V.mapM_ substitute ts
 
 purify :: H.HashTable s Int T.Type -> Term s -> ST s T.Type
@@ -424,15 +421,15 @@ purify seen (Term ident Attribs children _) = do
     case purified of
         Just ty -> return ty
         Nothing -> do
-            node <- fromRNode $ children V.! 0
-            Term _ (Attrib k) _ _ <- fromRTerm $ children V.! 1
-            Term _ (Attrib f) _ _ <- fromRTerm $ children V.! 2
+            node <- fromRNode $ children SL.! 0
+            Term _ (Attrib k) _ _ <- fromRTerm $ children SL.! 1
+            Term _ (Attrib f) _ _ <- fromRTerm $ children SL.! 2
             let tType = T.Type ident k f
             case node of
                 Left (Term _ sym children' _) -> do
                     rec let ty = tType $ rawType sym cs
                         H.insert seen ident ty
-                        cs <- V.mapM (purify seen <=< fromRTerm) children'
+                        cs <- mapM (purify seen <=< fromRTerm) $ SL.toList children'
                     return ty
                 Right var -> do
                     Var ident' _ tyRef _ terms _ _ <- rep var
@@ -446,7 +443,7 @@ purify seen (Term ident Attribs children _) = do
                                          then return T.Opaque
                                          else do
                                              Term _ sym children' _ <- fromRTerm (ts V.! 0)
-                                             cs <- V.mapM (purify seen <=< fromRTerm) children'
+                                             cs <- mapM (purify seen <=< fromRTerm) $ SL.toList children'
                                              return $ rawType sym cs
                             return ty
                         _ -> do
@@ -454,13 +451,13 @@ purify seen (Term ident Attribs children _) = do
                             H.insert seen ident ty
                             return ty
   where
-    rawType Product       cs = T.Product (cs V.! 0) (cs V.! 1)
-    rawType Sum           cs = T.Sum     (cs V.! 0) (cs V.! 1)
-    rawType Block         cs = T.Block   (cs V.! 0) (cs V.! 1)
-    rawType Num           _  = T.Num
-    rawType Unit          _  = T.Unit
-    rawType (Sealed seal) cs = T.Sealed seal $ cs V.! 0
-    rawType _             _  = error "Illegal term type in purify"
+    rawType Product       [a, b] = T.Product a b
+    rawType Sum           [a, b] = T.Sum     a b
+    rawType Block         [a, b] = T.Block   a b
+    rawType Num           _      = T.Num
+    rawType Unit          _      = T.Unit
+    rawType (Sealed seal) [a]    = T.Sealed seal a
+    rawType _             _      = error "Illegal term type in purify"
 purify _ (Term _ sym _ _) = error $ "Attempted to purify non-Attribs term " ++ show sym
 
 mkAttribTerm :: ST s ID -> Symbol -> Either [RNode s] Bool -> Either [RNode s] Bool -> [RNode s] -> ST s (RNode s)
@@ -686,7 +683,6 @@ inferTypes mode logStages ops = do
             x' <- toNode mode x
             y' <- toNode mode y
             return $ Graph prefix label [] [x', y']
-    -- TODO this skips the contents of blocks
     res <- lift $ unifyAll unique ops
     case res of
         Left (i, a, b, x, y) -> do
