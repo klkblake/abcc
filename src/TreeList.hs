@@ -17,8 +17,8 @@ import Data.Vector (Vector)
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
 
-data TreeList a = Node (TreeList a) (TreeList a) Int
-              | Leaf a
+data TreeList a = Node !(TreeList a) !(TreeList a) !Int
+              | Leaf !a
               | Empty
 
 empty :: TreeList a
