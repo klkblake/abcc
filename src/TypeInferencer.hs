@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, TupleSections, FlexibleInstances, FlexibleContexts, RecursiveDo #-}
+{-# LANGUAGE TypeFamilies, TupleSections, FlexibleInstances, FlexibleContexts, RecursiveDo, TemplateHaskell, Rank2Types #-}
 module TypeInferencer
     ( inferTypes
     , TIStage (..)
@@ -9,10 +9,14 @@ module TypeInferencer
 -- the functional inverse of the Ackermann function. Be careful to preserve
 -- this time complexity!
 
+import Prelude hiding (read)
+
 import Control.Applicative
+import Control.Lens hiding (op, children)
 import Control.Monad
 import Control.Monad.ST
-import Control.Monad.State
+import Control.Monad.State hiding (modify)
+import qualified Control.Monad.State as State
 import qualified Data.HashTable.ST.Basic as H
 import qualified Data.Map.Strict as M
 import Data.STRef
@@ -74,20 +78,53 @@ data Stage = New | DeloopSeen | Delooped | Substituted deriving Eq
 
 data VarType = Structural | Substructural | Void deriving Eq
 
-data Term s = Term {-# UNPACK #-} !ID Symbol {-# UNPACK #-} !(ShortList (RNode s)) {-# UNPACK #-} !(STRef s Stage)
-
-data Var s = Var {-# UNPACK #-} !ID String {-# UNPACK #-} !(STRef s VarType) {-# UNPACK #-} !(STRef s (Maybe (Var s))) {-# UNPACK #-} !(STRef s (TreeList (RNode s))) {-# UNPACK #-} !(STRef s (TreeList (RNode s, RNode s))) {-# UNPACK #-} !(STRef s Int)
-
 newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
+
+data Term s = Term { _termID   :: {-# UNPACK #-} !ID
+                   , _symbol   :: Symbol
+                   , _children :: {-# UNPACK #-} !(ShortList (RNode s))
+                   , _stage    :: {-# UNPACK #-} !(STRef s Stage)
+                   }
+
+data Var s = Var { _varID    :: {-# UNPACK #-} !ID
+                 , _name     :: String
+                 , _varType  :: {-# UNPACK #-} !(STRef s VarType)
+                 , _repVar   :: {-# UNPACK #-} !(STRef s (Maybe (Var s)))
+                 , _terms    :: {-# UNPACK #-} !(STRef s (TreeList (RNode s)))
+                 , _merges   :: {-# UNPACK #-} !(STRef s (TreeList (RNode s, RNode s)))
+                 , _varCount :: {-# UNPACK #-} !(STRef s Int)
+                 }
+
+makeLenses ''Term
+makeLenses ''Var
+
+read :: IndexPreservingAction (ST s) (STRef s a) a
+read = act readSTRef
+{-# INLINE read #-}
+
+write :: a -> IndexPreservingAction (ST s) (STRef s a) ()
+write x = x `seq` act (flip writeSTRef x)
+{-# INLINE write #-}
+
+modifyM :: (a -> ST s a) -> IndexPreservingAction (ST s) (STRef s a) ()
+modifyM f = act $ \ref -> do
+    x <- readSTRef ref
+    x' <- f x
+    x' `seq` writeSTRef ref x'
+{-# INLINE modifyM #-}
+
+modify :: (a -> a) -> IndexPreservingAction (ST s) (STRef s a) ()
+modify f = modifyM $ return . f
+{-# INLINE modify #-}
 
 instance GraphViz (Term s) where
     type State (Term s) = s
-    toNode mode (Term ident sym children _) =
+    toNode mode term =
         case mode of
             Verbose -> toNode'
-            Compact -> case sym of
+            Compact -> case term^.symbol of
                            Attribs -> do
-                               [t, k, f] <- mapM fromRNode $ SL.toList children
+                               [t, k, f] <- mapM fromRNode . SL.toList $ term^.children
                                Node _ label' labelledChildren' <- toNode mode t
                                let (kl, kc) = case k of
                                                   Left (Term _ (Attrib True)  _ _) -> ("k", [])
@@ -97,39 +134,38 @@ instance GraphViz (Term s) where
                                                   Left (Term _ (Attrib True)  _ _) -> ("f", [])
                                                   Left (Term _ (Attrib False) _ _) -> ("", [])
                                                   _ -> ("", [("f", toNode mode f)])
-                               return $ Node ident (label' ++ " " ++ kl ++ fl) $ kc ++ fc ++ labelledChildren'
+                               return $ Node (term^.termID) (label' ++ " " ++ kl ++ fl) $ kc ++ fc ++ labelledChildren'
                            _ -> toNode'
       where
-        toNode' = Node ident label <$> labelledChildren
-        label = show sym
-        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map (toNode mode) <$> mapM fromRNode (SL.toList children)
+        toNode' = Node (term^.termID) (show $ term^.symbol) <$> labelledChildren
+        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map (toNode mode) <$> mapM fromRNode (SL.toList $ term^.children)
 
 instance GraphViz (Var s) where
     type State (Var s) = s
-    toNode mode (Var ident sym tyRef repRef terms mergesRef varCountRef) =
+    toNode mode var =
         case mode of
             Verbose -> toNode'
             Compact -> do
-                rep' <- readSTRef repRef
+                rep' <- var^!repVar.read
                 case rep' of
                     Just r -> toNode mode r
                     Nothing -> toNode'
       where
-        toNode' = Node ident <$> label <*> labelledChildren
+        toNode' = Node (var^.varID) <$> label <*> labelledChildren
         label = do
-            ty <- readSTRef tyRef
-            varCount <- readSTRef varCountRef
-            return $ sym ++ " (" ++ show varCount ++ ")" ++ case ty of
-                                                                Structural    -> ""
-                                                                Substructural -> " kf"
-                                                                Void          -> " void"
+            ty <- var^!varType.read
+            count <- var^!varCount.read
+            return $ (show $ var^.name) ++ " (" ++ show count ++ ")" ++ case ty of
+                                                                            Structural    -> ""
+                                                                            Substructural -> " kf"
+                                                                            Void          -> " void"
         labelledChildren = do
-            rep' <- readSTRef repRef
+            rep' <- var^!repVar.read
             let repEdge = case rep' of
                               Just r -> [("rep", toNode mode r)]
                               Nothing -> []
-            termEdges <- zip numbers <$> (mapM fromRNode' =<< V.toList . TL.toVector <$> readSTRef terms)
-            (mergesLeft, mergesRight) <- unzip . V.toList . TL.toVector <$> readSTRef mergesRef
+            termEdges <- zip numbers <$> (mapM fromRNode' =<< V.toList . TL.toVector <$> var^!terms.read)
+            (mergesLeft, mergesRight) <- unzip . V.toList . TL.toVector <$> var^!merges.read
             mergesLeftEdges  <- zip (map ("ML" ++) numbers) <$> mapM fromRNode' mergesLeft
             mergesRightEdges <- zip (map ("MR" ++) numbers) <$> mapM fromRNode' mergesRight
             return $ repEdge ++ termEdges ++ mergesLeftEdges ++ mergesRightEdges
@@ -137,7 +173,7 @@ instance GraphViz (Var s) where
         fromRNode' rn = toNode mode <$> fromRNode rn
 
 mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Term s)
-mkTerm unique sym children = Term <$> unique <*> pure sym <*> pure (SL.fromList children) <*> newSTRef New
+mkTerm unique sym cs = Term <$> unique <*> pure sym <*> pure (SL.fromList cs) <*> newSTRef New
 
 mkVar :: ST s ID -> String -> VarType -> ST s (Var s)
 mkVar unique v ty = Var <$> unique <*> pure v <*> newSTRef ty <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> newSTRef 1
@@ -146,7 +182,7 @@ toRNode :: Either (Term s) (Var s) -> ST s (RNode s)
 toRNode node = RNode <$> newSTRef node
 
 mkRTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (RNode s)
-mkRTerm unique sym children = toRNode =<< Left <$> mkTerm unique sym children
+mkRTerm unique sym cs = toRNode =<< Left <$> mkTerm unique sym cs
 
 mkRVar :: ST s ID -> String -> VarType -> ST s (RNode s)
 mkRVar unique v ty = toRNode =<< Right <$> mkVar unique v ty
@@ -182,39 +218,35 @@ replaceNode :: RNode s -> Either (Term s) (Var s) -> ST s ()
 replaceNode (RNode ref) = writeSTRef ref
 
 add :: Queue (Var s) -> Var s -> RNode s -> ST s (Queue (Var s))
-add queue v@(Var _ _ tyRef _ termsRef _ _) t = do
-    ty <- readSTRef tyRef
-    ts <- readSTRef termsRef
-    writeSTRef termsRef $ TL.cons t ts
+add queue v t = do
+    ty <- v^!varType.read
+    ts <- v^!terms.read
+    v^!terms.write (TL.cons t ts)
     return $ if TL.size ts == 1 && ty /= Substructural
                  then Q.push queue v
                  else queue
 
 merge :: Queue (Var s) -> Var s -> Var s -> ST s (Queue (Var s))
-merge queue v1@(Var _ _ _ _ _ _ varCountRef1) v2@(Var _ _ _ _ _ _ varCountRef2) = do
-    r1 <- readSTRef varCountRef1
-    r2 <- readSTRef varCountRef2
+merge queue v1 v2 = do
+    r1 <- v1^!varCount.read
+    r2 <- v2^!varCount.read
     let vc = r1 + r2
     if r1 >= r2
         then go vc v1 v2
         else go vc v2 v1
   where
-    go vc bigV@(Var _ _ bigTyRef _ bigTermsRef bigMergesRef bigVarCountRef) (Var _ _ tyRef repRef termsRef mergesRef varCountRef) = do
-        bigTy     <- readSTRef bigTyRef
-        ty        <- readSTRef tyRef
-        bigTerms  <- readSTRef bigTermsRef
-        terms     <- readSTRef termsRef
-        bigMerges <- readSTRef bigMergesRef
-        merges    <- readSTRef mergesRef
-        let bigTerms' = bigTerms `TL.concat` terms
-        writeSTRef bigTyRef $ if ty == Void then ty else bigTy
-        writeSTRef bigTermsRef bigTerms'
-        writeSTRef bigMergesRef $ bigMerges `TL.concat` merges
-        writeSTRef repRef (Just bigV)
-        writeSTRef termsRef TL.empty
-        writeSTRef varCountRef 0
-        writeSTRef bigVarCountRef vc
-        return $ if TL.size bigTerms <= 1 && TL.size bigTerms' >= 2 && ty /= Substructural
+    go vc bigV v = do
+        ty <- v^!varType.read
+        bigV^!varType.modify (\bigTy -> if ty == Void then ty else bigTy)
+        v^!repVar.write (Just bigV)
+        numTerms <- bigV^!terms.read.to TL.size
+        bigTerms' <- TL.concat <$> bigV^!terms.read <*> v^!terms.read
+        bigV^!terms.write bigTerms'
+        v^!terms.write TL.empty
+        bigV^!merges.modifyM (\x -> TL.concat x <$> v^!merges.read)
+        bigV^!varCount.write vc
+        v^!varCount.write 0
+        return $ if numTerms <= 1 && TL.size bigTerms' >= 2 && ty /= Substructural
                      then Q.push queue bigV
                      else queue
 
@@ -223,15 +255,15 @@ rep v = do
     r <- findRep v
     setRep r v
   where
-    findRep v'@(Var _ _ _ repRef _ _ _) = do
-        r <- readSTRef repRef
+    findRep v' = do
+        r <- v'^!repVar.read
         case r of
             Just r' -> findRep r'
             Nothing -> return v'
-    setRep r (Var _ _ _ repRef _ _ _) = do
-        r' <- readSTRef repRef
+    setRep r v' = do
+        r' <- v'^!repVar.read
         case r' of
-            Just r'' -> writeSTRef repRef (Just r) >> setRep r r''
+            Just r'' -> v'^!repVar.write (Just r) >> setRep r r''
             Nothing  -> return r
 
 splitNodes :: V.Vector (RNode s) -> ST s ([RNode s], [(Int, RNode s)])
@@ -245,14 +277,14 @@ splitNodes = V.foldM splitNode ([], []) . V.indexed
 
 commonFrontier :: ST s ID -> Queue (Var s) -> V.Vector (RNode s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
 commonFrontier unique queue t_list = do
-    t@(Term _ sym _ _) <- fromRTerm $ t_list V.! 0
+    t <- fromRTerm $ t_list V.! 0
     ts <- V.mapM fromRTerm t_list
     case checkEqual t ts of
         Just err -> return $ Left err
-        Nothing  -> foldM goChild (Right queue) [0 .. arity sym - 1]
+        Nothing  -> foldM goChild (Right queue) [0 .. arity (t^.symbol) - 1]
   where
-    checkEqual t@(Term _ sym _ _) ts =
-        let diffs = V.filter (\(Term _ sym' _ _) -> sym /= sym') ts
+    checkEqual t ts =
+        let diffs = V.filter (\t' -> t^.symbol /= t'^.symbol) ts
         in if V.null diffs
                then Nothing
                else Just (t, diffs V.! 0)
@@ -262,43 +294,43 @@ commonFrontier unique queue t_list = do
         sns <- splitNodes t0_list
         case sns of
             ([], []) -> error "commonFrontier called on empty term list"
-            (t:terms, []) -> do
-                Term _ sym _ _ <- fromRTerm t
-                case sym of
-                    Or       -> fmap Right . genSubVar queue' i $ t:terms
+            (t:ts, []) -> do
+                t' <- fromRTerm t
+                case t'^.symbol of
+                    Or       -> fmap Right . genSubVar queue' i $ t:ts
                     Attrib a -> do
-                        terms' <- mapM fromRTerm terms
-                        Right <$> if all (matchingAttrib a) terms'
+                        ts' <- mapM fromRTerm ts
+                        Right <$> if all (matchingAttrib a) ts'
                                       then return queue'
-                                      else genSubVar queue' i $ t:terms
-                    _ -> commonFrontier unique queue' . V.fromList $ t:terms
-            (terms, (j, var):vars) -> do
+                                      else genSubVar queue' i $ t:ts
+                    _ -> commonFrontier unique queue' . V.fromList $ t:ts
+            (ts, (j, var):vars) -> do
                 swapChild i j
                 v <- rep =<< fromRVar var
                 queue''  <- foldM (processVars  v) queue' $ map snd vars
-                queue''' <- foldM (processTerms v) queue'' terms
+                queue''' <- foldM (processTerms v) queue'' ts
                 return $ Right queue'''
     ithChildren i = V.forM t_list $ \t -> do
-        (Term _ _ children _) <- fromRTerm t
-        return $ children SL.! i
-    genSubVar queue' i terms = do
+        t' <- fromRTerm t
+        return $ (t'^.children) SL.! i
+    genSubVar queue' i ts = do
         v <- mkRVar unique "attr" Substructural
         v' <- fromRVar v
-        queue'' <- foldM (`add` v') queue' terms
-        let t = t_list V.! 0
-        Term ident sym cs stage <- fromRTerm t
-        replaceNode t . Left $ Term ident sym (SL.update i v cs) stage
+        queue'' <- foldM (`add` v') queue' ts
+        let term = t_list V.! 0
+        t <- fromRTerm term
+        replaceNode term . Left $! children %~ SL.update i v $ t
         return queue''
     swapChild i j = do
-        let t0 = t_list V.! 0
-            tj = t_list V.! j
-        Term ident0 sym0 c0 stage0 <- fromRTerm t0
-        Term identj symj cj stagej <- fromRTerm tj
-        replaceNode t0 . Left $ Term ident0 sym0 (SL.update i (cj SL.! i) c0) stage0
-        replaceNode tj . Left $ Term identj symj (SL.update i (c0 SL.! i) cj) stagej
-    processVars v@(Var ident _ _ _ _ _ _) queue' var = do
-        v2@(Var ident2 _ _ _ _ _ _) <- rep =<< fromRVar var
-        if ident /= ident2
+        let term0 = t_list V.! 0
+            termj = t_list V.! j
+        t0 <- fromRTerm term0
+        tj <- fromRTerm termj
+        replaceNode term0 . Left $! children %~ SL.update i ((tj^.children) SL.! i) $ t0
+        replaceNode termj . Left $! children %~ SL.update i ((t0^.children) SL.! i) $ tj
+    processVars v queue' var = do
+        v2 <- rep =<< fromRVar var
+        if v^.varID /= v2^.varID
             then merge queue' v v2
             else return queue'
     processTerms v queue' = add queue' v
@@ -311,13 +343,13 @@ unify unique t_list = do
         Right queue -> go $ Q.pop queue
   where
     go Nothing = return Nothing
-    go (Just (Var _ _ _ _ termsRef _ _, queue')) = do
-        terms <- readSTRef termsRef
-        if TL.size terms < 2
+    go (Just (v, queue')) = do
+        ts <- v^!terms.read
+        if TL.size ts < 2
             then go $ Q.pop queue'
             else do
-                let t = TL.toVector terms
-                writeSTRef termsRef . TL.singleton $ t V.! 0
+                let t = TL.toVector ts
+                v^!terms.write (TL.singleton $ t V.! 0)
                 res <- commonFrontier unique queue' t
                 case res of
                     Left  err     -> return $ Just err
@@ -329,50 +361,52 @@ simplifyOr f a b = do
     b' <- fromRNode b
     go a' b'
   where
-    go (Left (Term _ (Attrib True)  _ _)) _ = return a
-    go (Left (Term _ (Attrib False) _ _)) _ = return b
-    go _ (Left (Term _ (Attrib True)  _ _)) = return b
-    go _ (Left (Term _ (Attrib False) _ _)) = return a
-    go (Left  (Term ident _ _ _))     (Left  (Term ident' _ _ _))     | ident == ident' = return a
-    go (Right (Var  ident _ _ _ _ _ _)) (Right (Var  ident' _ _ _ _ _ _)) | ident == ident' = return a
+    go (Left t) _ | Attrib True  <- t^.symbol = return a
+    go (Left t) _ | Attrib False <- t^.symbol = return b
+    go _ (Left t) | Attrib True  <- t^.symbol = return b
+    go _ (Left t) | Attrib False <- t^.symbol = return a
+    go (Left  t1) (Left  t2) | t1^.termID == t2^.termID = return a
+    go (Right v1) (Right v2) | v1^.varID  == v2^.varID  = return a
     go _ _ = f a b
 
 deloop :: ST s ID -> RNode s -> ST s ()
 deloop unique node = do
     n <- fromRNode node
     case n of
-        Left (Term _ sym children stageRef) -> do
-            stage <- readSTRef stageRef
-            case stage of
+        Left t -> do
+            stage' <- t^!stage.read
+            case stage' of
                 New -> do
-                    writeSTRef stageRef DeloopSeen
-                    mapM_ (deloop unique) $ SL.toList children
-                    case sym of
+                    t^!stage.write DeloopSeen
+                    mapM_ (deloop unique) $ SL.toList $ t^.children
+                    case t^.symbol of
                         Or -> do
-                            [a, b] <- mapM derefVar $ SL.toList children
+                            [a, b] <- mapM derefVar $ SL.toList $ t^.children
                             replaceNode node =<< fromRNode =<< simplifyOr (const . const $ return node) a b
                         _  -> return ()
-                    writeSTRef stageRef Delooped
-                DeloopSeen -> case sym of
+                    t^!stage.write Delooped
+                DeloopSeen -> case t^.symbol of
                                   Or -> replaceNode node =<< Left <$> mkTerm unique (Attrib False) []
                                   _  -> return ()
                 _ -> return ()
         Right var -> do
-            v@(Var _ sym tyRef _ terms _ _) <- rep var
-            ty <- readSTRef tyRef
-            ts <- TL.toVector <$> readSTRef terms
+            v <- rep var
+            ts <- TL.toVector <$> v^!terms.read
             V.mapM_ (deloop unique) ts
-            ts' <- TL.toVector <$> readSTRef terms
+            ts' <- TL.toVector <$> v^!terms.read
             (terms', vars) <- V.foldM splitVars ([], []) ts'
             terms'' <- mapM fromRTerm terms'
-            writeSTRef terms =<< case terms'' of
-                                     [] -> case ty of
-                                               Structural    -> return TL.empty
-                                               Substructural -> TL.singleton <$> mkRTerm unique (Attrib False) []
-                                               Void          -> return TL.empty
-                                     [_] -> return . TL.singleton $ head terms'
-                                     Term _ (Attrib a) _ _:_ | all (matchingAttrib a) terms'' -> return . TL.singleton $ head terms'
-                                     _ -> error $ "variable " ++ sym ++ " has multiple values "
+            terms''' <- case terms'' of
+                            [] -> do
+                                ty <- v^!varType.read
+                                case ty of
+                                    Structural    -> return TL.empty
+                                    Substructural -> TL.singleton <$> mkRTerm unique (Attrib False) []
+                                    Void          -> return TL.empty
+                            [_] -> return . TL.singleton $ head terms'
+                            Term _ (Attrib a) _ _:_ | all (matchingAttrib a) terms'' -> return . TL.singleton $ head terms'
+                            _ -> error $ "variable " ++ v^.name ++ " has multiple values "
+            v^!terms.write terms'''
             mapM_ (mergeVar v) vars
   where
     derefVar n = do
@@ -380,20 +414,20 @@ deloop unique node = do
         case n' of
             Left _ -> return n
             Right v -> do
-                Var _ _ _ _ terms _ _ <- rep v
-                terms' <- readSTRef terms
-                return $ if TL.size terms' == 1
-                             then TL.toVector terms' V.! 0
+                v' <- rep v
+                ts' <- v'^!terms.read
+                return $ if TL.size ts' == 1
+                             then TL.toVector ts' V.! 0
                              else n
-    splitVars (terms, vars) node' = do
+    splitVars (ts, vars) node' = do
         n <- fromRNode node'
         return $ case n of
-                     Left  _ -> (node':terms, vars)
-                     Right v -> (terms, v:vars)
+                     Left  _ -> (node':ts, vars)
+                     Right v -> (ts, v:vars)
     mergeVar v v' = do
-            vr@(Var ident _ _ _ _ _ _) <- rep v
-            vr'@(Var ident' _ _ _ _ _ _) <- rep v'
-            when (ident /= ident') . void $ merge Q.empty vr vr'
+            vr  <- rep v
+            vr' <- rep v'
+            when (vr^.varID /= vr'^.varID) . void $ merge Q.empty vr vr'
 
 substitute :: RNode s -> ST s ()
 substitute term = do
@@ -503,9 +537,9 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
         action a'' b''
 
     a' ~> b' = do
-        modify $ \(_, vars) -> (False, vars)
+        State.modify $ \(_, vars) -> (False, vars)
         a'' <- a'
-        modify $ \(_, vars) -> (True, vars)
+        State.modify $ \(_, vars) -> (True, vars)
         b'' <- b'
         return (a'', b'')
     (.*) = seq2 $ \a' b' -> mkAttribTerm' Product [a', b']

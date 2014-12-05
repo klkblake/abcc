@@ -24,6 +24,7 @@ executable abcc
       , mtl
       , transformers
       , mmorph
+      , lens >=4.4
       , vector
       , pipes
       , multiarg
