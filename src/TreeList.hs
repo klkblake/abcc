@@ -23,25 +23,31 @@ data TreeList a = Node !(TreeList a) !(TreeList a) !Int
 
 empty :: TreeList a
 empty = Empty
+{-# INLINABLE empty #-}
 
 singleton :: a -> TreeList a
 singleton = Leaf
+{-# INLINABLE singleton #-}
 
 size :: TreeList a -> Int
 size (Node _ _ s) = s
 size (Leaf _) = 1
 size Empty = 0
+{-# INLINABLE size #-}
 
 concat :: TreeList a -> TreeList a -> TreeList a
 concat Empty r = r
 concat l Empty = l
 concat l r = Node l r (size l + size r)
+{-# INLINABLE concat #-}
 
 cons :: a -> TreeList a -> TreeList a
 cons x xs = singleton x `concat` xs
+{-# INLINABLE cons #-}
 
 fromList :: [a] -> TreeList a
 fromList = foldr cons empty
+{-# INLINABLE fromList #-}
 
 toVector :: TreeList a -> Vector a
 toVector xs = runST $ MV.new (size xs) >>= (\v -> go v xs >> return v) >>= V.freeze
@@ -50,3 +56,4 @@ toVector xs = runST $ MV.new (size xs) >>= (\v -> go v xs >> return v) >>= V.fre
                           in go (MV.slice 0 s' v) l >> go (MV.slice s' (s - s') v) r
     go v (Leaf t) = MV.write v 0 t
     go _ Empty = return ()
+{-# INLINABLE toVector #-}
