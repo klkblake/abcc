@@ -217,6 +217,10 @@ getAttribs node = do
 replaceNode :: RNode s -> Either (Term s) (Var s) -> ST s ()
 replaceNode (RNode ref) = writeSTRef ref
 
+updateChild :: RNode s -> Term s -> Int -> RNode s -> ST s ()
+updateChild n t i c = replaceNode n . Left $! children %~ SL.update i c $ t
+{-# INLINE updateChild #-}
+
 add :: Queue (Var s) -> Var s -> RNode s -> ST s (Queue (Var s))
 add queue v t = do
     ty <- v^!varType.read
@@ -319,15 +323,15 @@ commonFrontier unique queue t_list = do
         queue'' <- foldM (`add` v') queue' ts
         let term = t_list V.! 0
         t <- fromRTerm term
-        replaceNode term . Left $! children %~ SL.update i v $ t
+        updateChild term t i v
         return queue''
     swapChild i j = do
         let term0 = t_list V.! 0
             termj = t_list V.! j
         t0 <- fromRTerm term0
         tj <- fromRTerm termj
-        replaceNode term0 . Left $! children %~ SL.update i ((tj^.children) SL.! i) $ t0
-        replaceNode termj . Left $! children %~ SL.update i ((t0^.children) SL.! i) $ tj
+        updateChild term0 t0 i $ (tj^.children) SL.! i
+        updateChild termj tj i $ (t0^.children) SL.! i
     processVars v queue' var = do
         v2 <- rep =<< fromRVar var
         if v^.varID /= v2^.varID
@@ -404,7 +408,7 @@ deloop unique node = do
                                     Substructural -> TL.singleton <$> mkRTerm unique (Attrib False) []
                                     Void          -> return TL.empty
                             [_] -> return . TL.singleton $ head terms'
-                            Term _ (Attrib a) _ _:_ | all (matchingAttrib a) terms'' -> return . TL.singleton $ head terms'
+                            t:_ | Attrib a <- t^.symbol, all (matchingAttrib a) terms'' -> return . TL.singleton $ head terms'
                             _ -> error $ "variable " ++ v^.name ++ " has multiple values "
             v^!terms.write terms'''
             mapM_ (mergeVar v) vars
@@ -431,23 +435,24 @@ deloop unique node = do
 
 substitute :: RNode s -> ST s ()
 substitute term = do
-    Term _ _ children stageRef <- fromRTerm term
-    stage <- readSTRef stageRef
-    unless (stage == Substituted) $ do
-        writeSTRef stageRef Substituted
-        mapM_ go . zip [0..] $ SL.toList children
+    t <- fromRTerm term
+    s <- t^!stage.read
+    unless (s == Substituted) $ do
+        t^!stage.write Substituted
+        mapM_ go . zip [0..] . SL.toList $ t^.children
   where
     go (i, node) = do
         node' <- fromRNode node
         case node' of
             Left  _   -> substitute node
             Right var -> do
-                Term ident sym children stage <- fromRTerm term
-                Var _ _ tyRef _ terms _ _ <- rep var
-                ty <- readSTRef tyRef
-                ts <- TL.toVector <$> readSTRef terms
-                when (ty /= Void && V.length ts == 1) . replaceNode term . Left $ Term ident sym (SL.update i (ts V.! 0) children) stage
-                V.mapM_ substitute ts
+                t <- fromRTerm term
+                v <- rep var
+                ty <- v^!varType.read
+                ts <- v^!terms.read
+                let ts' = TL.toVector ts
+                when (ty /= Void && V.length ts' == 1) . updateChild term t i $ ts' V.! 0
+                V.mapM_ substitute ts'
 
 purify :: H.HashTable s Int T.Type -> Term s -> ST s T.Type
 purify seen (Term ident Attribs children _) = do
