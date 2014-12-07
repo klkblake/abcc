@@ -9,14 +9,15 @@ module TypeInferencer
 -- the functional inverse of the Ackermann function. Be careful to preserve
 -- this time complexity!
 
-import Prelude hiding (read)
+import Prelude hiding (read, all, mapM_, elem)
 
 import Control.Applicative
 import Control.Lens hiding (op, children)
-import Control.Monad
+import Control.Monad hiding (mapM_)
 import Control.Monad.ST
-import Control.Monad.State hiding (modify)
+import Control.Monad.State hiding (mapM_, modify)
 import qualified Control.Monad.State as State
+import Data.Foldable
 import qualified Data.HashTable.ST.Basic as H
 import qualified Data.Map.Strict as M
 import Data.STRef
@@ -124,7 +125,7 @@ instance GraphViz (Term s) where
             Verbose -> toNode'
             Compact -> case term^.symbol of
                            Attribs -> do
-                               [t, k, f] <- mapM fromRNode . SL.toList $ term^.children
+                               [t, k, f] <- childList' term
                                Node _ label' labelledChildren' <- toNode mode t
                                let (kl, kc) = case k of
                                                   Left (Term _ (Attrib True)  _ _) -> ("k", [])
@@ -138,7 +139,7 @@ instance GraphViz (Term s) where
                            _ -> toNode'
       where
         toNode' = Node (term^.termID) (show $ term^.symbol) <$> labelledChildren
-        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map (toNode mode) <$> mapM fromRNode (SL.toList $ term^.children)
+        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map (toNode mode) <$> childList' term
 
 instance GraphViz (Var s) where
     type State (Var s) = s
@@ -216,6 +217,12 @@ getAttribs node = do
 
 replaceNode :: RNode s -> Either (Term s) (Var s) -> ST s ()
 replaceNode (RNode ref) = writeSTRef ref
+
+childList :: Term s -> [RNode s]
+childList t = t^..children.traverse
+
+childList' :: Term s -> ST s [Either (Term s) (Var s)]
+childList' = mapM fromRNode . childList
 
 updateChild :: RNode s -> Term s -> Int -> RNode s -> ST s ()
 updateChild n t i c = replaceNode n . Left $! children %~ SL.update i c $ t
@@ -382,10 +389,10 @@ deloop unique node = do
             case stage' of
                 New -> do
                     t^!stage.write DeloopSeen
-                    mapM_ (deloop unique) $ SL.toList $ t^.children
+                    mapM_ (deloop unique) $ childList t
                     case t^.symbol of
                         Or -> do
-                            [a, b] <- mapM derefVar $ SL.toList $ t^.children
+                            [a, b] <- mapM derefVar $ childList t
                             replaceNode node =<< fromRNode =<< simplifyOr (const . const $ return node) a b
                         _  -> return ()
                     t^!stage.write Delooped
@@ -439,7 +446,7 @@ substitute term = do
     s <- t^!stage.read
     unless (s == Substituted) $ do
         t^!stage.write Substituted
-        mapM_ go . zip [0..] . SL.toList $ t^.children
+        mapM_ go . zip [0..] $ childList t
   where
     go (i, node) = do
         node' <- fromRNode node
@@ -460,7 +467,7 @@ purify seen t | t^.symbol == Attribs = do
     case purified of
         Just ty -> return ty
         Nothing -> do
-            [node, Left tk, Left tf] <- mapM fromRNode . SL.toList $ t^.children
+            [node, Left tk, Left tf] <- childList' t
             let Attrib k = tk^.symbol
                 Attrib f = tf^.symbol
                 tType = T.Type ident k f
@@ -468,7 +475,7 @@ purify seen t | t^.symbol == Attribs = do
                 Left t' -> do
                     rec let ty = tType $ rawType (t'^.symbol) cs
                         H.insert seen ident ty
-                        cs <- mapM (purify seen <=< fromRTerm) $ SL.toList $ t'^.children
+                        cs <- mapM (purify seen <=< fromRTerm) $ childList t'
                     return ty
                 Right var -> do
                     v <- rep var
@@ -482,7 +489,7 @@ purify seen t | t^.symbol == Attribs = do
                                            then return T.Opaque
                                            else do
                                                t' <- fromRTerm (ts V.! 0)
-                                               cs <- mapM (purify seen <=< fromRTerm) $ SL.toList $ t'^.children
+                                               cs <- mapM (purify seen <=< fromRTerm) $ childList t'
                                                return $ rawType (t'^.symbol) cs
                             return ty
                         _ -> do
