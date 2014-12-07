@@ -82,14 +82,14 @@ data VarType = Structural | Substructural | Void deriving Eq
 newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
 
 data Term s = Term { _termID   :: {-# UNPACK #-} !ID
-                   , _symbol   :: Symbol
+                   , _symbol   ::                 Symbol
                    , _children :: {-# UNPACK #-} !(ShortList (RNode s))
                    , _stage    :: {-# UNPACK #-} !(STRef s Stage)
                    }
 
 data Var s = Var { _varID    :: {-# UNPACK #-} !ID
-                 , _name     :: String
-                 , _varType  :: {-# UNPACK #-} !(STRef s VarType)
+                 , _name     ::                 String
+                 , _varType  ::                 VarType
                  , _repVar   :: {-# UNPACK #-} !(STRef s (Maybe (RNode s)))
                  , _terms    :: {-# UNPACK #-} !(STRef s (TreeList (RNode s)))
                  , _merges   :: {-# UNPACK #-} !(STRef s (TreeList (RNode s, RNode s)))
@@ -113,10 +113,6 @@ modifyM f = act $ \ref -> do
     x' <- f x
     x' `seq` writeSTRef ref x'
 {-# INLINE modifyM #-}
-
-modify :: (a -> a) -> IndexPreservingAction (ST s) (STRef s a) ()
-modify f = modifyM $ return . f
-{-# INLINE modify #-}
 
 instance GraphViz (Term s) where
     type State (Term s) = s
@@ -154,9 +150,8 @@ instance GraphViz (Var s) where
       where
         toNode' = Node (var^.varID) <$> label <*> labelledChildren
         label = do
-            ty <- var^!varType.read
             count <- var^!varCount.read
-            return $ (show $ var^.name) ++ " (" ++ show count ++ ")" ++ case ty of
+            return $ (show $ var^.name) ++ " (" ++ show count ++ ")" ++ case var^.varType of
                                                                             Structural    -> ""
                                                                             Substructural -> " kf"
                                                                             Void          -> " void"
@@ -179,7 +174,7 @@ mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Term s)
 mkTerm unique sym cs = Term <$> unique <*> pure sym <*> pure (SL.fromList cs) <*> newSTRef New
 
 mkVar :: ST s ID -> String -> VarType -> ST s (Var s)
-mkVar unique v ty = Var <$> unique <*> pure v <*> newSTRef ty <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> newSTRef 1
+mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> newSTRef 1
 
 toRNode :: Either (Term s) (Var s) -> ST s (RNode s)
 toRNode node = RNode <$> newSTRef node
@@ -232,10 +227,9 @@ updateChild n t i c = replaceNode n . Left $! children %~ SL.update i c $ t
 
 add :: Queue (Var s) -> Var s -> RNode s -> ST s (Queue (Var s))
 add queue v t = do
-    ty <- v^!varType.read
     ts <- v^!terms.read
     v^!terms.write (TL.cons t ts)
-    return $ if TL.size ts == 1 && ty /= Substructural
+    return $ if TL.size ts == 1 && v^.varType /= Substructural
                  then Q.push queue v
                  else queue
 
@@ -251,8 +245,8 @@ merge queue n1 n2 = do
         else go vc n2 v2 v1
   where
     go vc bigNode bigV v = do
-        ty <- v^!varType.read
-        bigV^!varType.modify (\bigTy -> if ty == Void then ty else bigTy)
+        let ty = v^.varType
+        when (ty == Void) $ replaceNode bigNode . Right $! varType .~ Void $ bigV
         v^!repVar.write (Just bigNode)
         numTerms <- bigV^!terms.read.to TL.size
         bigTerms' <- TL.concat <$> bigV^!terms.read <*> v^!terms.read
@@ -420,8 +414,7 @@ deloop unique node = do
             terms'' <- mapM fromRTerm terms'
             terms''' <- case terms'' of
                             [] -> do
-                                ty <- v'^!varType.read
-                                case ty of
+                                case v'^.varType of
                                     Structural    -> return TL.empty
                                     Substructural -> TL.singleton <$> mkRTerm unique (Attrib False) []
                                     Void          -> return TL.empty
@@ -468,9 +461,8 @@ substitute term = do
             Right _ -> do
                 t <- fromRTerm term
                 v <- fromRVar =<< rep node
-                ty <- v^!varType.read
                 ts <- TL.toVector <$> v^!terms.read
-                when (ty /= Void && V.length ts == 1) . updateChild term t i $ ts V.! 0
+                when (v^.varType /= Void && V.length ts == 1) . updateChild term t i $ ts V.! 0
                 V.mapM_ substitute ts
 
 purify :: H.HashTable s Int T.Type -> Term s -> ST s T.Type
@@ -494,8 +486,7 @@ purify seen t | t^.symbol == Attribs = do
                     return ty
                 Right _ -> do
                     v <- fromRVar =<< rep node
-                    vty <- v^!varType.read
-                    case vty of
+                    case v^.varType of
                         Void -> do
                             ts <- TL.toVector <$> v^!terms.read
                             rec let ty = tType . T.Void $ T.Type (v^.varID) k f ty'
