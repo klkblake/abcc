@@ -128,12 +128,12 @@ instance GraphViz (Term s) where
                                [t, k, f] <- childList' term
                                Node _ label' labelledChildren' <- toNode mode t
                                let (kl, kc) = case k of
-                                                  Left (Term _ (Attrib True)  _ _) -> ("k", [])
-                                                  Left (Term _ (Attrib False) _ _) -> ("", [])
+                                                  Left t' | Attrib True  <- t'^.symbol -> ("k", [])
+                                                          | Attrib False <- t'^.symbol -> ("",  [])
                                                   _ -> ("", [("k", toNode mode k)])
                                let (fl, fc) = case f of
-                                                  Left (Term _ (Attrib True)  _ _) -> ("f", [])
-                                                  Left (Term _ (Attrib False) _ _) -> ("", [])
+                                                  Left t' | Attrib True  <- t'^.symbol -> ("f", [])
+                                                          | Attrib False <- t'^.symbol -> ("",  [])
                                                   _ -> ("", [("f", toNode mode f)])
                                return $ Node (term^.termID) (label' ++ " " ++ kl ++ fl) $ kc ++ fc ++ labelledChildren'
                            _ -> toNode'
