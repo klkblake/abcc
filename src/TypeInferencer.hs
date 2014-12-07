@@ -299,8 +299,8 @@ commonFrontier unique queue t_list = do
         case sns of
             ([], []) -> error "commonFrontier called on empty term list"
             (t:ts, []) -> do
-                t' <- fromRTerm t
-                case t'^.symbol of
+                sym <- view symbol <$> fromRTerm t
+                case sym of
                     Or       -> fmap Right . genSubVar queue' i $ t:ts
                     Attrib a -> do
                         ts' <- mapM fromRTerm ts
@@ -315,8 +315,8 @@ commonFrontier unique queue t_list = do
                 queue''' <- foldM (processTerms v) queue'' ts
                 return $ Right queue'''
     ithChildren i = V.forM t_list $ \t -> do
-        t' <- fromRTerm t
-        return $ (t'^.children) SL.! i
+        cs <- view children <$> fromRTerm t
+        return $ cs SL.! i
     genSubVar queue' i ts = do
         v <- mkRVar unique "attr" Substructural
         v' <- fromRVar v
@@ -449,10 +449,9 @@ substitute term = do
                 t <- fromRTerm term
                 v <- rep var
                 ty <- v^!varType.read
-                ts <- v^!terms.read
-                let ts' = TL.toVector ts
-                when (ty /= Void && V.length ts' == 1) . updateChild term t i $ ts' V.! 0
-                V.mapM_ substitute ts'
+                ts <- TL.toVector <$> v^!terms.read
+                when (ty /= Void && V.length ts == 1) . updateChild term t i $ ts V.! 0
+                V.mapM_ substitute ts
 
 purify :: H.HashTable s Int T.Type -> Term s -> ST s T.Type
 purify seen (Term ident Attribs children _) = do
