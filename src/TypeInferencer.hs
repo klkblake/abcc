@@ -90,7 +90,7 @@ data Term s = Term { _termID   :: {-# UNPACK #-} !ID
 data Var s = Var { _varID    :: {-# UNPACK #-} !ID
                  , _name     :: String
                  , _varType  :: {-# UNPACK #-} !(STRef s VarType)
-                 , _repVar   :: {-# UNPACK #-} !(STRef s (Maybe (Var s)))
+                 , _repVar   :: {-# UNPACK #-} !(STRef s (Maybe (RNode s)))
                  , _terms    :: {-# UNPACK #-} !(STRef s (TreeList (RNode s)))
                  , _merges   :: {-# UNPACK #-} !(STRef s (TreeList (RNode s, RNode s)))
                  , _varCount :: {-# UNPACK #-} !(STRef s Int)
@@ -149,7 +149,7 @@ instance GraphViz (Var s) where
             Compact -> do
                 rep' <- var^!repVar.read
                 case rep' of
-                    Just r -> toNode mode r
+                    Just r -> toNode mode =<< fromRNode r
                     Nothing -> toNode'
       where
         toNode' = Node (var^.varID) <$> label <*> labelledChildren
@@ -162,9 +162,11 @@ instance GraphViz (Var s) where
                                                                             Void          -> " void"
         labelledChildren = do
             rep' <- var^!repVar.read
-            let repEdge = case rep' of
-                              Just r -> [("rep", toNode mode r)]
-                              Nothing -> []
+            repEdge <- case rep' of
+                           Just r -> do
+                               r' <- fromRVar r
+                               return [("rep", toNode mode r')]
+                           Nothing -> return []
             termEdges <- zip numbers <$> (mapM fromRNode' =<< V.toList . TL.toVector <$> var^!terms.read)
             (mergesLeft, mergesRight) <- unzip . V.toList . TL.toVector <$> var^!merges.read
             mergesLeftEdges  <- zip (map ("ML" ++) numbers) <$> mapM fromRNode' mergesLeft
@@ -237,19 +239,21 @@ add queue v t = do
                  then Q.push queue v
                  else queue
 
-merge :: Queue (Var s) -> Var s -> Var s -> ST s (Queue (Var s))
-merge queue v1 v2 = do
+merge :: Queue (Var s) -> RNode s -> RNode s -> ST s (Queue (Var s))
+merge queue n1 n2 = do
+    v1 <- fromRVar n1
+    v2 <- fromRVar n2
     r1 <- v1^!varCount.read
     r2 <- v2^!varCount.read
     let vc = r1 + r2
     if r1 >= r2
-        then go vc v1 v2
-        else go vc v2 v1
+        then go vc n1 v1 v2
+        else go vc n2 v2 v1
   where
-    go vc bigV v = do
+    go vc bigNode bigV v = do
         ty <- v^!varType.read
         bigV^!varType.modify (\bigTy -> if ty == Void then ty else bigTy)
-        v^!repVar.write (Just bigV)
+        v^!repVar.write (Just bigNode)
         numTerms <- bigV^!terms.read.to TL.size
         bigTerms' <- TL.concat <$> bigV^!terms.read <*> v^!terms.read
         bigV^!terms.write bigTerms'
@@ -261,17 +265,19 @@ merge queue v1 v2 = do
                      then Q.push queue bigV
                      else queue
 
-rep :: Var s -> ST s (Var s)
+rep :: RNode s -> ST s (RNode s)
 rep v = do
     r <- findRep v
     setRep r v
   where
-    findRep v' = do
+    findRep n = do
+        v' <- fromRVar n
         r <- v'^!repVar.read
         case r of
             Just r' -> findRep r'
-            Nothing -> return v'
-    setRep r v' = do
+            Nothing -> return n
+    setRep r n = do
+        v' <- fromRVar n
         r' <- v'^!repVar.read
         case r' of
             Just r'' -> v'^!repVar.write (Just r) >> setRep r r''
@@ -317,7 +323,7 @@ commonFrontier unique queue t_list = do
                     _ -> commonFrontier unique queue' . V.fromList $ t:ts
             (ts, (j, var):vars) -> do
                 swapChild i j
-                v <- rep =<< fromRVar var
+                v <- rep var
                 queue''  <- foldM (processVars  v) queue' $ map snd vars
                 queue''' <- foldM (processTerms v) queue'' ts
                 return $ Right queue'''
@@ -340,11 +346,15 @@ commonFrontier unique queue t_list = do
         updateChild term0 t0 i $ (tj^.children) SL.! i
         updateChild termj tj i $ (t0^.children) SL.! i
     processVars v queue' var = do
-        v2 <- rep =<< fromRVar var
-        if v^.varID /= v2^.varID
+        ident <- view varID <$> fromRVar v
+        v2 <- rep var
+        ident2 <- view varID <$> fromRVar v2
+        if ident /= ident2
             then merge queue' v v2
             else return queue'
-    processTerms v queue' = add queue' v
+    processTerms v queue' t = do
+        v' <- fromRVar v
+        add queue' v' t
 
 unify :: ST s ID -> V.Vector (RNode s) -> ST s (Maybe (Term s, Term s))
 unify unique t_list = do
@@ -400,33 +410,34 @@ deloop unique node = do
                                   Or -> replaceNode node =<< Left <$> mkTerm unique (Attrib False) []
                                   _  -> return ()
                 _ -> return ()
-        Right var -> do
-            v <- rep var
-            ts <- TL.toVector <$> v^!terms.read
+        Right _ -> do
+            v <- rep node
+            v' <- fromRVar v
+            ts <- TL.toVector <$> v'^!terms.read
             V.mapM_ (deloop unique) ts
-            ts' <- TL.toVector <$> v^!terms.read
+            ts' <- TL.toVector <$> v'^!terms.read
             (terms', vars) <- V.foldM splitVars ([], []) ts'
             terms'' <- mapM fromRTerm terms'
             terms''' <- case terms'' of
                             [] -> do
-                                ty <- v^!varType.read
+                                ty <- v'^!varType.read
                                 case ty of
                                     Structural    -> return TL.empty
                                     Substructural -> TL.singleton <$> mkRTerm unique (Attrib False) []
                                     Void          -> return TL.empty
                             [_] -> return . TL.singleton $ head terms'
                             t:_ | Attrib a <- t^.symbol, all (matchingAttrib a) terms'' -> return . TL.singleton $ head terms'
-                            _ -> error $ "variable " ++ v^.name ++ " has multiple values "
-            v^!terms.write terms'''
+                            _ -> error $ "variable " ++ v'^.name ++ " has multiple values "
+            v'^!terms.write terms'''
             mapM_ (mergeVar v) vars
   where
     derefVar n = do
         n' <- fromRNode n
         case n' of
             Left _ -> return n
-            Right v -> do
-                v' <- rep v
-                ts' <- v'^!terms.read
+            Right _ -> do
+                v <- fromRVar =<< rep n
+                ts' <- v^!terms.read
                 return $ if TL.size ts' == 1
                              then TL.toVector ts' V.! 0
                              else n
@@ -434,11 +445,13 @@ deloop unique node = do
         n <- fromRNode node'
         return $ case n of
                      Left  _ -> (node':ts, vars)
-                     Right v -> (ts, v:vars)
+                     Right _ -> (ts, node':vars)
     mergeVar v v' = do
             vr  <- rep v
             vr' <- rep v'
-            when (vr^.varID /= vr'^.varID) . void $ merge Q.empty vr vr'
+            ident  <- view varID <$> fromRVar vr
+            ident2 <- view varID <$> fromRVar vr'
+            when (ident /= ident2) . void $ merge Q.empty vr vr'
 
 substitute :: RNode s -> ST s ()
 substitute term = do
@@ -452,9 +465,9 @@ substitute term = do
         node' <- fromRNode node
         case node' of
             Left  _   -> substitute node
-            Right var -> do
+            Right _ -> do
                 t <- fromRTerm term
-                v <- rep var
+                v <- fromRVar =<< rep node
                 ty <- v^!varType.read
                 ts <- TL.toVector <$> v^!terms.read
                 when (ty /= Void && V.length ts == 1) . updateChild term t i $ ts V.! 0
@@ -467,18 +480,20 @@ purify seen t | t^.symbol == Attribs = do
     case purified of
         Just ty -> return ty
         Nothing -> do
-            [node, Left tk, Left tf] <- childList' t
+            let node = (t^.children) SL.! 0
+            node' <- fromRNode node
+            [_, Left tk, Left tf] <- childList' t
             let Attrib k = tk^.symbol
                 Attrib f = tf^.symbol
                 tType = T.Type ident k f
-            case node of
+            case node' of
                 Left t' -> do
                     rec let ty = tType $ rawType (t'^.symbol) cs
                         H.insert seen ident ty
                         cs <- mapM (purify seen <=< fromRTerm) $ childList t'
                     return ty
-                Right var -> do
-                    v <- rep var
+                Right _ -> do
+                    v <- fromRVar =<< rep node
                     vty <- v^!varType.read
                     case vty of
                         Void -> do
