@@ -454,35 +454,36 @@ substitute term = do
                 V.mapM_ substitute ts
 
 purify :: H.HashTable s Int T.Type -> Term s -> ST s T.Type
-purify seen (Term ident Attribs children _) = do
+purify seen t | t^.symbol == Attribs = do
+    let ident = t^.termID
     purified <- H.lookup seen ident
     case purified of
         Just ty -> return ty
         Nothing -> do
-            node <- fromRNode $ children SL.! 0
-            Term _ (Attrib k) _ _ <- fromRTerm $ children SL.! 1
-            Term _ (Attrib f) _ _ <- fromRTerm $ children SL.! 2
-            let tType = T.Type ident k f
+            [node, Left tk, Left tf] <- mapM fromRNode . SL.toList $ t^.children
+            let Attrib k = tk^.symbol
+                Attrib f = tf^.symbol
+                tType = T.Type ident k f
             case node of
-                Left (Term _ sym children' _) -> do
-                    rec let ty = tType $ rawType sym cs
+                Left t' -> do
+                    rec let ty = tType $ rawType (t'^.symbol) cs
                         H.insert seen ident ty
-                        cs <- mapM (purify seen <=< fromRTerm) $ SL.toList children'
+                        cs <- mapM (purify seen <=< fromRTerm) $ SL.toList $ t'^.children
                     return ty
                 Right var -> do
-                    Var ident' _ tyRef _ terms _ _ <- rep var
-                    vty <- readSTRef tyRef
+                    v <- rep var
+                    vty <- v^!varType.read
                     case vty of
                         Void -> do
-                            ts <- TL.toVector <$> readSTRef terms
-                            rec let ty = tType . T.Void $ T.Type ident' k f v
+                            ts <- TL.toVector <$> v^!terms.read
+                            rec let ty = tType . T.Void $ T.Type (v^.varID) k f ty'
                                 H.insert seen ident ty
-                                v <- if V.null ts
-                                         then return T.Opaque
-                                         else do
-                                             Term _ sym children' _ <- fromRTerm (ts V.! 0)
-                                             cs <- mapM (purify seen <=< fromRTerm) $ SL.toList children'
-                                             return $ rawType sym cs
+                                ty' <- if V.null ts
+                                           then return T.Opaque
+                                           else do
+                                               t' <- fromRTerm (ts V.! 0)
+                                               cs <- mapM (purify seen <=< fromRTerm) $ SL.toList $ t'^.children
+                                               return $ rawType (t'^.symbol) cs
                             return ty
                         _ -> do
                             let ty = tType T.Opaque
@@ -496,44 +497,44 @@ purify seen (Term ident Attribs children _) = do
     rawType Unit          _      = T.Unit
     rawType (Sealed seal) [a]    = T.Sealed seal a
     rawType _             _      = error "Illegal term type in purify"
-purify _ (Term _ sym _ _) = error $ "Attempted to purify non-Attribs term " ++ show sym
+purify _ t = error $ "Attempted to purify non-Attribs term " ++ show (t^.symbol)
 
 mkAttribTerm :: ST s ID -> Symbol -> Either [RNode s] Bool -> Either [RNode s] Bool -> [RNode s] -> ST s (RNode s)
-mkAttribTerm unique sym relevant affine children = do
-    t <- mkRTerm' sym children
+mkAttribTerm unique sym relevant affine cs = do
+    t <- mkRTerm' sym cs
     false <- mkRTerm' (Attrib False) []
     k <- mkAttrib false relevant "k" fst
     f <- mkAttrib false affine   "f" snd
     mkRTerm' Attribs [t, k, f]
   where
     mkRTerm' = mkRTerm unique
-    mkAttrib false attrib name extract = case attrib of
-              Left  [] -> mkRVar unique name Substructural
+    mkAttrib false attrib label extract = case attrib of
+              Left  [] -> mkRVar unique label Substructural
               Left  as -> foldM (simplifyOr mkOr) false =<< map extract <$> mapM getAttribs as
               Right a  -> mkRTerm' (Attrib a) []
     mkOr a b = mkRTerm' Or [a, b]
 
 mkAttribVar :: ST s ID -> String -> VarType -> Maybe Bool -> Maybe Bool -> ST s (RNode s)
-mkAttribVar unique name ty relevant affine = do
-    v <- mkRVar unique name ty
+mkAttribVar unique label ty relevant affine = do
+    v <- mkRVar unique label ty
     k <- mkAttrib relevant "_k"
     f <- mkAttrib affine   "_f"
     mkRTerm unique Attribs [v, k, f]
   where
     mkAttrib (Just a) _      = mkRTerm unique (Attrib a) []
-    mkAttrib Nothing  suffix = mkRVar unique (name ++ suffix) Substructural
+    mkAttrib Nothing  suffix = mkRVar unique (label ++ suffix) Substructural
 
 type RNodeIL s = IL.InterList (RNode s)
 
 opType :: ST s ID -> Op (RNodeIL s) -> ST s (RNode s, RNode s)
 opType unique = flip evalStateT (False, M.empty) . blockOrOp
   where
-    mkRTerm' sym children = lift $ mkRTerm unique sym children
-    mkAttribTerm' sym children = do
+    mkRTerm' sym cs = lift $ mkRTerm unique sym cs
+    mkAttribTerm' sym cs = do
         onRight <- gets fst
         lift $ if onRight
-                   then mkAttribTerm unique sym (Left children) (Left children) children
-                   else mkAttribTerm unique sym (Left [])       (Left [])       children
+                   then mkAttribTerm unique sym (Left cs) (Left cs) cs
+                   else mkAttribTerm unique sym (Left []) (Left []) cs
     eval x' = lift $ evalStateT x' (False, M.empty)
     seq2 action a' b' = do
         a'' <- a'
@@ -587,8 +588,10 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
     mkText = do
         v <- eval $ var' "L" (Just False) (Just False)
         list <- eval $ num .* return v .+ unit
-        Var _ _ _ _ termRef _ _ <- lift $ fromRVar =<< getType v
-        lift $ writeSTRef termRef . TL.singleton =<< getType list
+        lift $ do
+            v' <- fromRVar =<< getType v
+            list' <- getType list
+            v'^!terms.write (TL.singleton list')
         return v
     
     opMark relevant = do
@@ -654,8 +657,8 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
         a' <- eval a
         b' <- eval b
         c' <- eval c
-        Var _ _ _ _ _ mergesRef _ <- lift $ fromRVar =<< getType c'
-        lift . writeSTRef mergesRef $ TL.singleton (a', b')
+        v <- lift $ fromRVar =<< getType c'
+        lift $ v^!merges.write (TL.singleton (a', b'))
         (return a' .+ return b') .* e ~> return c' .* e
     op Assert    = (a .+ b) .* e ~> b .* e
 
@@ -711,12 +714,12 @@ inferTypes mode logStages ops = do
     let unique = do
             modifySTRef' counter (+1)
             readSTRef counter
-    let writeGraph stage xs =
-            when (stage `elem` logStages) $ do
+    let writeGraph stage' xs =
+            when (stage' `elem` logStages) $ do
                 rootID <- lift unique
-                let root = Node rootID (show stage) . zip (map (('#':) . show) [1 :: Int ..]) $ map (toNode mode <=< fromRTerm) xs
+                let root = Node rootID (show stage') . zip (map (('#':) . show) [1 :: Int ..]) $ map (toNode mode <=< fromRTerm) xs
                 graph <- lift $ showGraph $ Graph "node" "" [] [root]
-                yield (stage, graph)
+                yield (stage', graph)
         errorTerm prefix label x y = lift $ do
             x' <- toNode mode x
             y' <- toNode mode y
