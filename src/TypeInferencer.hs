@@ -82,14 +82,14 @@ data VarType = Structural | Substructural | Void deriving Eq
 newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
 
 data Term s = Term { _termID   :: {-# UNPACK #-} !ID
-                   , _symbol   ::                 Symbol
+                   , _symbol   ::                !Symbol
                    , _children :: {-# UNPACK #-} !(ShortList (RNode s))
                    , _stage    :: {-# UNPACK #-} !(STRef s Stage)
                    }
 
 data Var s = Var { _varID    :: {-# UNPACK #-} !ID
                  , _name     ::                 String
-                 , _varType  ::                 VarType
+                 , _varType  ::                !VarType
                  , _repVar   :: {-# UNPACK #-} !(STRef s (Maybe (RNode s)))
                  , _terms    :: {-# UNPACK #-} !(STRef s (TreeList (RNode s)))
                  , _merges   :: {-# UNPACK #-} !(STRef s (TreeList (RNode s, RNode s)))
