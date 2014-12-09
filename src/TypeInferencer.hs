@@ -85,7 +85,7 @@ newtype RNode s = RNode (STRef s (Either (Term s) (Var s)))
 data Term s = Term { _termID   :: {-# UNPACK #-} !ID
                    , _symbol   ::                !Symbol
                    , _children :: {-# UNPACK #-} !(ShortList (RNode s))
-                   , _stage    :: {-# UNPACK #-} !(STRef s Stage)
+                   , _stage    ::                !Stage
                    }
 
 data Var s = Var { _varID    :: {-# UNPACK #-} !ID
@@ -172,7 +172,9 @@ instance GraphViz (Var s) where
         fromRNode' rn = toNode mode <$> fromRNode rn
 
 mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Term s)
-mkTerm unique sym cs = Term <$> unique <*> pure sym <*> pure (SL.fromList cs) <*> newSTRef New
+mkTerm unique sym cs = do
+    ident <- unique
+    return $ Term ident sym (SL.fromList cs) New
 
 mkVar :: ST s ID -> String -> VarType -> ST s (Var s)
 mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> newSTRef 1
@@ -393,17 +395,18 @@ deloop unique node = do
     n <- fromRNode node
     case n of
         Left t -> do
-            stage' <- t^!stage.read
-            case stage' of
+            case t^.stage of
                 New -> do
-                    t^!stage.write DeloopSeen
+                    replaceNode node . Left $! stage .~ DeloopSeen $ t
                     mapM_ (deloop unique) $ childList t
                     case t^.symbol of
                         Or -> do
                             [a, b] <- mapM derefVar $ childList t
-                            replaceNode node =<< fromRNode =<< simplifyOr (const . const $ return node) a b
-                        _  -> return ()
-                    t^!stage.write Delooped
+                            n' <- fromRNode =<< simplifyOr (const . const $ return node) a b
+                            case n' of
+                                Left  t' -> replaceNode node . Left $! stage .~ Delooped $ t'
+                                Right _  -> replaceNode node n'
+                        _  -> replaceNode node . Left $! stage .~ Delooped $ t
                 DeloopSeen -> case t^.symbol of
                                   Or -> replaceNode node =<< Left <$> mkTerm unique (Attrib False) []
                                   _  -> return ()
@@ -453,9 +456,8 @@ deloop unique node = do
 substitute :: RNode s -> ST s ()
 substitute term = do
     t <- fromRTerm term
-    s <- t^!stage.read
-    unless (s == Substituted) $ do
-        t^!stage.write Substituted
+    unless (t^.stage == Substituted) $ do
+        replaceNode term . Left $! stage .~ Substituted $ t
         mapM_ go . zip [0..] $ childList t
   where
     go (i, node) = do
