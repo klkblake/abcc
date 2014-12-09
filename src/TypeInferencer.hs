@@ -22,6 +22,7 @@ import qualified Data.HashTable.ST.Basic as H
 import qualified Data.Map.Strict as M
 import Data.STRef
 import qualified Data.Vector as V
+import qualified Data.Vector.Mutable as MV
 import Pipes hiding ((~>))
 
 import Op
@@ -292,39 +293,45 @@ commonFrontier unique queue t_list = do
                else Just (t, diffs V.! 0)
     goChild (Left err) _ = return $ Left err
     goChild (Right queue') i = do
-        sns <- splitIthChildren i
-        case sns of
-            ([], []) -> error "commonFrontier called on empty term list"
-            (t:ts, []) -> do
-                sym <- view symbol <$> fromRTerm t
+        (ts, vs, j) <- splitIthChildren i
+        case (V.null ts, V.null vs) of
+            (False, True) -> do
+                sym <- view symbol <$> fromRTerm (ts V.! 0)
                 case sym of
-                    Or       -> fmap Right . genSubVar queue' i $ t:ts
+                    Or       -> fmap Right $ genSubVar queue' i ts
                     Attrib a -> do
-                        ts' <- mapM fromRTerm ts
-                        Right <$> if all (matchingAttrib a) ts'
+                        ts' <- V.mapM fromRTerm $ V.slice 1 (V.length ts - 1) ts
+                        Right <$> if V.all (matchingAttrib a) ts'
                                       then return queue'
-                                      else genSubVar queue' i $ t:ts
-                    _ -> commonFrontier unique queue' . V.fromList $ t:ts
-            (ts, (j, var):vars) -> do
+                                      else genSubVar queue' i ts
+                    _ -> commonFrontier unique queue' ts
+            (_, False) -> do
                 swapChild i j
-                v <- rep var
-                queue''  <- foldM (processVars  v) queue' $ map snd vars
-                queue''' <- foldM (processTerms v) queue'' ts
+                v <- rep (vs V.! 0)
+                queue''  <- V.foldM (processVars  v) queue' $ V.slice 1 (V.length vs - 1) vs
+                queue''' <- V.foldM (processTerms v) queue'' ts
                 return $ Right queue'''
-    splitIthChildren i = splitNode (V.length t_list) 0 [] []
+            (True, True) -> error "commonFrontier called on empty term list"
+    splitIthChildren i = do
+        let len = V.length t_list
+        v <- MV.new len
+        splitIthChildren' v 0 0 0 $ len - 1
       where
-        splitNode n j ls rs | n == j = return (ls, rs)
-                            | otherwise = do
+        splitIthChildren' v vi j l r | l > r     = do v' <- V.unsafeFreeze v
+                                                      return (V.unsafeSlice 0 l v', V.unsafeSlice l (V.length v' - l) v', vi)
+                                     | otherwise = do
             cs <- view children <$> fromRTerm (t_list V.! j)
             let node = cs SL.! i
             node' <- fromRNode node
             case node' of
-                Left  _ -> splitNode n (j + 1) (node:ls) rs
-                Right _ -> splitNode n (j + 1) ls ((j, node):rs)
+                Left  _ -> do MV.write v l node
+                              splitIthChildren' v vi (j + 1) (l + 1) r
+                Right _ -> do MV.write v r node
+                              splitIthChildren' v j (j + 1) l (r - 1)
     genSubVar queue' i ts = do
         v <- mkRVar unique "attr" Substructural
         v' <- fromRVar v
-        queue'' <- foldM (`add` v') queue' ts
+        queue'' <- V.foldM (`add` v') queue' ts
         let term = t_list V.! 0
         t <- fromRTerm term
         updateChild term t i v
