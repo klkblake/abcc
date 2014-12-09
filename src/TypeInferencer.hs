@@ -93,7 +93,7 @@ data Var s = Var { _varID    :: {-# UNPACK #-} !ID
                  , _varType  ::                !VarType
                  , _repVar   ::                !(Maybe (RNode s))
                  , _terms    :: {-# UNPACK #-} !(STRef s (TreeList (RNode s)))
-                 , _merges   :: {-# UNPACK #-} !(STRef s (TreeList (RNode s, RNode s)))
+                 , _merges   ::                !(TreeList (RNode s, RNode s))
                  , _varCount :: {-# UNPACK #-} !Int
                  }
 
@@ -107,13 +107,6 @@ read = act readSTRef
 write :: a -> IndexPreservingAction (ST s) (STRef s a) ()
 write x = x `seq` act (flip writeSTRef x)
 {-# INLINE write #-}
-
-modifyM :: (a -> ST s a) -> IndexPreservingAction (ST s) (STRef s a) ()
-modifyM f = act $ \ref -> do
-    x <- readSTRef ref
-    x' <- f x
-    x' `seq` writeSTRef ref x'
-{-# INLINE modifyM #-}
 
 instance GraphViz (Term s) where
     type State (Term s) = s
@@ -161,7 +154,7 @@ instance GraphViz (Var s) where
                                return [("rep", toNode mode r')]
                            Nothing -> return []
             termEdges <- zip numbers <$> (mapM fromRNode' =<< V.toList . TL.toVector <$> var^!terms.read)
-            (mergesLeft, mergesRight) <- unzip . V.toList . TL.toVector <$> var^!merges.read
+            let (mergesLeft, mergesRight) = unzip . V.toList . TL.toVector $ var^.merges
             mergesLeftEdges  <- zip (map ("ML" ++) numbers) <$> mapM fromRNode' mergesLeft
             mergesRightEdges <- zip (map ("MR" ++) numbers) <$> mapM fromRNode' mergesRight
             return $ repEdge ++ termEdges ++ mergesLeftEdges ++ mergesRightEdges
@@ -174,7 +167,7 @@ mkTerm unique sym cs = do
     return $ Term ident sym (SL.fromList cs) New
 
 mkVar :: ST s ID -> String -> VarType -> ST s (Var s)
-mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> pure Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> pure 1
+mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> pure Nothing <*> newSTRef TL.empty <*> pure TL.empty <*> pure 1
 
 toRNode :: Either (Term s) (Var s) -> ST s (RNode s)
 toRNode node = RNode <$> newSTRef node
@@ -249,11 +242,16 @@ merge queue n1 n2 = do
             bty = if ty == Void then Void else bigV^.varType
         bigTerms <- bigV^!terms.read
         bigTerms' <- TL.concat bigTerms <$> v^!terms.read
-        replaceNode bigNode . Right $! varType .~ bty $ varCount .~ vc $ bigV
-        replaceNode node . Right $! repVar .~ Just bigNode $ varCount .~ 0 $ v
+        replaceNode bigNode . Right $! varType  .~ bty
+                                    $  merges   .~ TL.concat (bigV^.merges) (v^.merges)
+                                    $  varCount .~ vc
+                                    $ bigV
+        replaceNode node . Right $! repVar   .~ Just bigNode
+                                 $  merges   .~ TL.empty
+                                 $  varCount .~ 0
+                                 $ v
         bigV^!terms.write bigTerms'
         v^!terms.write TL.empty
-        bigV^!merges.modifyM (\x -> TL.concat x <$> v^!merges.read)
         return $ if TL.size bigTerms <= 1 && TL.size bigTerms' >= 2 && ty /= Substructural
                      then Q.push queue bigV
                      else queue
@@ -672,8 +670,10 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
         a' <- eval a
         b' <- eval b
         c' <- eval c
-        v <- lift $ fromRVar =<< getType c'
-        lift $ v^!merges.write (TL.singleton (a', b'))
+        lift $ do
+            v  <- getType c'
+            v' <- fromRVar v
+            replaceNode v . Right $! merges .~ TL.singleton (a', b') $ v'
         (return a' .+ return b') .* e ~> return c' .* e
     op Assert    = (a .+ b) .* e ~> b .* e
 
