@@ -94,7 +94,7 @@ data Var s = Var { _varID    :: {-# UNPACK #-} !ID
                  , _repVar   ::                !(Maybe (RNode s))
                  , _terms    :: {-# UNPACK #-} !(STRef s (TreeList (RNode s)))
                  , _merges   :: {-# UNPACK #-} !(STRef s (TreeList (RNode s, RNode s)))
-                 , _varCount :: {-# UNPACK #-} !(STRef s Int)
+                 , _varCount :: {-# UNPACK #-} !Int
                  }
 
 makeLenses ''Term
@@ -150,11 +150,10 @@ instance GraphViz (Var s) where
       where
         toNode' = Node (var^.varID) <$> label <*> labelledChildren
         label = do
-            count <- var^!varCount.read
-            return $ (show $ var^.name) ++ " (" ++ show count ++ ")" ++ case var^.varType of
-                                                                            Structural    -> ""
-                                                                            Substructural -> " kf"
-                                                                            Void          -> " void"
+            return $ (show $ var^.name) ++ " (" ++ show (var^.varCount) ++ ")" ++ case var^.varType of
+                                                                                      Structural    -> ""
+                                                                                      Substructural -> " kf"
+                                                                                      Void          -> " void"
         labelledChildren = do
             repEdge <- case var^.repVar of
                            Just r -> do
@@ -175,7 +174,7 @@ mkTerm unique sym cs = do
     return $ Term ident sym (SL.fromList cs) New
 
 mkVar :: ST s ID -> String -> VarType -> ST s (Var s)
-mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> pure Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> newSTRef 1
+mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> pure Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> pure 1
 
 toRNode :: Either (Term s) (Var s) -> ST s (RNode s)
 toRNode node = RNode <$> newSTRef node
@@ -238,25 +237,24 @@ merge :: Queue (Var s) -> RNode s -> RNode s -> ST s (Queue (Var s))
 merge queue n1 n2 = do
     v1 <- fromRVar n1
     v2 <- fromRVar n2
-    r1 <- v1^!varCount.read
-    r2 <- v2^!varCount.read
-    let vc = r1 + r2
+    let r1 = v1^.varCount
+        r2 = v2^.varCount
+        vc = r1 + r2
     if r1 >= r2
         then go vc n1 n2 v1 v2
         else go vc n2 n1 v2 v1
   where
     go vc bigNode node bigV v = do
         let ty = v^.varType
-        when (ty == Void) $ replaceNode bigNode . Right $! varType .~ Void $ bigV
-        replaceNode node . Right $! repVar .~ Just bigNode $ v
-        numTerms <- bigV^!terms.read.to TL.size
-        bigTerms' <- TL.concat <$> bigV^!terms.read <*> v^!terms.read
+            bty = if ty == Void then Void else bigV^.varType
+        bigTerms <- bigV^!terms.read
+        bigTerms' <- TL.concat bigTerms <$> v^!terms.read
+        replaceNode bigNode . Right $! varType .~ bty $ varCount .~ vc $ bigV
+        replaceNode node . Right $! repVar .~ Just bigNode $ varCount .~ 0 $ v
         bigV^!terms.write bigTerms'
         v^!terms.write TL.empty
         bigV^!merges.modifyM (\x -> TL.concat x <$> v^!merges.read)
-        bigV^!varCount.write vc
-        v^!varCount.write 0
-        return $ if numTerms <= 1 && TL.size bigTerms' >= 2 && ty /= Substructural
+        return $ if TL.size bigTerms <= 1 && TL.size bigTerms' >= 2 && ty /= Substructural
                      then Q.push queue bigV
                      else queue
 
