@@ -292,8 +292,7 @@ commonFrontier unique queue t_list = do
                else Just (t, diffs V.! 0)
     goChild (Left err) _ = return $ Left err
     goChild (Right queue') i = do
-        t0_list <- ithChildren i
-        sns <- splitNodes t0_list
+        sns <- splitIthChildren i
         case sns of
             ([], []) -> error "commonFrontier called on empty term list"
             (t:ts, []) -> do
@@ -312,16 +311,15 @@ commonFrontier unique queue t_list = do
                 queue''  <- foldM (processVars  v) queue' $ map snd vars
                 queue''' <- foldM (processTerms v) queue'' ts
                 return $ Right queue'''
-    ithChildren i = V.forM t_list $ \t -> do
-        cs <- view children <$> fromRTerm t
-        return $ cs SL.! i
-    splitNodes = V.foldM splitNode ([], []) . V.indexed
+    splitIthChildren i = V.foldM splitNode ([], []) $ V.indexed t_list
       where
-        splitNode (ls, rs) (i, n) = do
+        splitNode (ls, rs) (j, t) = do
+            cs <- view children <$> fromRTerm t
+            let n = cs SL.! i
             n' <- fromRNode n
             return $ case n' of
                          Left  _ -> (n:ls, rs)
-                         Right _ -> (ls, (i, n):rs)
+                         Right _ -> (ls, (j, n):rs)
     genSubVar queue' i ts = do
         v <- mkRVar unique "attr" Substructural
         v' <- fromRVar v
