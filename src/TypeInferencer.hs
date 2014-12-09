@@ -277,15 +277,6 @@ rep v = do
             Just r'' -> v'^!repVar.write (Just r) >> setRep r r''
             Nothing  -> return r
 
-splitNodes :: V.Vector (RNode s) -> ST s ([RNode s], [(Int, RNode s)])
-splitNodes = V.foldM splitNode ([], []) . V.indexed
-  where
-    splitNode (ls, rs) (i, n) = do
-        n' <- fromRNode n
-        return $ case n' of
-                     Left  _ -> (n:ls, rs)
-                     Right _ -> (ls, (i, n):rs)
-
 commonFrontier :: ST s ID -> Queue (Var s) -> V.Vector (RNode s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
 commonFrontier unique queue t_list = do
     t <- fromRTerm $ t_list V.! 0
@@ -324,6 +315,13 @@ commonFrontier unique queue t_list = do
     ithChildren i = V.forM t_list $ \t -> do
         cs <- view children <$> fromRTerm t
         return $ cs SL.! i
+    splitNodes = V.foldM splitNode ([], []) . V.indexed
+      where
+        splitNode (ls, rs) (i, n) = do
+            n' <- fromRNode n
+            return $ case n' of
+                         Left  _ -> (n:ls, rs)
+                         Right _ -> (ls, (i, n):rs)
     genSubVar queue' i ts = do
         v <- mkRVar unique "attr" Substructural
         v' <- fromRVar v
