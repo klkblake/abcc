@@ -91,7 +91,7 @@ data Term s = Term { _termID   :: {-# UNPACK #-} !ID
 data Var s = Var { _varID    :: {-# UNPACK #-} !ID
                  , _name     ::                 String
                  , _varType  ::                !VarType
-                 , _repVar   :: {-# UNPACK #-} !(STRef s (Maybe (RNode s)))
+                 , _repVar   ::                !(Maybe (RNode s))
                  , _terms    :: {-# UNPACK #-} !(STRef s (TreeList (RNode s)))
                  , _merges   :: {-# UNPACK #-} !(STRef s (TreeList (RNode s, RNode s)))
                  , _varCount :: {-# UNPACK #-} !(STRef s Int)
@@ -144,8 +144,7 @@ instance GraphViz (Var s) where
         case mode of
             Verbose -> toNode'
             Compact -> do
-                rep' <- var^!repVar.read
-                case rep' of
+                case var^.repVar of
                     Just r -> toNode mode =<< fromRNode r
                     Nothing -> toNode'
       where
@@ -157,8 +156,7 @@ instance GraphViz (Var s) where
                                                                             Substructural -> " kf"
                                                                             Void          -> " void"
         labelledChildren = do
-            rep' <- var^!repVar.read
-            repEdge <- case rep' of
+            repEdge <- case var^.repVar of
                            Just r -> do
                                r' <- fromRVar r
                                return [("rep", toNode mode r')]
@@ -177,7 +175,7 @@ mkTerm unique sym cs = do
     return $ Term ident sym (SL.fromList cs) New
 
 mkVar :: ST s ID -> String -> VarType -> ST s (Var s)
-mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> newSTRef Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> newSTRef 1
+mkVar unique v ty = Var <$> unique <*> pure v <*> pure ty <*> pure Nothing <*> newSTRef TL.empty <*> newSTRef TL.empty <*> newSTRef 1
 
 toRNode :: Either (Term s) (Var s) -> ST s (RNode s)
 toRNode node = RNode <$> newSTRef node
@@ -244,13 +242,13 @@ merge queue n1 n2 = do
     r2 <- v2^!varCount.read
     let vc = r1 + r2
     if r1 >= r2
-        then go vc n1 v1 v2
-        else go vc n2 v2 v1
+        then go vc n1 n2 v1 v2
+        else go vc n2 n1 v2 v1
   where
-    go vc bigNode bigV v = do
+    go vc bigNode node bigV v = do
         let ty = v^.varType
         when (ty == Void) $ replaceNode bigNode . Right $! varType .~ Void $ bigV
-        v^!repVar.write (Just bigNode)
+        replaceNode node . Right $! repVar .~ Just bigNode $ v
         numTerms <- bigV^!terms.read.to TL.size
         bigTerms' <- TL.concat <$> bigV^!terms.read <*> v^!terms.read
         bigV^!terms.write bigTerms'
@@ -269,15 +267,15 @@ rep v = do
   where
     findRep n = do
         v' <- fromRVar n
-        r <- v'^!repVar.read
-        case r of
+        case v'^.repVar of
             Just r' -> findRep r'
             Nothing -> return n
     setRep r n = do
         v' <- fromRVar n
-        r' <- v'^!repVar.read
-        case r' of
-            Just r'' -> v'^!repVar.write (Just r) >> setRep r r''
+        case v'^.repVar of
+            Just r'' -> do
+                replaceNode n . Right $! repVar .~ Just r $ v'
+                setRep r r''
             Nothing  -> return r
 
 commonFrontier :: ST s ID -> Queue (Var s) -> V.Vector (RNode s) -> ST s (Either (Term s, Term s) (Queue (Var s)))
