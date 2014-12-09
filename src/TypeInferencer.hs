@@ -311,15 +311,16 @@ commonFrontier unique queue t_list = do
                 queue''  <- foldM (processVars  v) queue' $ map snd vars
                 queue''' <- foldM (processTerms v) queue'' ts
                 return $ Right queue'''
-    splitIthChildren i = V.foldM splitNode ([], []) $ V.indexed t_list
+    splitIthChildren i = splitNode (V.length t_list) 0 [] []
       where
-        splitNode (ls, rs) (j, t) = do
-            cs <- view children <$> fromRTerm t
-            let n = cs SL.! i
-            n' <- fromRNode n
-            return $ case n' of
-                         Left  _ -> (n:ls, rs)
-                         Right _ -> (ls, (j, n):rs)
+        splitNode n j ls rs | n == j = return (ls, rs)
+                            | otherwise = do
+            cs <- view children <$> fromRTerm (t_list V.! j)
+            let node = cs SL.! i
+            node' <- fromRNode node
+            case node' of
+                Left  _ -> splitNode n (j + 1) (node:ls) rs
+                Right _ -> splitNode n (j + 1) ls ((j, node):rs)
     genSubVar queue' i ts = do
         v <- mkRVar unique "attr" Substructural
         v' <- fromRVar v
