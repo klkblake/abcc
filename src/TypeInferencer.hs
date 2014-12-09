@@ -530,12 +530,12 @@ mkAttribTerm unique sym relevant affine cs = do
 mkAttribVar :: ST s ID -> String -> VarType -> Maybe Bool -> Maybe Bool -> ST s (RNode s)
 mkAttribVar unique label ty relevant affine = do
     v <- mkRVar unique label ty
-    k <- mkAttrib relevant "_k"
-    f <- mkAttrib affine   "_f"
+    k <- mkAttrib relevant "k"
+    f <- mkAttrib affine   "f"
     mkRTerm unique Attribs [v, k, f]
   where
     mkAttrib (Just a) _      = mkRTerm unique (Attrib a) []
-    mkAttrib Nothing  suffix = mkRVar unique (label ++ suffix) Substructural
+    mkAttrib Nothing  label' = mkRVar unique label' Substructural
 
 type RNodeIL s = IL.InterList (RNode s)
 
