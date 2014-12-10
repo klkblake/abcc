@@ -17,6 +17,10 @@ outerList :: InterList a b -> [a]
 outerList (Empty x) = [x]
 outerList (Cons x _ xys) = x:outerList xys
 
+innerList :: InterList a b -> [b]
+innerList (Empty _) = []
+innerList (Cons _ y xys) = y:innerList xys
+
 reverse :: InterList a b -> InterList a b
 reverse il = go (Empty . head $ outerList il) il
   where

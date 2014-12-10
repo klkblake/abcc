@@ -9,7 +9,7 @@ module TypeInferencer
 -- the functional inverse of the Ackermann function. Be careful to preserve
 -- this time complexity!
 
-import Prelude hiding (read, all, mapM_, elem)
+import Prelude hiding (read, all, mapM_, elem, concatMap)
 
 import Control.Applicative
 import Control.Lens hiding (op, children)
@@ -717,6 +717,12 @@ unifyAll unique (opcode:opcodes) = do
                     Nothing -> go (i + 1) (IL.cons a lop tyOps) rop'' ops a'
     go _ tyOps op [] a = return . Right . IL.reverse $ IL.cons a op tyOps
 
+allTypes :: IL.InterList a (Op (IL.InterList a)) -> [a]
+allTypes tyOps = IL.outerList tyOps ++ concatMap op (IL.innerList tyOps)
+  where
+    op (LitBlock tyOps') = allTypes tyOps'
+    op _ = []
+
 inferTypes :: Mode -> [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String) [T.Type])
 inferTypes mode logStages ops = do
     counter <- lift $ newSTRef (0 :: Int)
@@ -741,7 +747,7 @@ inferTypes mode logStages ops = do
             graph <- lift . showGraph $ Graph "" ("Unification failure at opcode index " ++ show i) [inner, outer] []
             return $ Left (i, graph)
         Right tyOps -> do
-            let tys = IL.outerList tyOps
+            let tys = allTypes tyOps
             writeGraph TIUnified tys
             lift $ mapM_ (deloop unique) tys
             writeGraph TIResolved tys
