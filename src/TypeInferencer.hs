@@ -717,13 +717,19 @@ unifyAll unique (opcode:opcodes) = do
                     Nothing -> go (i + 1) (IL.cons a lop tyOps) rop'' ops a'
     go _ tyOps op [] a = return . Right . IL.reverse $ IL.cons a op tyOps
 
-allTypes :: IL.InterList a (Op (IL.InterList a)) -> [a]
-allTypes tyOps = IL.outerList tyOps ++ concatMap op (IL.innerList tyOps)
+mapMTyOps :: Applicative m => (a -> m b) -> (FlatOp -> m FlatOp) -> IL.InterList a (Op (IL.InterList a)) -> m (IL.InterList b (Op (IL.InterList b)))
+mapMTyOps f g = IL.mapM f op
   where
-    op (LitBlock tyOps') = allTypes tyOps'
-    op _ = []
+    op (LitBlock tyOps) = LitBlock <$> mapMTyOps f g tyOps
+    op (Op op') = Op <$> g op'
 
-inferTypes :: Mode -> [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String) [T.Type])
+mapMTyOps_ :: Applicative m => (a -> m ()) -> (FlatOp -> m ()) -> IL.InterList a (Op (IL.InterList a)) -> m ()
+mapMTyOps_ f g = IL.mapM_ f op
+  where
+    op (LitBlock tyOps) = mapMTyOps_ f g tyOps
+    op (Op op') = g op'
+
+inferTypes :: Mode -> [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String) (IL.InterList T.Type TyOp))
 inferTypes mode logStages ops = do
     counter <- lift $ newSTRef (0 :: Int)
     let unique = do
@@ -747,15 +753,15 @@ inferTypes mode logStages ops = do
             graph <- lift . showGraph $ Graph "" ("Unification failure at opcode index " ++ show i) [inner, outer] []
             return $ Left (i, graph)
         Right tyOps -> do
-            let tys = allTypes tyOps
+            let tys = IL.outerList tyOps
             writeGraph TIUnified tys
-            lift $ mapM_ (deloop unique) tys
+            lift $ mapMTyOps_ (deloop unique) (const $ pure ()) tyOps
             writeGraph TIResolved tys
-            lift $ mapM_ substitute tys
+            lift $ mapMTyOps_ substitute (const $ pure ()) tyOps
             writeGraph TISubstituted tys
-            pureExprs <- lift $ do
+            tyOps' <- lift $ do
                 seen   <- H.new
                 idents <- H.new
                 nextID <- newSTRef 0
-                mapM (purify seen idents nextID <=< fromRNode) tys
-            return $ Right pureExprs
+                mapMTyOps (purify seen idents nextID <=< fromRNode) pure tyOps
+            return $ Right tyOps'

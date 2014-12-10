@@ -12,6 +12,8 @@ import System.IO
 import System.Process
 
 import GraphViz
+import qualified InterList as IL
+import Op
 
 import Parser
 import PeepholePre
@@ -122,10 +124,14 @@ doTypeCheck opts = do
                         _ <- waitForProcess ph
                         return ()
                     exitFailure
-                Right exprs -> mapM_ print exprs
+                Right prog -> printProg 0 prog
         Nothing   -> exitFailure
   where
     writeGraph (stage, graph) = writeFile (fromJust . lookup stage $ optDump opts) graph
+    printProg i p = IL.mapM_ (printIndent i) (printOp i) p
+    printOp i (LitBlock ops) = printProg (i + 1) ops
+    printOp i (Op op) = printIndent i op
+    printIndent i x = putStrLn $ replicate i '\t' ++ show x
 
 main :: IO ()
 main = do
