@@ -439,13 +439,17 @@ substitute term = do
             Term {} -> substitute node
             Var  {} -> do
                 t <- fromRNode term
-                v <- fromRNode =<< rep node
-                let ts = TL.toVector $ v^?!terms
-                when (v^?!varType /= Void && V.length ts == 1) . updateChild term t i $ ts V.! 0
+                v <- rep node
+                v' <- fromRNode v
+                let ts = TL.toVector $ v'^?!terms
+                when (v'^?!varType /= Void) $ case V.length ts of
+                                                  0 -> updateChild term t i $ v
+                                                  1 -> updateChild term t i $ ts V.! 0
+                                                  _ -> error "Var has multiple children"
                 V.mapM_ substitute ts
 
-purify :: H.HashTable s Int T.Type -> Node s -> ST s T.Type
-purify seen t | t^?!symbol == Attribs = do
+purify :: H.HashTable s ID T.Type -> H.HashTable s ID ID -> STRef s ID -> Node s -> ST s T.Type
+purify seen idents nextID t | t^?!symbol == Attribs = do
     let ident = t^.nodeID
     purified <- H.lookup seen ident
     case purified of
@@ -453,15 +457,25 @@ purify seen t | t^?!symbol == Attribs = do
         Nothing -> do
             let node = (t^?!children) SL.! 0
             node' <- fromRNode node
+            ident' <- do
+                let nIdent = node'^.nodeID
+                ident' <- H.lookup idents nIdent
+                case ident' of
+                    Just ident'' -> return ident''
+                    Nothing      -> do
+                        ident'' <- readSTRef nextID
+                        writeSTRef nextID $! ident'' + 1
+                        H.insert idents nIdent ident''
+                        return ident''
             [_, tk, tf] <- childList' t
             let Attrib k = tk^?!symbol
                 Attrib f = tf^?!symbol
-                tType = T.Type ident k f
+                tType = T.Type ident' k f
             case node' of
                 t'@Term {} -> do
                     rec let ty = tType $ rawType (t'^?!symbol) cs
                         H.insert seen ident ty
-                        cs <- mapM (purify seen <=< fromRNode) $ childList t'
+                        cs <- mapM (purify seen idents nextID <=< fromRNode) $ childList t'
                     return ty
                 Var {} -> do
                     v <- fromRNode =<< rep node
@@ -474,7 +488,7 @@ purify seen t | t^?!symbol == Attribs = do
                                            then return T.Opaque
                                            else do
                                                t' <- fromRNode (ts V.! 0)
-                                               cs <- mapM (purify seen <=< fromRNode) $ childList t'
+                                               cs <- mapM (purify seen idents nextID <=< fromRNode) $ childList t'
                                                return $ rawType (t'^?!symbol) cs
                             return ty
                         _ -> do
@@ -489,7 +503,7 @@ purify seen t | t^?!symbol == Attribs = do
     rawType Unit          _      = T.Unit
     rawType (Sealed seal) [a]    = T.Sealed seal a
     rawType _             _      = error "Illegal term type in purify"
-purify _ t = error $ "Attempted to purify non-Attribs term " ++ show (t^?!symbol)
+purify _ _ _ t = error $ "Attempted to purify non-Attribs term " ++ show (t^?!symbol)
 
 mkAttribTerm :: ST s ID -> Symbol -> Either [RNode s] Bool -> Either [RNode s] Bool -> [RNode s] -> ST s (RNode s)
 mkAttribTerm unique sym relevant affine cs = do
@@ -733,6 +747,9 @@ inferTypes mode logStages ops = do
             writeGraph TIResolved tys
             lift $ mapM_ substitute tys
             writeGraph TISubstituted tys
-            seen <- lift H.new
-            pureExprs <- mapM (lift . (purify seen <=< fromRNode)) tys
+            pureExprs <- lift $ do
+                seen   <- H.new
+                idents <- H.new
+                nextID <- newSTRef 0
+                mapM (purify seen idents nextID <=< fromRNode) tys
             return $ Right pureExprs
