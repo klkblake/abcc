@@ -457,20 +457,10 @@ purify seen idents nextID t | t^?!symbol == Attribs = do
         Nothing -> do
             let node = (t^?!children) SL.! 0
             node' <- fromRNode node
-            ident' <- do
-                let nIdent = node'^.nodeID
-                ident' <- H.lookup idents nIdent
-                case ident' of
-                    Just ident'' -> return ident''
-                    Nothing      -> do
-                        ident'' <- readSTRef nextID
-                        writeSTRef nextID $! ident'' + 1
-                        H.insert idents nIdent ident''
-                        return ident''
             [_, tk, tf] <- childList' t
             let Attrib k = tk^?!symbol
                 Attrib f = tf^?!symbol
-                tType = T.Type ident' k f
+                tType = T.Type ident k f
             case node' of
                 t'@Term {} -> do
                     rec let ty = tType $ rawType (t'^?!symbol) cs
@@ -485,17 +475,28 @@ purify seen idents nextID t | t^?!symbol == Attribs = do
                             rec let ty = tType . T.Void $ T.Type (v^.nodeID) k f ty'
                                 H.insert seen ident ty
                                 ty' <- if V.null ts
-                                           then return T.Opaque
+                                           then T.Opaque <$> getIdent node'
                                            else do
                                                t' <- fromRNode (ts V.! 0)
                                                cs <- mapM (purify seen idents nextID <=< fromRNode) $ childList t'
                                                return $ rawType (t'^?!symbol) cs
                             return ty
                         _ -> do
-                            let ty = tType T.Opaque
+                            ident' <- getIdent node'
+                            let ty = tType $ T.Opaque ident'
                             H.insert seen ident ty
                             return ty
   where
+    getIdent node = do
+        let ident = node^.nodeID
+        ident' <- H.lookup idents ident
+        case ident' of
+            Just ident'' -> return ident''
+            Nothing      -> do
+                ident'' <- readSTRef nextID
+                writeSTRef nextID $! ident'' + 1
+                H.insert idents ident ident''
+                return ident''
     rawType Product       [a, b] = T.Product a b
     rawType Sum           [a, b] = T.Sum     a b
     rawType Block         [a, b] = T.Block   a b
