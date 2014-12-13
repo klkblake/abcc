@@ -10,7 +10,6 @@ module GraphViz
     ) where
 
 import Control.Applicative
-import Control.Monad.ST
 import qualified Data.IntSet as IS
 import Data.List
 import Numeric
@@ -21,18 +20,18 @@ type ID = Int
 
 data Mode = Verbose | Compact
 
-data Node s = Node ID String [(String, ST s (Node s))]
+data Node m = Node ID String [(String, m (Node m))]
 
 class GraphViz g where
-    type State g
-    toNode :: Mode -> g -> ST (State g) (Node (State g))
+    type GVMonad g :: * -> *
+    toNode :: Mode -> g -> (GVMonad g) (Node (GVMonad g))
 
-instance (GraphViz a, GraphViz b, State a ~ State b) => GraphViz (Either a b) where
-    type State (Either a b) = State a
+instance (GraphViz a, GraphViz b, GVMonad a ~ GVMonad b) => GraphViz (Either a b) where
+    type GVMonad (Either a b) = GVMonad a
     toNode mode (Left  x) = toNode mode x
     toNode mode (Right y) = toNode mode y
 
-data Graph s = Graph String String [Graph s] [Node s]
+data Graph m = Graph String String [Graph m] [Node m]
 
 showID :: String -> ID -> ShowS
 showID prefix ident = showString prefix . showChar '_' . showInt ident
@@ -46,7 +45,7 @@ showNode prefix ident label = showID prefix ident . showLabel label . showChar '
 showEdge :: String -> ID -> ID -> String -> ShowS
 showEdge prefix from to label = showID prefix from . showString " -> " . showID prefix to . showLabel label . showChar '\n'
 
-showNodes :: String -> Node s -> ST s String
+showNodes :: (Functor m, Monad m) => String -> Node m -> m String
 showNodes prefix node = ($ "") <$> go IS.empty (Just (node, Q.empty))
   where
     go _ Nothing = return id
@@ -57,13 +56,13 @@ showNodes prefix node = ($ "") <$> go IS.empty (Just (node, Q.empty))
         let chunk = showNode prefix ident label . foldr (\(l, Node ident' _ _) s -> showEdge prefix ident ident' l . s) id children'
         fmap (chunk .) . go seen' . Q.pop . foldl' Q.push queue $ map snd children'
 
-showSubgraph :: Graph s -> ST s String
+showSubgraph :: (Functor m, Monad m) => Graph m -> m String
 showSubgraph (Graph prefix label graphs nodes) = do
     body1 <- concat <$> mapM showSubgraph graphs
     body2 <- concat <$> mapM (showNodes prefix) nodes
     return . showString "subgraph cluster_" . showString prefix . showString "{\n" . showString body1 . showString body2 . showString "label=\"" $ showString label "\"\nlabelloc=top\nlabeljust=center\n}"
 
-showGraph :: Graph s -> ST s String
+showGraph :: (Functor m, Monad m) => Graph m -> m String
 showGraph (Graph prefix label graphs nodes) = do
     body1 <- concat <$> mapM showSubgraph graphs
     body2 <- concat <$> mapM (showNodes prefix) nodes

@@ -101,7 +101,7 @@ data Node s = Term { _nodeID   :: {-# UNPACK #-} !ID
 makeLenses ''Node
 
 instance GraphViz (Node s) where
-    type State (Node s) = s
+    type GVMonad (Node s) = ST s
 
     toNode mode term@Term {} =
         case mode of
