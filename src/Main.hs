@@ -18,6 +18,7 @@ import Op
 import Parser
 import PeepholePre
 import TypeInferencer
+import Expansion
 import Codegen
 
 helpText :: String -> String
@@ -26,8 +27,9 @@ helpText prog = unlines [ prog ++ " - A compiler for Awelon Bytecode"
                         , "Usage: " ++ prog ++ " [--typecheck] [--dump-<stage>[=FILE]]"
                         , ""
                         , "Options:"
-                        , "\t--typecheck              Run the typechecker instead of the compiler"
                         , "\t--peephole-pre           Run the pre-typechecker peephole optimiser"
+                        , "\t--typecheck              Run the typechecker instead of the compiler"
+                        , "\t--expansion              Run the expansion pass"
                         , "\t--dump-<stage>[=FILE]    Dump the internal state of the typechecker at a particular stage to a GraphViz file"
                         , "\t\tStages:"
                         , "\t\t  initial        After the opcodes have had types assigned to them"
@@ -38,8 +40,9 @@ helpText prog = unlines [ prog ++ " - A compiler for Awelon Bytecode"
                         , "\t--verbose-graphs         Output graphs that more accurately reflect the type inferencer state"
                         ]
 
-data Flag = TypeCheck
-          | PeepholePre
+data Flag = PeepholePre
+          | TypeCheck
+          | Expansion
           | Dump TIStage (Maybe FilePath)
           | DumpAll
           | VerboseGraphs
@@ -47,8 +50,9 @@ data Flag = TypeCheck
 
 flagSpecs :: [OptSpec Flag]
 flagSpecs =
-    [ OptSpec ["typecheck"]        [] (NoArg TypeCheck)
-    , OptSpec ["peephole-pre"]     [] (NoArg PeepholePre)
+    [ OptSpec ["peephole-pre"]     [] (NoArg PeepholePre)
+    , OptSpec ["typecheck"]        [] (NoArg TypeCheck)
+    , OptSpec ["expansion"]        [] (NoArg Expansion)
     , OptSpec ["dump-initial"]     [] . OptionalArg $ return . Dump TIInitial
     , OptSpec ["dump-unified"]     [] . OptionalArg $ return . Dump TIUnified
     , OptSpec ["dump-resolved"]    [] . OptionalArg $ return . Dump TIResolved
@@ -102,8 +106,8 @@ doPeepholePre = do
         Just ops' -> mapM_ (putStr . show) ops' >> putStrLn ""
         Nothing   -> exitFailure
 
-doTypeCheck :: Options -> IO ()
-doTypeCheck opts = do
+doTypeCheck :: [Flag] -> Options -> IO ()
+doTypeCheck flags opts = do
     input <- getContents
     ops <- parse input
     case ops of
@@ -124,7 +128,11 @@ doTypeCheck opts = do
                         _ <- waitForProcess ph
                         return ()
                     exitFailure
-                Right prog -> printProg 0 prog
+                Right prog ->
+                    if Expansion `elem` flags
+                        then let g = expand prog
+                             in print g
+                        else printProg 0 prog
         Nothing   -> exitFailure
   where
     writeGraph (stage, graph) = writeFile (fromJust . lookup stage $ optDump opts) graph
@@ -139,6 +147,6 @@ main = do
     if PeepholePre `elem` flags
         then doPeepholePre
         else
-            if TypeCheck `elem` flags
-                then doTypeCheck $ processFlags flags
+            if TypeCheck `elem` flags || Expansion `elem` flags
+                then doTypeCheck flags $ processFlags flags
                 else doCompile

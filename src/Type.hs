@@ -1,6 +1,8 @@
+{-# LANGUAGE PatternSynonyms #-}
 module Type
     ( Type (..)
     , RawType (..)
+    , pattern (:*:)
     ) where
 
 import Control.Monad.State
@@ -20,6 +22,9 @@ data RawType = Product Type Type
              | Void Type
              | Sealed String Type
              | Opaque ID
+
+pattern a :*: b <- Type _ _ _ (Product a b)
+infixr 7 :*:
 
 instance Show Type where
     show ty = evalState (showsType 0 ty) (IS.empty, IM.empty, 0) ""
