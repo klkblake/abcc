@@ -86,11 +86,12 @@ toGraphViz (Graph _ pgs lsE) =
         (nodes, edges) = foldMap nodeNetlist $ concat pgs
     in GV.Graph "node" "" [] (start:end:nodes) $ endEdges ++ edges
   where
-    endEdge slot' (Link _ ident slot ty) = GV.Edge (ident + 2) 1 $ edgeLabel slot slot' ty
-    endEdge slot' (StartLink slot ty) = GV.Edge 0 1 $ edgeLabel slot slot' ty
+    mkEdge ident ident' label = GV.Edge ident ident' Nothing Nothing label
+    endEdge slot' (Link _ ident slot ty) = mkEdge (ident + 2) 1 $ edgeLabel slot slot' ty
+    endEdge slot' (StartLink slot ty) = mkEdge 0 1 $ edgeLabel slot slot' ty
     nodeNetlist (Node ident uop ls) = ([GV.Node (ident + 2) $ show uop], zipWith (edge ident) [0 :: Int ..] ls)
-    edge ident' slot' (Link _ ident slot ty) = GV.Edge (ident + 2) (ident' + 2) $ edgeLabel slot slot' ty
-    edge ident' slot' (StartLink slot ty) = GV.Edge 0 (ident' + 2) $ edgeLabel slot slot' ty
+    edge ident' slot' (Link _ ident slot ty) = mkEdge (ident + 2) (ident' + 2) $ edgeLabel slot slot' ty
+    edge ident' slot' (StartLink slot ty) = mkEdge 0 (ident' + 2) $ edgeLabel slot slot' ty
     edgeLabel slot slot' ty = show slot ++ " >> " ++ show ty ++ " >> " ++ show slot'
 
 empty :: [Type] -> Graph

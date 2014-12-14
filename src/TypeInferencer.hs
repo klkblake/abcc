@@ -124,6 +124,9 @@ ifUnseen node action = do
             put $ IM.insert ident ident seen
             action
 
+mkEdge :: ID -> ID -> String -> Edge
+mkEdge ident ident' label = GV.Edge ident ident' Nothing Nothing label
+
 toNetlistLabel :: GV.Mode -> Node s -> String -> ToNetlistT s (ID, Bool)
 toNetlistLabel mode term@Term {} label = ifUnseen term $ do
     case mode of
@@ -143,14 +146,14 @@ toNetlistLabel mode term@Term {} label = ifUnseen term $ do
                                                        | Attrib False <- t'^?!symbol -> return ("",  [])
                                             _ -> do
                                                 ident'' <- toNetlist mode k
-                                                return ("", [GV.Edge ident' ident'' "k"])
+                                                return ("", [mkEdge ident' ident'' "k"])
                                     (fl', fe) <-
                                         case f of
                                             t'@Term {} | Attrib True  <- t'^?!symbol -> return ("f", [])
                                                        | Attrib False <- t'^?!symbol -> return ("",  [])
                                             _ -> do
                                                 ident'' <- toNetlist mode f
-                                                return ("", [GV.Edge ident' ident'' "f"])
+                                                return ("", [mkEdge ident' ident'' "f"])
                                     tell ([], ke ++ fe)
                                     return (kl', fl')
                                 else return ("", "")
@@ -162,7 +165,7 @@ toNetlistLabel mode term@Term {} label = ifUnseen term $ do
         cs <- lift2 $ childList' term
         subNodes <- mapM (toNetlist mode) cs
         let thisNode = GV.Node ident label
-            thisEdges = zipWith (GV.Edge ident) subNodes (map (('#':) . show) [1 :: Int ..])
+            thisEdges = zipWith (mkEdge ident) subNodes (map (('#':) . show) [1 :: Int ..])
         tell ([thisNode], thisEdges)
         return (ident, True)
 
@@ -184,7 +187,7 @@ toNetlistLabel mode var@Var {} label = ifUnseen var $ do
                        Just r -> do
                            r' <- lift2 $ fromRNode r
                            ident' <- toNetlist mode r'
-                           return [GV.Edge ident ident' "rep"]
+                           return [mkEdge ident ident' "rep"]
                        Nothing -> return []
         ts <- lift2 $ mapM fromRNode . V.toList . TL.toVector $ var^?!terms
         let (mergesLeft, mergesRight) = unzip . V.toList . TL.toVector $ var^?!merges
@@ -192,12 +195,12 @@ toNetlistLabel mode var@Var {} label = ifUnseen var $ do
         mergesLeft'  <- mapM (toNetlist mode) =<< lift2 (mapM fromRNode mergesLeft)
         mergesRight' <- mapM (toNetlist mode) =<< lift2 (mapM fromRNode mergesRight)
         let thisNode = GV.Node ident label
-            termEdges = zipWith (\label' t -> GV.Edge ident t label') numbers ts'
-            mergesLeftEdges  = zipWith mkEdge (map ("ML" ++) numbers) mergesLeft'
-            mergesRightEdges = zipWith mkEdge (map ("MR" ++) numbers) mergesRight'
+            termEdges = zipWith (\label' t -> mkEdge ident t label') numbers ts'
+            mergesLeftEdges  = zipWith mkEdge' (map ("ML" ++) numbers) mergesLeft'
+            mergesRightEdges = zipWith mkEdge' (map ("MR" ++) numbers) mergesRight'
         tell ([thisNode], repEdge ++ termEdges ++ mergesLeftEdges ++ mergesRightEdges)
         return (ident, True)
-    mkEdge label' m = GV.Edge ident m label'
+    mkEdge' label' m = mkEdge ident m label'
     numbers = map (('#':) . show) [1 :: Int ..]
 
 toNetlist :: GV.Mode -> Node s -> ToNetlistT s ID
@@ -793,7 +796,7 @@ inferTypes mode logStages ops = do
                 let root = GV.Node rootID (show stage')
                 ns <- lift $ mapM fromRNode xs
                 (idents, netList) <- lift $ evalStateT (runWriterT $ mapM (toNetlist mode) ns) IM.empty
-                let edges = zipWith (GV.Edge rootID) idents $ map (('#':) . show) [1 :: Int ..]
+                let edges = zipWith (mkEdge rootID) idents $ map (('#':) . show) [1 :: Int ..]
                     graph = showGraph $ Graph "node" "" [] (root:fst netList) (edges ++ snd netList)
                 yield (stage', graph "")
         errorTerm prefix label x y = lift $ do
