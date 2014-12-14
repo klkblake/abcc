@@ -3,7 +3,9 @@ module Expansion where
 
 import Control.Applicative hiding (empty)
 import Control.Monad.State
+import Data.Foldable (foldMap)
 
+import qualified GraphViz as GV
 import qualified InterList as IL
 import Type
 import qualified Op as O
@@ -51,50 +53,52 @@ Notes on graph design:
  - Nodes that have in-degree = 0 are positioned at the bottom
 -}
 
-{-
-type Slot = Int
-type Dist = Int
-type Port = (ID, Slot)
-
-data LinkForward = LinkForward ID Slot
-
-data Link = Link ID Slot Dist Type
-
-data HalfLink = Link ID Slot Dist Type
--}
-
 type ID   = Int
 type Slot = Int
 type Dist = Int
 
 data Link = Link !Dist ID Slot Type
-          | StartLink ID Type
+          | StartLink Slot Type
           deriving Show
 
 instance Eq Link where
      Link _ ident slot _ == Link _ ident' slot' _ = ident == ident' && slot == slot'
-     StartLink ident _ == StartLink ident' _ = ident == ident'
+     StartLink slot _ == StartLink slot' _ = slot == slot'
      _ == _ = False
 
 data Node = Node ID UOp [Link]
           deriving Show
 
-data ParGroup = ParGroup [Node]
-              deriving Show
+type ParGroup = [Node]
 
-data Graph = Graph !ID [Link] [ParGroup] [Link]
+data Graph = Graph !ID [ParGroup] [Link]
            deriving Show
+
+toGraphViz :: Graph -> GV.Graph
+toGraphViz (Graph _ pgs lsE) =
+    let start = GV.Node 0 "START"
+        end = GV.Node 1 "END"
+        endEdges = zipWith endEdge [0 :: Int ..] lsE
+        (nodes, edges) = foldMap nodeNetlist $ concat pgs
+    in GV.Graph "node" "" [] (start:end:nodes) $ endEdges ++ edges
+  where
+    endEdge slot' (Link _ ident slot ty) = GV.Edge (ident + 2) 1 $ edgeLabel slot slot' ty
+    endEdge slot' (StartLink slot ty) = GV.Edge 0 1 $ edgeLabel slot slot' ty
+    nodeNetlist (Node ident uop ls) = ([GV.Node (ident + 2) $ show uop], zipWith (edge ident) [0 :: Int ..] ls)
+    edge ident' slot' (Link _ ident slot ty) = GV.Edge (ident + 2) (ident' + 2) $ edgeLabel slot slot' ty
+    edge ident' slot' (StartLink slot ty) = GV.Edge 0 (ident' + 2) $ edgeLabel slot slot' ty
+    edgeLabel slot slot' ty = show slot ++ " >> " ++ show ty ++ " >> " ++ show slot'
 
 empty :: [Type] -> Graph
 empty tys =
     let links = zipWith StartLink [0..] tys
-    in Graph (length tys) links [] links
+    in Graph 0 [] links
 
 linksE :: Graph -> [Link]
-linksE (Graph _ _ _ ls) = ls
+linksE (Graph _ _ ls) = ls
 
 swapE :: Link -> Link -> Graph -> Graph
-swapE a b (Graph nextID lsS pgs lsE) = Graph nextID lsS pgs $ swap lsE
+swapE a b (Graph nextID pgs lsE) = Graph nextID pgs $ swap lsE
   where
     swap (l:ls) | l == a = b:replace b a ls
                 | l == b = a:replace a b ls
@@ -108,11 +112,11 @@ swapEM :: Link -> Link -> State Graph ()
 swapEM a b = modify $ swapE a b
 
 snoc :: UOp -> [Link] -> [Type] -> Graph -> ([Link], Graph)
-snoc uop links outTys (Graph nextID lsS pgs lsE) =
+snoc uop links outTys (Graph nextID pgs lsE) =
     let oldLinks = map incDist $ filter (not . flip elem links) lsE
         newLinks = zipWith (Link 0 nextID) [0..] outTys
         n = Node nextID uop links
-    in (newLinks, Graph (nextID + 1) lsS (ParGroup [n]:pgs) $ oldLinks ++ newLinks)
+    in (newLinks, Graph (nextID + 1) ([n]:pgs) $ oldLinks ++ newLinks)
   where
     incDist (Link dist ident slot ty) = Link (dist + 1) ident slot ty
     incDist (StartLink ident ty) = StartLink ident ty

@@ -130,8 +130,10 @@ doTypeCheck flags opts = do
                     exitFailure
                 Right prog ->
                     if Expansion `elem` flags
-                        then let g = expand prog
-                             in print g
+                        then do
+                            let g = expand prog
+                            print g
+                            writeFile "expanded.dot" $ showGraph (toGraphViz g) ""
                         else printProg 0 prog
         Nothing   -> exitFailure
   where
