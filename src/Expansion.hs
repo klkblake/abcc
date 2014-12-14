@@ -13,7 +13,10 @@ import qualified Op as O
 
 data UOp = ConstBlock Graph
          | UOp FlatUOp
-         deriving Show
+
+instance Show UOp where
+    showsPrec p (ConstBlock g) = showParen (p > 10) $ showString "ConstBlock " .  showsPrec 11 g
+    showsPrec p (UOp uop) = showsPrec p uop
 
 data FlatUOp = CreatePair
              | DestroyPair
