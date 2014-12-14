@@ -9,7 +9,7 @@ module TypeInferencer
 -- the functional inverse of the Ackermann function. Be careful to preserve
 -- this time complexity!
 
-import Prelude hiding (read, all, mapM_, elem, concatMap)
+import Prelude hiding (read, all, mapM_, elem, concat, concatMap)
 
 import Control.Applicative
 import Control.Lens hiding (op, children)
@@ -17,8 +17,10 @@ import Control.Monad hiding (mapM_)
 import Control.Monad.ST
 import Control.Monad.State hiding (mapM_, modify)
 import qualified Control.Monad.State as State
+import Control.Monad.Writer hiding (Product, Sum, mapM_)
 import Data.Foldable
 import qualified Data.HashTable.ST.Basic as H
+import qualified Data.IntMap as IM
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.STRef
@@ -100,57 +102,106 @@ data Node s = Term { _nodeID   :: {-# UNPACK #-} !ID
 
 makeLenses ''Node
 
-instance GraphViz (Node s) where
-    type GVMonad (Node s) = ST s
+nodeLabel :: Node s -> String
+nodeLabel term@Term {} = show $ term^?!symbol
+nodeLabel var@Var {}   = (var^?!name) ++ " (" ++ show (var^?!varCount) ++ ")" ++ case var^?!varType of
+                                                                                     Structural    -> ""
+                                                                                     Substructural -> " kf"
+                                                                                     Void          -> " void"
 
-    toNode mode term@Term {} =
-        case mode of
-            Verbose -> toNode'
-            Compact -> case term^?!symbol of
-                           Attribs -> do
-                               [t, k, f] <- childList' term
-                               GV.Node _ label' labelledChildren' <- toNode mode t
-                               let (kl, kc) = case k of
-                                                  t'@Term {} | Attrib True  <- t'^?!symbol -> ("k", [])
-                                                             | Attrib False <- t'^?!symbol -> ("",  [])
-                                                  _ -> ("", [("k", toNode mode k)])
-                               let (fl, fc) = case f of
-                                                  t'@Term {} | Attrib True  <- t'^?!symbol -> ("f", [])
-                                                             | Attrib False <- t'^?!symbol -> ("",  [])
-                                                  _ -> ("", [("f", toNode mode f)])
-                               return $ GV.Node (term^.nodeID) (label' ++ " " ++ kl ++ fl) $ kc ++ fc ++ labelledChildren'
-                           _ -> toNode'
-      where
-        toNode' = GV.Node (term^.nodeID) (show $ term^?!symbol) <$> labelledChildren
-        labelledChildren = zip (map (('#':) . show) [1 :: Int ..]) . map (toNode mode) <$> childList' term
+type ToNetlistT s = WriterT ([GV.Node], [GV.Edge]) (StateT (IM.IntMap ID) (ST s))
 
-    toNode mode var@Var {} =
-        case mode of
-            Verbose -> toNode'
-            Compact -> do
-                case var^?!repVar of
-                    Just r -> toNode mode =<< fromRNode r
-                    Nothing -> toNode'
-      where
-        toNode' = GV.Node (var^.nodeID) <$> label <*> labelledChildren
-        label = do
-            return $ (show $ var^?!name) ++ " (" ++ show (var^?!varCount) ++ ")" ++ case var^?!varType of
-                                                                                        Structural    -> ""
-                                                                                        Substructural -> " kf"
-                                                                                        Void          -> " void"
-        labelledChildren = do
-            repEdge <- case var^?!repVar of
-                           Just r -> do
-                               r' <- fromRNode r
-                               return [("rep", toNode mode r')]
-                           Nothing -> return []
-            termEdges <- zip numbers <$> (mapM fromRNode' . V.toList . TL.toVector $ var^?!terms)
-            let (mergesLeft, mergesRight) = unzip . V.toList . TL.toVector $ var^?!merges
-            mergesLeftEdges  <- zip (map ("ML" ++) numbers) <$> mapM fromRNode' mergesLeft
-            mergesRightEdges <- zip (map ("MR" ++) numbers) <$> mapM fromRNode' mergesRight
-            return $ repEdge ++ termEdges ++ mergesLeftEdges ++ mergesRightEdges
-        numbers = map (('#':) . show) [1 :: Int ..]
-        fromRNode' rn = toNode mode <$> fromRNode rn
+lift2 :: ST s a -> ToNetlistT s a
+lift2 = lift . lift
+
+ifUnseen :: Node s -> ToNetlistT s (ID, Bool) -> ToNetlistT s (ID, Bool)
+ifUnseen node action = do
+    let ident = node^.nodeID
+    seen <- get
+    case IM.lookup ident seen of
+        Just ident' -> return (ident', False)
+        Nothing -> do
+            put $ IM.insert ident ident seen
+            action
+
+toNetlistLabel :: GV.Mode -> Node s -> String -> ToNetlistT s (ID, Bool)
+toNetlistLabel mode term@Term {} label = ifUnseen term $ do
+    case mode of
+        Verbose -> toNetlist'
+        Compact ->
+            case term^?!symbol of
+                Attribs -> do
+                    [t, k, f] <- lift2 $ childList' term
+                    rec State.modify $ IM.insert ident ident'
+                        (ident', new) <- toNetlistLabel mode t $ nodeLabel t ++ " " ++ kl ++ fl
+                        (kl, fl) <-
+                            if new
+                                then do
+                                    (kl', ke) <-
+                                        case k of
+                                            t'@Term {} | Attrib True  <- t'^?!symbol -> return ("k", [])
+                                                       | Attrib False <- t'^?!symbol -> return ("",  [])
+                                            _ -> do
+                                                ident'' <- toNetlist mode k
+                                                return ("", [GV.Edge ident' ident'' "k"])
+                                    (fl', fe) <-
+                                        case f of
+                                            t'@Term {} | Attrib True  <- t'^?!symbol -> return ("f", [])
+                                                       | Attrib False <- t'^?!symbol -> return ("",  [])
+                                            _ -> do
+                                                ident'' <- toNetlist mode f
+                                                return ("", [GV.Edge ident' ident'' "f"])
+                                    tell ([], ke ++ fe)
+                                    return (kl', fl')
+                                else return ("", "")
+                    return (ident', new)
+                _ -> toNetlist'
+  where
+    ident = term^.nodeID
+    toNetlist' = do
+        cs <- lift2 $ childList' term
+        subNodes <- mapM (toNetlist mode) cs
+        let thisNode = GV.Node ident label
+            thisEdges = zipWith (GV.Edge ident) subNodes (map (('#':) . show) [1 :: Int ..])
+        tell ([thisNode], thisEdges)
+        return (ident, True)
+
+toNetlistLabel mode var@Var {} label = ifUnseen var $ do
+    case mode of
+        Verbose -> toNetlist'
+        Compact -> do
+            case var^?!repVar of
+                Just r -> do
+                    rec State.modify $ IM.insert ident ident'
+                        n <- lift2 $ fromRNode r
+                        (ident', new) <- toNetlistLabel mode n $ nodeLabel n
+                    return (ident', new)
+                Nothing -> toNetlist'
+  where
+    ident = var^.nodeID
+    toNetlist' = do
+        repEdge <- case var^?!repVar of
+                       Just r -> do
+                           r' <- lift2 $ fromRNode r
+                           ident' <- toNetlist mode r'
+                           return [GV.Edge ident ident' "rep"]
+                       Nothing -> return []
+        ts <- lift2 $ mapM fromRNode . V.toList . TL.toVector $ var^?!terms
+        let (mergesLeft, mergesRight) = unzip . V.toList . TL.toVector $ var^?!merges
+        ts' <- mapM (toNetlist mode) ts
+        mergesLeft'  <- mapM (toNetlist mode) =<< lift2 (mapM fromRNode mergesLeft)
+        mergesRight' <- mapM (toNetlist mode) =<< lift2 (mapM fromRNode mergesRight)
+        let thisNode = GV.Node ident label
+            termEdges = zipWith (\label' t -> GV.Edge ident t label') numbers ts'
+            mergesLeftEdges  = zipWith mkEdge (map ("ML" ++) numbers) mergesLeft'
+            mergesRightEdges = zipWith mkEdge (map ("MR" ++) numbers) mergesRight'
+        tell ([thisNode], repEdge ++ termEdges ++ mergesLeftEdges ++ mergesRightEdges)
+        return (ident, True)
+    mkEdge label' m = GV.Edge ident m label'
+    numbers = map (('#':) . show) [1 :: Int ..]
+
+toNetlist :: GV.Mode -> Node s -> ToNetlistT s ID
+toNetlist mode node = fst <$> toNetlistLabel mode node (nodeLabel node)
 
 mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Node s)
 mkTerm unique sym cs = do
@@ -739,20 +790,22 @@ inferTypes mode logStages ops = do
     let writeGraph stage' xs =
             when (stage' `elem` logStages) $ do
                 rootID <- lift unique
-                let root = GV.Node rootID (show stage') . zip (map (('#':) . show) [1 :: Int ..]) $ map (toNode mode <=< fromRNode) xs
-                graph <- lift $ showGraph $ Graph "node" "" [] [root]
-                yield (stage', graph)
+                let root = GV.Node rootID (show stage')
+                ns <- lift $ mapM fromRNode xs
+                (idents, netList) <- lift $ evalStateT (runWriterT $ mapM (toNetlist mode) ns) IM.empty
+                let edges = zipWith (GV.Edge rootID) idents $ map (('#':) . show) [1 :: Int ..]
+                    graph = showGraph $ Graph "node" "" [] (root:fst netList) (edges ++ snd netList)
+                yield (stage', graph "")
         errorTerm prefix label x y = lift $ do
-            x' <- toNode mode x
-            y' <- toNode mode y
-            return $ Graph prefix label [] [x', y']
+            netList <- evalStateT (execWriterT $ mapM (toNetlist mode) [x, y]) IM.empty
+            return $ Graph prefix label [] (fst netList) (snd netList)
     res <- lift $ unifyAll unique ops
     case res of
         Left (i, a, b, x, y) -> do
             inner <- errorTerm "inner" "Could not unify:" x y
             outer <- errorTerm "outer" "While trying to unify:" a b
-            graph <- lift . showGraph $ Graph "" ("Unification failure at opcode index " ++ show i) [inner, outer] []
-            return $ Left (i, graph)
+            let graph = showGraph $ Graph "" ("Unification failure at opcode index " ++ show i) [inner, outer] [] []
+            return $ Left (i, graph "")
         Right tyOps -> do
             let tys = IL.outerList tyOps
             writeGraph TIUnified tys
