@@ -48,6 +48,39 @@ data FlatUOp = CreatePair
              | DebugPrintText
              deriving Show
 
+arity :: UOp -> (Int, Int)
+arity (ConstBlock _) = (0, 1)
+arity (UOp uop) = arity' uop
+  where
+    arity' CreatePair      = (2, 1)
+    arity' DestroyPair     = (1, 2)
+    arity' (ConstText _)   = (0, 1)
+    arity' Intro1          = (0, 1)
+    arity' Elim1           = (1, 0)
+    arity' Drop            = (1, 0)
+    arity' Copy            = (1, 2)
+    arity' Apply           = (2, 1)
+    arity' Compose         = (2, 1)
+    arity' Quote           = (1, 1)
+    arity' (ConstNumber _) = (0, 1)
+    arity' Add             = (2, 1)
+    arity' Multiply        = (2, 1)
+    arity' Inverse         = (1, 1)
+    arity' Negate          = (1, 1)
+    arity' Divmod          = (2, 2)
+    arity' CreateSum       = (2, 1)
+    arity' DestroySum      = (1, 2)
+    arity' Intro0          = (0, 1)
+    arity' Elim0           = (1, 0)
+    arity' CondApply       = (3, 2)
+    arity' Distrib         = (3, 4)
+    arity' Merge           = (2, 1)
+    arity' Assert          = (2, 1)
+    arity' Greater         = (2, 4)
+    arity' AssertEQ        = (2, 2)
+    arity' DebugPrintRaw   = (1, 0)
+    arity' DebugPrintText  = (1, 0)
+
 {- 
 Notes on graph design:
  - Implicit ordering on output links
@@ -89,9 +122,25 @@ toGraphViz (Graph _ pgs lsE) =
     mkEdge ident ident' label = GV.Edge ident ident' Nothing Nothing label
     endEdge slot' (Link _ ident slot ty) = mkEdge (ident + 2) 1 $ edgeLabel slot slot' ty
     endEdge slot' (StartLink slot ty) = mkEdge 0 1 $ edgeLabel slot slot' ty
-    nodeNetlist (Node ident uop ls) = ([GV.Node (ident + 2) $ show uop], zipWith (edge ident) [0 :: Int ..] ls)
-    edge ident' slot' (Link _ ident slot ty) = mkEdge (ident + 2) (ident' + 2) $ edgeLabel slot slot' ty
-    edge ident' slot' (StartLink slot ty) = mkEdge 0 (ident' + 2) $ edgeLabel slot slot' ty
+    nodeNetlist (Node ident uop ls) = ([GV.Node (ident + 2) $ show uop], zipWith (edge uop ident) [0 :: Int ..] ls)
+    edge uop ident2 slot2 link =
+        let port' = Just $ portForUOpE uop slot2
+            ident2' = ident2 + 2
+        in case link of
+               Link _ ident slot1 ty -> GV.Edge (ident + 2) ident2' Nothing port' $ show slot1 ++ " >> " ++ show ty
+               StartLink    slot1 ty -> GV.Edge 0           ident2' Nothing port' $ show slot1 ++ " >> " ++ show ty
+    portForUOpE uop slot = portForUOpE' (fst $ arity uop) slot
+    portForUOpE' 1 0 = GV.N
+    portForUOpE' 2 0 = GV.NW
+    portForUOpE' 2 1 = GV.NE
+    portForUOpE' 3 0 = GV.NW
+    portForUOpE' 3 1 = GV.N
+    portForUOpE' 3 2 = GV.NE
+    portForUOpE' 4 0 = GV.W
+    portForUOpE' 4 2 = GV.NW
+    portForUOpE' 4 3 = GV.N
+    portForUOpE' 4 4 = GV.NE
+    portForUOpE' n s = error $ "Invalid port " ++ show s ++ "/" ++ show n
     edgeLabel slot slot' ty = show slot ++ " >> " ++ show ty ++ " >> " ++ show slot'
 
 empty :: [Type] -> Graph

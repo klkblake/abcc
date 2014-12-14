@@ -3,6 +3,7 @@ module GraphViz
     ( ID
     , Mode (..)
     , Node (..)
+    , Port (..)
     , Edge (..)
     , Graph (..)
     , showGraph
