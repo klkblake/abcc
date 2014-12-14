@@ -4,6 +4,7 @@ module Expansion where
 import Control.Applicative hiding (empty)
 import Control.Monad.State
 import Data.Foldable (foldMap)
+import Data.List
 
 import qualified GraphViz as GV
 import qualified InterList as IL
@@ -113,11 +114,15 @@ swapEM a b = modify $ swapE a b
 
 snoc :: UOp -> [Link] -> [Type] -> Graph -> ([Link], Graph)
 snoc uop links outTys (Graph nextID pgs lsE) =
-    let oldLinks = map incDist $ filter (not . flip elem links) lsE
-        newLinks = zipWith (Link 0 nextID) [0..] outTys
+    let newLinks = zipWith (Link 0 nextID) [0..] outTys
+        lsE' = processLinks newLinks lsE links
         n = Node nextID uop links
-    in (newLinks, Graph (nextID + 1) ([n]:pgs) $ oldLinks ++ newLinks)
+    in (newLinks, Graph (nextID + 1) ([n]:pgs) lsE')
   where
+    processLinks new ls     []   = new ++ map incDist ls
+    processLinks new (l:ls) used | l `elem` used = processLinks new ls $ delete l used
+                                 | otherwise     = incDist l:processLinks new ls used
+    processLinks _   []     used = error $ "Finished processing links with " ++ show used ++ " left over"
     incDist (Link dist ident slot ty) = Link (dist + 1) ident slot ty
     incDist (StartLink ident ty) = StartLink ident ty
 
