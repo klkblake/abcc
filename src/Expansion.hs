@@ -5,6 +5,7 @@ import Control.Applicative hiding (empty)
 import Control.Monad.State
 import Data.Foldable (foldMap)
 import Data.List
+import Data.Maybe
 
 import qualified GraphViz as GV
 import qualified InterList as IL
@@ -92,9 +93,9 @@ Notes on graph design:
 
 type ID   = Int
 type Slot = Int
-type Dist = Int
+type Index = Int
 
-data Link = Link !Dist ID Slot Type
+data Link = Link !Index ID Slot Type
           | StartLink Slot Type
           deriving Show
 
@@ -108,11 +109,11 @@ data Node = Node ID UOp [Link]
 
 type ParGroup = [Node]
 
-data Graph = Graph !ID [ParGroup] [Link]
+data Graph = Graph !ID !Int [ParGroup] [Link]
            deriving Show
 
 toGraphViz :: Graph -> GV.Graph
-toGraphViz (Graph _ pgs lsE) =
+toGraphViz g@(Graph _ _ pgs lsE) =
     let start = GV.Node 0 "START"
         end = GV.Node 1 "END"
         endEdges = zipWith endEdge [0 :: Int ..] lsE
@@ -120,15 +121,33 @@ toGraphViz (Graph _ pgs lsE) =
     in GV.Graph "node" "" [] (start:end:nodes) $ endEdges ++ edges
   where
     mkEdge ident ident' label = GV.Edge ident ident' Nothing Nothing label
-    endEdge slot' (Link _ ident slot ty) = mkEdge (ident + 2) 1 $ edgeLabel slot slot' ty
-    endEdge slot' (StartLink slot ty) = mkEdge 0 1 $ edgeLabel slot slot' ty
+    endEdge slot2 link@(Link _ ident1 slot1 ty) =
+        let Node _ uop1 _ = fromJust $ followLink g link
+            port1 = Just $ portForUOpS uop1 slot1
+        in GV.Edge (ident1 + 2) 1 port1 Nothing $ show ty ++ "\\n" ++ show slot2
+    endEdge slot2 (StartLink slot1 ty) = mkEdge 0 1 $ show slot1 ++ "\\n" ++ show ty ++ "\\n" ++ show slot2
     nodeNetlist (Node ident uop ls) = ([GV.Node (ident + 2) $ show uop], zipWith (edge uop ident) [0 :: Int ..] ls)
-    edge uop ident2 slot2 link =
-        let port' = Just $ portForUOpE uop slot2
+    edge uop2 ident2 slot2 link =
+        let port2 = Just $ portForUOpE uop2 slot2
             ident2' = ident2 + 2
         in case link of
-               Link _ ident slot1 ty -> GV.Edge (ident + 2) ident2' Nothing port' $ show slot1 ++ " >> " ++ show ty
-               StartLink    slot1 ty -> GV.Edge 0           ident2' Nothing port' $ show slot1 ++ " >> " ++ show ty
+               Link _ ident slot1 ty ->
+                   let Node _ uop1 _ = fromJust $ followLink g link
+                       port1 = Just $ portForUOpS uop1 slot1
+                   in GV.Edge (ident + 2) ident2' port1 port2 $ show ty
+               StartLink slot1 ty -> GV.Edge 0 ident2' Nothing port2 $ show slot1 ++ "\\n" ++ show ty
+    portForUOpS uop slot = portForUOpS' (snd $ arity uop) slot
+    portForUOpS' 1 0 = GV.S
+    portForUOpS' 2 0 = GV.SW
+    portForUOpS' 2 1 = GV.SE
+    portForUOpS' 3 0 = GV.SW
+    portForUOpS' 3 1 = GV.S
+    portForUOpS' 3 2 = GV.SE
+    portForUOpS' 4 0 = GV.SW
+    portForUOpS' 4 1 = GV.S
+    portForUOpS' 4 2 = GV.SE
+    portForUOpS' 4 3 = GV.E
+    portForUOpS' n s = error $ "Invalid port " ++ show s ++ "/" ++ show n
     portForUOpE uop slot = portForUOpE' (fst $ arity uop) slot
     portForUOpE' 1 0 = GV.N
     portForUOpE' 2 0 = GV.NW
@@ -137,22 +156,27 @@ toGraphViz (Graph _ pgs lsE) =
     portForUOpE' 3 1 = GV.N
     portForUOpE' 3 2 = GV.NE
     portForUOpE' 4 0 = GV.W
-    portForUOpE' 4 2 = GV.NW
-    portForUOpE' 4 3 = GV.N
-    portForUOpE' 4 4 = GV.NE
+    portForUOpE' 4 1 = GV.NW
+    portForUOpE' 4 2 = GV.N
+    portForUOpE' 4 3 = GV.NE
     portForUOpE' n s = error $ "Invalid port " ++ show s ++ "/" ++ show n
-    edgeLabel slot slot' ty = show slot ++ " >> " ++ show ty ++ " >> " ++ show slot'
 
 empty :: [Type] -> Graph
 empty tys =
     let links = zipWith StartLink [0..] tys
-    in Graph 0 [] links
+    in Graph 0 0 [] links
 
 linksE :: Graph -> [Link]
-linksE (Graph _ _ ls) = ls
+linksE (Graph _ _ _ ls) = ls
+
+followLink :: Graph -> Link -> Maybe Node
+followLink (Graph _ npgs pgs _) (Link idx from _ _) = find nodeMatches $ pgs !! (npgs - idx - 1)
+  where
+    nodeMatches (Node ident _ _) = ident == from
+followLink _ (StartLink _ _) = Nothing
 
 swapE :: Link -> Link -> Graph -> Graph
-swapE a b (Graph nextID pgs lsE) = Graph nextID pgs $ swap lsE
+swapE a b (Graph nextID npgs pgs lsE) = Graph nextID npgs pgs $ swap lsE
   where
     swap (l:ls) | l == a = b:replace b a ls
                 | l == b = a:replace a b ls
@@ -166,18 +190,16 @@ swapEM :: Link -> Link -> State Graph ()
 swapEM a b = modify $ swapE a b
 
 snoc :: UOp -> [Link] -> [Type] -> Graph -> ([Link], Graph)
-snoc uop links outTys (Graph nextID pgs lsE) =
-    let newLinks = zipWith (Link 0 nextID) [0..] outTys
+snoc uop links outTys (Graph nextID npgs pgs lsE) =
+    let newLinks = zipWith (Link npgs nextID) [0..] outTys
         lsE' = processLinks newLinks lsE links
         n = Node nextID uop links
-    in (newLinks, Graph (nextID + 1) ([n]:pgs) lsE')
+    in (newLinks, Graph (nextID + 1) (npgs + 1) ([n]:pgs) lsE')
   where
-    processLinks new ls     []   = new ++ map incDist ls
+    processLinks new ls     []   = new ++ ls
     processLinks new (l:ls) used | l `elem` used = processLinks new ls $ delete l used
-                                 | otherwise     = incDist l:processLinks new ls used
+                                 | otherwise     = l:processLinks new ls used
     processLinks _   []     used = error $ "Finished processing links with " ++ show used ++ " left over"
-    incDist (Link dist ident slot ty) = Link (dist + 1) ident slot ty
-    incDist (StartLink ident ty) = StartLink ident ty
 
 snocM :: UOp -> [Link] -> [Type] -> State Graph [Link]
 snocM uop links outTys = state $ snoc uop links outTys
@@ -235,13 +257,13 @@ addFlatOp O.Intro1 ty (_ :*: t1) = do
     _ <- endList 1 ty
     snocFM_ Intro1 [] [t1]
 
-addFlatOp O.Elim1 ty ta = do
+addFlatOp O.Elim1 ty _ = do
     [_, b] <- endList 2 ty
-    snocFM_ Elim1 [b] [ta]
+    snocFM_ Elim1 [b] []
 
-addFlatOp O.Drop ty te = do
+addFlatOp O.Drop ty _ = do
     [a, _] <- endList 2 ty
-    snocFM_ Drop [a] [te]
+    snocFM_ Drop [a] []
 
 addFlatOp O.Copy ty (tx1 :*: (tx2 :*: _)) = do
     [a, _] <- endList 2 ty
