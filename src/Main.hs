@@ -133,7 +133,7 @@ doTypeCheck flags opts = do
                         then do
                             let g = expand prog
                             print g
-                            writeFile "expanded.dot" $ showGraph (toGraphViz g) ""
+                            writeFile "expanded.dot" $ showGraph (toGraphViz "node" g) ""
                         else printProg 0 prog
         Nothing   -> exitFailure
   where

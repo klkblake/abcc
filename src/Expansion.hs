@@ -15,10 +15,7 @@ import qualified Op as O
 
 data UOp = ConstBlock Graph
          | UOp FlatUOp
-
-instance Show UOp where
-    showsPrec p (ConstBlock g) = showParen (p > 10) $ showString "ConstBlock " .  showsPrec 11 g
-    showsPrec p (UOp uop) = showsPrec p uop
+         deriving Show
 
 data FlatUOp = CreatePair
              | DestroyPair
@@ -114,13 +111,13 @@ type ParGroup = [Node]
 data Graph = Graph !ID !Int [ParGroup] [Link]
            deriving Show
 
-toGraphViz :: Graph -> GV.Graph
-toGraphViz g@(Graph _ _ pgs lsE) =
+toGraphViz :: String -> Graph -> GV.Graph
+toGraphViz prefix g@(Graph _ _ pgs lsE) =
     let start = GV.Node 0 "START"
         end = GV.Node 1 "END"
         endEdges = zipWith endEdge [0 :: Int ..] lsE
-        (nodes, edges) = foldMap nodeNetlist $ concat pgs
-    in GV.Graph "node" "" [] (start:end:nodes) $ endEdges ++ edges
+        (graphs, nodes, edges) = foldMap nodeNetlist $ concat pgs
+    in GV.Graph prefix "" graphs (start:end:nodes) $ endEdges ++ edges
   where
     mkEdge ident ident' label = GV.Edge ident ident' Nothing Nothing label
     endEdge slot2 link@(Link _ ident1 slot1 ty) =
@@ -128,7 +125,17 @@ toGraphViz g@(Graph _ _ pgs lsE) =
             port1 = Just $ portForUOpS uop1 slot1
         in GV.Edge (ident1 + 2) 1 port1 Nothing $ show ty ++ "\\n" ++ show slot2
     endEdge slot2 (StartLink slot1 ty) = mkEdge 0 1 $ show slot1 ++ "\\n" ++ show ty ++ "\\n" ++ show slot2
-    nodeNetlist (Node ident uop ls) = ([GV.Node (ident + 2) $ show uop], zipWith (edge uop ident) [0 :: Int ..] ls)
+    nodeNetlist (Node ident (ConstBlock g2) []) =
+        ( [toGraphViz (prefix ++ "_block_" ++ show ident ++ "_") g2]
+        , [GV.Node (ident + 2) $ "ConstBlock " ++ show ident]
+        , []
+        )
+    nodeNetlist (Node ident (UOp uop) ls) =
+        ( []
+        , [GV.Node (ident + 2) $ show uop]
+        , zipWith (edge (UOp uop) ident) [0 :: Int ..] ls
+        )
+    nodeNetlist (Node ident (ConstBlock _) ls) = error $ "ConstBlock node " ++ show ident ++ " has links: " ++ show ls
     edge uop2 ident2 slot2 link =
         let port2 = Just $ portForUOpE uop2 slot2
             ident2' = ident2 + 2
@@ -364,7 +371,11 @@ addFlatOp O.Divmod   ty (tr :*: (tq :*: _)) = addSimple ty 3 Divmod   [tr, tq]
 addFlatOp op tyS tyE = error $ show op ++ ", " ++ show tyS ++ ", " ++ show tyE
 
 addOp :: O.TyOp -> Type -> Type -> State Graph ()
-addOp (O.Op op) = addFlatOp op
+addOp (O.LitBlock block) ty (tb :*: _) = do
+    _ <- endList 1 ty
+    snocM_ (ConstBlock $ expand block) [] [tb]
+addOp (O.Op op) tyS tyE = addFlatOp op tyS tyE
+addOp (O.LitBlock _) _ ty = error $ "LitBlock with incorrect type " ++ show ty
 
 expand :: IL.InterList Type O.TyOp -> Graph
 expand tyOps = execState addAll $ empty [head $ IL.outerList tyOps]
