@@ -183,12 +183,13 @@ followLink (Graph _ npgs pgs _) link@(Link idx from slot ty) = findNode idx $ dr
 followLink _ (StartLink _ _) = Nothing
 
 deleteNode :: Link -> Graph -> Graph
-deleteNode (Link idx ident _ _) (Graph nextID npgs pgs lsE) =
+deleteNode link@(Link idx ident _ _) g@(Graph nextID npgs pgs lsE) =
     let (doDec, pgs') = go (npgs - idx - 1) pgs
     in if doDec
            then Graph nextID (npgs - 1) pgs' $ map decLink lsE
            else Graph nextID npgs pgs' lsE
   where
+    go (-1) pgs' = go 0 pgs'
     go 0 ([Node ident' _ _]:pgs') | ident' == ident = (True, pgs')
     go 0 (pg:pgs') | Just _ <- find (nodeMatches ident) pg = (False, filter (not . nodeMatches ident) pg:pgs')
     go i (pg:pgs')  =
@@ -196,7 +197,7 @@ deleteNode (Link idx ident _ _) (Graph nextID npgs pgs lsE) =
                                  0 -> go i pgs'
                                  _ -> go (i - 1) pgs'
         in (doDec, if doDec then map dec pg:pgs'' else pg:pgs'')
-    go _ [] = error "Invalid link or graph"
+    go _ [] = error $ "Invalid link or graph: " ++ show link ++ ", " ++ show g
     dec (Node ident' uop links) = Node ident' uop $ map decLink links
     decLink (Link idx' ident' slot ty) | idx' > idx = Link (idx' - 1) ident' slot ty
     decLink l = l
