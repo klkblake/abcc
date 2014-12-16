@@ -242,23 +242,38 @@ singleCancel = Map.fromList $ [ (DestroyPair, CreatePair)
                               , (Elim1, Intro1)
                               ]
 
+functions1 :: Map.Map FlatUOp (Rational -> Rational)
+functions1 = Map.fromList $ [ (Inverse, recip)
+                            , (Negate,  negate)
+                            ]
+
+functions2 :: Map.Map FlatUOp (Rational -> Rational -> Rational)
+functions2 = Map.fromList $ [ (Add,      (+))
+                            , (Multiply, (*))
+                            ]
+
 snoc' :: UOp -> [Link] -> [Type] -> Graph -> ([Link], Graph)
-snoc' (UOp uop) [link] outTys g@(Graph nextID npgs pgs lsE) | Just uop2 <- Map.lookup uop singleCancel =
-    case followLink g link of
-        Just (Node _ (UOp uop2') links, _) | uop2' == uop2 ->
-            (links, deleteNode link . Graph nextID npgs pgs $ splice link links lsE)
-        Just (_, link') -> snoc (UOp uop) [link'] outTys g
-        Nothing -> snoc (UOp uop) [link] outTys g
-snoc' (UOp CreatePair) [linkA, linkB] outTys g@(Graph nextID npgs pgs lsE) =
-    case followLink g linkA of
-        Just (Node ident (UOp DestroyPair) links, _) ->
-            case followLink g linkB of
-                Just (Node ident' _ _, _) | ident == ident' ->
-                    (links, deleteNode linkA . Graph nextID npgs pgs . delete linkA $ splice linkB links lsE)
-                Just (_, linkB') -> snoc (UOp CreatePair) [linkA, linkB'] outTys g
-                Nothing -> snoc (UOp CreatePair) [linkA, linkB] outTys g
-        Just (_, linkA') -> snoc (UOp CreatePair) [linkA', linkB] outTys g
-        Nothing -> snoc (UOp CreatePair) [linkA, linkB] outTys g
+snoc' (UOp uop) [link] _ g@(Graph nextID npgs pgs lsE)
+    | Just uop2 <- Map.lookup uop singleCancel
+    , Just (Node _ (UOp uop2') links, _) <- followLink g link
+    , uop2' == uop2 =
+        (links, deleteNode link . Graph nextID npgs pgs $ splice link links lsE)
+snoc' (UOp CreatePair) [linkA, linkB] _ g@(Graph nextID npgs pgs lsE)
+    | Just (Node ident (UOp DestroyPair) links, _) <- followLink g linkA
+    , Just (Node ident' _ _, _) <- followLink g linkB
+    , ident == ident' =
+        (links, deleteNode linkA . Graph nextID npgs pgs . delete linkA $ splice linkB links lsE)
+snoc' (UOp uop) [link] outTys g@(Graph nextID npgs pgs lsE)
+    | Just f <- Map.lookup uop functions1
+    , Just (Node _ (UOp (ConstNumber a)) _, _) <- followLink g link =
+        let g' = deleteNode link . Graph nextID npgs pgs $ delete link lsE
+        in snoc (UOp . ConstNumber $ f a) [] outTys g'
+snoc' (UOp uop) [linkA, linkB] outTys g@(Graph nextID npgs pgs lsE)
+    | Just f <- Map.lookup uop functions2
+    , Just (Node _ (UOp (ConstNumber a)) _, _) <- followLink g linkA
+    , Just (Node _ (UOp (ConstNumber b)) _, _) <- followLink g linkB =
+        let g' = deleteNode linkA . deleteNode linkB . Graph nextID npgs pgs . delete linkA $ delete linkB lsE
+        in snoc (UOp . ConstNumber $ f a b) [] outTys g'
 snoc' uop links outTys g = snoc uop links outTys g
 
 snocM :: UOp -> [Link] -> [Type] -> State Graph [Link]
