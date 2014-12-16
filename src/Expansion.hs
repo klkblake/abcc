@@ -220,7 +220,9 @@ swapEM a b = modify $ swapE a b
 snoc :: UOp -> [Link] -> [Type] -> Graph -> ([Link], Graph)
 snoc uop links outTys (Graph nextID npgs pgs lsE) =
     let newLinks = zipWith (Link npgs nextID) [0..] outTys
-        lsE' = processLinks newLinks lsE links
+        lsE' = case links of
+                   [] -> lsE ++ newLinks
+                   _  -> processLinks newLinks lsE links
         n = Node nextID uop links
     in (newLinks, Graph (nextID + 1) (npgs + 1) ([n]:pgs) lsE')
   where
