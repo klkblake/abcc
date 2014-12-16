@@ -5,6 +5,7 @@ import Control.Applicative hiding (empty)
 import Control.Monad.State
 import Data.Foldable (foldMap)
 import Data.List
+import qualified Data.Map as Map
 import Data.Maybe
 
 import qualified GraphViz as GV
@@ -47,7 +48,7 @@ data FlatUOp = CreatePair
              | AssertEQ
              | DebugPrintRaw
              | DebugPrintText
-             deriving Show
+             deriving (Show, Eq, Ord)
 
 arity :: UOp -> (Int, Int)
 arity (ConstBlock _) = (0, 1)
@@ -87,8 +88,8 @@ Notes on graph design:
  - Implicit ordering on output links
  - Nodes that have in-degree > 1 have output links positioned at
    location of lowest input link (measured on far side). This should
-   hopefully remove the need for swapping output links.
- - Nodes that have in-degree = 0 are positioned at the bottom
+   hopefully reduce the need for swapping output links.
+ - Nodes that have in-degree = 0 are positioned at the top
 -}
 
 type ID   = Int
@@ -220,9 +221,7 @@ swapEM a b = modify $ swapE a b
 snoc :: UOp -> [Link] -> [Type] -> Graph -> ([Link], Graph)
 snoc uop links outTys (Graph nextID npgs pgs lsE) =
     let newLinks = zipWith (Link npgs nextID) [0..] outTys
-        lsE' = case links of
-                   [] -> lsE ++ newLinks
-                   _  -> processLinks newLinks lsE links
+        lsE' = processLinks newLinks lsE links
         n = Node nextID uop links
     in (newLinks, Graph (nextID + 1) (npgs + 1) ([n]:pgs) lsE')
   where
@@ -237,13 +236,19 @@ splice x ys = concatMap go
     go x' | x' == x = ys
           | otherwise = [x']
 
+-- These are in reverse order
+singleCancel :: Map.Map FlatUOp FlatUOp
+singleCancel = Map.fromList $ [ (DestroyPair, CreatePair)
+                              , (Elim1, Intro1)
+                              ]
+
 snoc' :: UOp -> [Link] -> [Type] -> Graph -> ([Link], Graph)
-snoc' (UOp DestroyPair) [link] outTys g@(Graph nextID npgs pgs lsE) =
+snoc' (UOp uop) [link] outTys g@(Graph nextID npgs pgs lsE) | Just uop2 <- Map.lookup uop singleCancel =
     case followLink g link of
-        Just (Node _ (UOp CreatePair) links, _) ->
+        Just (Node _ (UOp uop2') links, _) | uop2' == uop2 ->
             (links, deleteNode link . Graph nextID npgs pgs $ splice link links lsE)
-        Just (_, link') -> snoc (UOp DestroyPair) [link'] outTys g
-        Nothing -> snoc (UOp DestroyPair) [link] outTys g
+        Just (_, link') -> snoc (UOp uop) [link'] outTys g
+        Nothing -> snoc (UOp uop) [link] outTys g
 snoc' (UOp CreatePair) [linkA, linkB] outTys g@(Graph nextID npgs pgs lsE) =
     case followLink g linkA of
         Just (Node ident (UOp DestroyPair) links, _) ->
@@ -291,14 +296,15 @@ endList n ty = do
         (a:) <$> goGT (n' - 1) tb b
     goGT _ ty' _ = error $ "goGT: Expected pair, got " ++ show ty'
 
-addFlatOp :: O.FlatOp -> Type -> Type -> State Graph ()
-addFlatOp O.AssocL ty (tab :*: _) = do
-    [a, b, _] <- endList 3 ty
-    snocFM_ CreatePair [a, b] [tab]
+addSimple :: Type -> Int -> FlatUOp -> [Type] -> State Graph ()
+addSimple ty n uop outTys = do
+    input <- endList n ty
+    snocFM_ uop (init input) outTys
 
-addFlatOp O.AssocR ty (ta :*: (tb :*: _)) = do
-    [a, _] <- endList 2 ty
-    snocFM_ DestroyPair [a] [ta, tb]
+addFlatOp :: O.FlatOp -> Type -> Type -> State Graph ()
+addFlatOp O.AssocL ty (tab :*: _) = addSimple ty 3 CreatePair [tab]
+
+addFlatOp O.AssocR ty (ta :*: (tb :*: _)) = addSimple ty 2 DestroyPair [ta, tb]
 
 addFlatOp O.Swap ty (_ :*: (_ :*: _)) = do
     [a, b, _] <- endList 3 ty
@@ -309,20 +315,36 @@ addFlatOp O.SwapD ty (_ :*: (_ :*: (_ :*: _))) = do
     swapEM b c
 
 addFlatOp O.Intro1 ty (_ :*: t1) = do
-    _ <- endList 1 ty
-    snocFM_ Intro1 [] [t1]
+    [a] <- endList 1 ty
+    [c1] <- snocFM Intro1 [] [t1]
+    swapEM a c1
 
 addFlatOp O.Elim1 ty _ = do
     [_, b] <- endList 2 ty
     snocFM_ Elim1 [b] []
 
-addFlatOp O.Drop ty _ = do
-    [a, _] <- endList 2 ty
-    snocFM_ Drop [a] []
+addFlatOp O.Drop ty _ = addSimple ty 2 Drop []
+addFlatOp O.Copy ty (tx1 :*: (tx2 :*: _)) = addSimple ty 2 Copy [tx1, tx2]
 
-addFlatOp O.Copy ty (tx1 :*: (tx2 :*: _)) = do
-    [a, _] <- endList 2 ty
-    snocFM_ Copy [a] [tx1, tx2]
+addFlatOp O.Apply    ty (tx'  :*: _) = addSimple ty 3 Apply   [tx']
+addFlatOp O.Compose  ty (txz  :*: _) = addSimple ty 3 Compose [txz]
+addFlatOp O.Quote    ty (tsxs :*: _) = addSimple ty 2 Quote   [tsxs]
+addFlatOp O.Relevant _ _ = return ()
+addFlatOp O.Affine   _ _ = return ()
+
+addFlatOp O.IntroNum  ty (tn :*: _) = addSimple ty 1 (ConstNumber 0)  [tn]
+addFlatOp (O.Digit d) ty (tn :*: _) = do
+    [n, _] <- endList 2 ty
+    [c10] <- snocFM (ConstNumber 10) [] [tn]
+    [n10] <- snocFM Multiply [n, c10] [tn]
+    [cd] <- snocFM (ConstNumber $ fromIntegral d) [] [tn]
+    snocFM_ Add [n10, cd] [tn]
+
+addFlatOp O.Add      ty (tn :*: _)          = addSimple ty 3 Add      [tn]
+addFlatOp O.Multiply ty (tn :*: _)          = addSimple ty 3 Multiply [tn]
+addFlatOp O.Inverse  ty (tn :*: _)          = addSimple ty 2 Inverse  [tn]
+addFlatOp O.Negate   ty (tn :*: _)          = addSimple ty 2 Negate   [tn]
+addFlatOp O.Divmod   ty (tr :*: (tq :*: _)) = addSimple ty 3 Divmod   [tr, tq]
 
 addFlatOp op tyS tyE = error $ show op ++ ", " ++ show tyS ++ ", " ++ show tyE
 
