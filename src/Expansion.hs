@@ -231,15 +231,29 @@ snoc uop links outTys (Graph nextID npgs pgs lsE) =
                                  | otherwise     = l:processLinks new ls used
     processLinks _   []     used = error $ "Finished processing links with " ++ show used ++ " left over"
 
+splice :: Eq a => a -> [a] -> [a] -> [a]
+splice x ys = concatMap go
+  where
+    go x' | x' == x = ys
+          | otherwise = [x']
+
 snoc' :: UOp -> [Link] -> [Type] -> Graph -> ([Link], Graph)
 snoc' (UOp DestroyPair) [link] outTys g@(Graph nextID npgs pgs lsE) =
     case followLink g link of
-        Just (Node _ (UOp CreatePair) links, _) -> (links, deleteNode link . Graph nextID npgs pgs $ concatMap (splice links) lsE)
+        Just (Node _ (UOp CreatePair) links, _) ->
+            (links, deleteNode link . Graph nextID npgs pgs $ splice link links lsE)
         Just (_, link') -> snoc (UOp DestroyPair) [link'] outTys g
         Nothing -> snoc (UOp DestroyPair) [link] outTys g
-  where
-    splice links l | l == link = links
-                   | otherwise = [l]
+snoc' (UOp CreatePair) [linkA, linkB] outTys g@(Graph nextID npgs pgs lsE) =
+    case followLink g linkA of
+        Just (Node ident (UOp DestroyPair) links, _) ->
+            case followLink g linkB of
+                Just (Node ident' _ _, _) | ident == ident' ->
+                    (links, deleteNode linkA . Graph nextID npgs pgs . delete linkA $ splice linkB links lsE)
+                Just (_, linkB') -> snoc (UOp CreatePair) [linkA, linkB'] outTys g
+                Nothing -> snoc (UOp CreatePair) [linkA, linkB] outTys g
+        Just (_, linkA') -> snoc (UOp CreatePair) [linkA', linkB] outTys g
+        Nothing -> snoc (UOp CreatePair) [linkA, linkB] outTys g
 snoc' uop links outTys g = snoc uop links outTys g
 
 snocM :: UOp -> [Link] -> [Type] -> State Graph [Link]
