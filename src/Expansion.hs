@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE PatternSynonyms, BangPatterns #-}
 module Expansion where
 
 import Control.Applicative hiding (empty)
@@ -95,6 +95,7 @@ type ID   = Int
 type Slot = Int
 type Index = Int
 
+-- Index is a hint. The node may be at a lower (but not higher!) index
 data Link = Link !Index ID Slot Type
           | StartLink Slot Type
           deriving Show
@@ -122,7 +123,7 @@ toGraphViz g@(Graph _ _ pgs lsE) =
   where
     mkEdge ident ident' label = GV.Edge ident ident' Nothing Nothing label
     endEdge slot2 link@(Link _ ident1 slot1 ty) =
-        let Node _ uop1 _ = fromJust $ followLink g link
+        let Node _ uop1 _ = fst . fromJust $ followLink g link
             port1 = Just $ portForUOpS uop1 slot1
         in GV.Edge (ident1 + 2) 1 port1 Nothing $ show ty ++ "\\n" ++ show slot2
     endEdge slot2 (StartLink slot1 ty) = mkEdge 0 1 $ show slot1 ++ "\\n" ++ show ty ++ "\\n" ++ show slot2
@@ -132,7 +133,7 @@ toGraphViz g@(Graph _ _ pgs lsE) =
             ident2' = ident2 + 2
         in case link of
                Link _ ident slot1 ty ->
-                   let Node _ uop1 _ = fromJust $ followLink g link
+                   let Node _ uop1 _ = fst . fromJust $ followLink g link
                        port1 = Just $ portForUOpS uop1 slot1
                    in GV.Edge (ident + 2) ident2' port1 port2 $ show ty
                StartLink slot1 ty -> GV.Edge 0 ident2' Nothing port2 $ show slot1 ++ "\\n" ++ show ty
@@ -169,11 +170,37 @@ empty tys =
 linksE :: Graph -> [Link]
 linksE (Graph _ _ _ ls) = ls
 
-followLink :: Graph -> Link -> Maybe Node
-followLink (Graph _ npgs pgs _) (Link idx from _ _) = find nodeMatches $ pgs !! (npgs - idx - 1)
+nodeMatches :: ID -> Node -> Bool
+nodeMatches ident (Node ident' _ _) = ident == ident'
+
+followLink :: Graph -> Link -> Maybe (Node, Link)
+followLink (Graph _ npgs pgs _) link@(Link idx from slot ty) = findNode idx $ drop (npgs - idx - 1) pgs
   where
-    nodeMatches (Node ident _ _) = ident == from
+    findNode !idx' (pg:pgs') = case find (nodeMatches from) pg of
+                                   Just n  -> Just (n, Link idx' from slot ty)
+                                   Nothing -> findNode (idx' - 1) pgs'
+    findNode _ [] = error $ "Invalid link " ++ show link
 followLink _ (StartLink _ _) = Nothing
+
+deleteNode :: Link -> Graph -> Graph
+deleteNode (Link idx ident _ _) (Graph nextID npgs pgs lsE) =
+    let (doDec, pgs') = go (npgs - idx - 1) pgs
+    in if doDec
+           then Graph nextID (npgs - 1) pgs' $ map decLink lsE
+           else Graph nextID npgs pgs' lsE
+  where
+    go 0 ([Node ident' _ _]:pgs') | ident' == ident = (True, pgs')
+    go 0 (pg:pgs') | Just _ <- find (nodeMatches ident) pg = (False, filter (not . nodeMatches ident) pg:pgs')
+    go i (pg:pgs')  =
+        let (doDec, pgs'') = case i of
+                                 0 -> go i pgs'
+                                 _ -> go (i - 1) pgs'
+        in (doDec, if doDec then map dec pg:pgs'' else pg:pgs'')
+    go _ [] = error "Invalid link or graph"
+    dec (Node ident' uop links) = Node ident' uop $ map decLink links
+    decLink (Link idx' ident' slot ty) | idx' > idx = Link (idx' - 1) ident' slot ty
+    decLink l = l
+deleteNode (StartLink _ _) g = g
 
 swapE :: Link -> Link -> Graph -> Graph
 swapE a b (Graph nextID npgs pgs lsE) = Graph nextID npgs pgs $ swap lsE
@@ -201,8 +228,19 @@ snoc uop links outTys (Graph nextID npgs pgs lsE) =
                                  | otherwise     = l:processLinks new ls used
     processLinks _   []     used = error $ "Finished processing links with " ++ show used ++ " left over"
 
+snoc' :: UOp -> [Link] -> [Type] -> Graph -> ([Link], Graph)
+snoc' (UOp DestroyPair) [link] outTys g@(Graph nextID npgs pgs lsE) =
+    case followLink g link of
+        Just (Node _ (UOp CreatePair) links, _) -> (links, deleteNode link . Graph nextID npgs pgs $ concatMap (splice links) lsE)
+        Just (_, link') -> snoc (UOp DestroyPair) [link'] outTys g
+        Nothing -> snoc (UOp DestroyPair) [link] outTys g
+  where
+    splice links l | l == link = links
+                   | otherwise = [l]
+snoc' uop links outTys g = snoc uop links outTys g
+
 snocM :: UOp -> [Link] -> [Type] -> State Graph [Link]
-snocM uop links outTys = state $ snoc uop links outTys
+snocM uop links outTys = state $ snoc' uop links outTys
 
 snocM_ :: UOp -> [Link] -> [Type] -> State Graph ()
 snocM_ uop links outTys = void $ snocM uop links outTys
