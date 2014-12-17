@@ -17,9 +17,9 @@ data UOp = ConstBlock Graph
          | UOp FlatUOp
          deriving Show
 
-data FlatUOp = CreatePair
+data FlatUOp = ConstList [Rational]
+             | CreatePair
              | DestroyPair
-             | ConstText String
              | Intro1
              | Elim1
              | Drop
@@ -53,9 +53,9 @@ arity :: UOp -> (Int, Int)
 arity (ConstBlock _) = (0, 1)
 arity (UOp uop) = arity' uop
   where
+    arity' (ConstList _)   = (0, 1)
     arity' CreatePair      = (2, 1)
     arity' DestroyPair     = (1, 2)
-    arity' (ConstText _)   = (0, 1)
     arity' Intro1          = (0, 1)
     arity' Elim1           = (1, 0)
     arity' Drop            = (1, 0)
@@ -363,8 +363,9 @@ createSum2_ a b c   ty = void $ createSum2 a b c   ty
 createSum3_ a b c d ty = void $ createSum3 a b c d ty
 
 addFlatOp :: O.FlatOp -> Type -> Type -> State Graph ()
-addFlatOp O.AssocL ty (tab :*: _) = addSimple ty 3 CreatePair [tab]
+addFlatOp (O.LitText text) ty (tt :*: _) = addSimple ty 1 (ConstList $ map (fromIntegral . fromEnum) text) [tt]
 
+addFlatOp O.AssocL ty (tab :*: _)         = addSimple ty 3 CreatePair  [tab]
 addFlatOp O.AssocR ty (ta :*: (tb :*: _)) = addSimple ty 2 DestroyPair [ta, tb]
 
 addFlatOp O.Swap ty (_ :*: (_ :*: _)) = do
