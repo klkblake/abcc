@@ -76,7 +76,7 @@ showsRawType _ (Block a b) kf = do
     b' <- showsType 0 b
     return $ showChar '[' . a' . showString " -> " . b' . showChar ']' . kf "" ""
 
-showsRawType _ Num  _ = return $ showChar 'N'
+showsRawType _ Num  _ = return $ showString "N(?)"
 showsRawType _ Unit _ = return $ showChar '1'
 showsRawType _ (Void (Type _ _ _ (Opaque _))) kf = return $ showChar '0' . kf "" ""
 
