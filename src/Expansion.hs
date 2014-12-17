@@ -42,6 +42,8 @@ data FlatUOp = CreatePair
              | Merge
              | Assert
              | Greater
+             | Seal String
+             | Unseal String
              | AssertEQ
              | DebugPrintRaw
              | DebugPrintText
@@ -71,14 +73,16 @@ arity (UOp uop) = arity' uop
     arity' DestroySum      = (1, 2)
     arity' Intro0          = (0, 1)
     arity' Elim0           = (1, 0)
-    arity' CondApply       = (3, 2)
-    arity' Distrib         = (3, 4)
+    arity' CondApply       = (2, 1)
+    arity' Distrib         = (1, 2)
     arity' Merge           = (2, 1)
     arity' Assert          = (2, 1)
     arity' Greater         = (2, 4)
+    arity' (Seal _)        = (1, 1)
+    arity' (Unseal _)      = (1, 1)
     arity' AssertEQ        = (2, 2)
-    arity' DebugPrintRaw   = (1, 0)
-    arity' DebugPrintText  = (1, 0)
+    arity' DebugPrintRaw   = (1, 1)
+    arity' DebugPrintText  = (1, 1)
 
 {- 
 Notes on graph design:
@@ -434,6 +438,56 @@ addFlatOp O.Elim0 ty@((_ :+: t0) :*: _) (ta :*: _) = do
     [a0, _] <- endList 2 ty
     [_, c0] <- snocFM DestroySum [a0] [ta, t0]
     snocFM_ Elim0 [c0] []
+
+addFlatOp O.CondApply tyS@(_ :*: ((tx :+: ty) :*: _)) (tx'y@(tx' :+: _) :*: _) = do
+    [xx', xy, _] <- endList 3 tyS
+    [x, y] <- snocFM DestroySum [xy]     [tx, ty]
+    [x']   <- snocFM CondApply  [xx', x] [tx']
+    snocFM_ CreateSum [x', y] [tx'y]
+
+addFlatOp O.Distrib ty (tabac@(tab@(ta1 :*: tb) :+: tac@(ta2 :*: tc)) :*: _) = do
+    [a, bc, _] <- endList 3 ty
+    [b, c]   <- snocFM DestroySum [bc] [tb, tc]
+    [a1, a2] <- snocFM Distrib    [a]  [ta1, ta2]
+    [ab] <- snocFM CreatePair [a1, b] [tab]
+    [ac] <- snocFM CreatePair [a2, c] [tac]
+    snocFM_ CreateSum [ab, ac] [tabac]
+
+addFlatOp O.Factor ty@((tab@(ta :*: tb) :+: tcd@(tc :*: td)) :*: _) (tac :*: (tbd :*: _)) = do
+    [abcd, _] <- endList 2 ty
+    [ab, cd] <- snocFM DestroySum  [abcd] [tab, tcd]
+    [a, b]   <- snocFM DestroyPair [ab]   [ta, tb]
+    [c, d]   <- snocFM DestroyPair [cd]   [tc, td]
+    snocFM_ CreateSum [a, c] [tac]
+    snocFM_ CreateSum [b, d] [tbd]
+
+addFlatOp O.Merge ty@((ta :+: ta') :*: _) (tb :*: _) = do
+    [aa', _] <- endList 2 ty
+    [a, a'] <- snocFM DestroySum [aa'] [ta, ta']
+    snocFM_ Merge [a, a'] [tb]
+
+addFlatOp O.Assert ty@((ta :+: tb) :*: _) _ = do
+    [ab, _] <- endList 2 ty
+    [a, b] <- snocFM DestroySum [ab] [ta, tb]
+    snocFM_ Assert [a, b] [tb]
+
+addFlatOp O.Greater ty (tyxxy@(tyx@(ty1 :*: tx1) :+: txy@(tx2 :*: ty2)) :*: _) = do
+    [x, y, _] <- endList 3 ty
+    [y1, x1, x2, y2] <- snocFM Greater [x, y]  [ty1, tx1, tx2, ty2]
+    [yx] <- snocFM CreatePair [y1, x1] [tyx]
+    [xy] <- snocFM CreatePair [x2, y2] [txy]
+    snocFM_ CreateSum [yx, xy] [tyxxy]
+
+addFlatOp (O.Sealer   seal) tyS tyE = do
+    [a] <- endList 1 tyS
+    snocFM_ (Seal seal) [a] [tyE]
+addFlatOp (O.Unsealer seal) tyS tyE = do
+    [a] <- endList 1 tyS
+    snocFM_ (Unseal seal) [a] [tyE]
+
+addFlatOp O.AssertEQ       ty (ta :*: (tb :*: _)) = addSimple ty 3 AssertEQ [ta, tb]
+addFlatOp O.DebugPrintRaw  ty (ta :*: _)          = addSimple ty 2 DebugPrintRaw  [ta]
+addFlatOp O.DebugPrintText ty (ta :*: _)          = addSimple ty 2 DebugPrintText [ta]
 
 addFlatOp op tyS tyE = error $ show op ++ ", " ++ show tyS ++ ", " ++ show tyE
 

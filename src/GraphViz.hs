@@ -34,7 +34,10 @@ showIDPort prefix ident Nothing = showID prefix ident
 showIDPort prefix ident (Just port) = showID prefix ident . showChar ':' . showString (map toLower $ show port)
 
 showLabel :: String -> ShowS
-showLabel label = showString " [label=\"" . showString label . showString "\"]"
+showLabel label = showString " [label=\"" . showString (concatMap quoted label) . showString "\"]"
+  where
+    quoted '\"' = "\\\""
+    quoted c    = [c]
 
 showNode :: String -> Node -> ShowS
 showNode prefix (Node ident label) = showID prefix ident . showLabel label . showChar '\n'
