@@ -3,6 +3,7 @@ module Type
     ( Type (..)
     , RawType (..)
     , pattern (:*:)
+    , pattern (:+:)
     ) where
 
 import Control.Monad.State
@@ -24,7 +25,9 @@ data RawType = Product Type Type
              | Opaque ID
 
 pattern a :*: b <- Type _ _ _ (Product a b)
+pattern a :+: b <- Type _ _ _ (Sum a b)
 infixr 7 :*:
+infixr 6 :+:
 
 instance Show Type where
     show ty = evalState (showsType 0 ty) (IS.empty, IM.empty, 0) ""

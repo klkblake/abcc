@@ -323,6 +323,39 @@ addSimple ty n uop outTys = do
     input <- endList n ty
     snocFM_ uop (init input) outTys
 
+destroySum2 :: Link -> Type -> State Graph (Link, Link, Link)
+destroySum2 abc (ta :+: tbc@(tb :+: tc)) = do
+    [a, bc] <- snocFM DestroySum [abc] [ta, tbc]
+    [b, c]  <- snocFM DestroySum [bc]  [tb, tc]
+    return (a, b, c)
+destroySum2 _ _ = error "Invalid type"
+
+destroySum3 :: Link -> Type -> State Graph (Link, Link, Link, Link)
+destroySum3 abcd tabcd@(_ :+: (_ :+: (tc :+: td))) = do
+    (a, b, cd) <- destroySum2 abcd tabcd
+    [c, d]  <- snocFM DestroySum [cd]  [tc, td]
+    return (a, b, c, d)
+destroySum3 _ _ = error "Invalid type"
+
+createSum2 :: Link -> Link -> Link -> Type -> State Graph Link
+createSum2 a b c tabc@(_ :+: tbc) = do
+    [bc]  <- snocFM CreateSum  [b, c]  [tbc]
+    [abc] <- snocFM CreateSum  [a, bc] [tabc]
+    return abc
+createSum2 _ _ _ _ = error "Invalid type"
+
+createSum3 :: Link -> Link -> Link -> Link -> Type -> State Graph Link
+createSum3 a b c d tabcd@(_ :+: tbcd) = do
+    bcd <- createSum2 b c d tbcd
+    [abcd] <- snocFM CreateSum [a, bcd] [tabcd]
+    return abcd
+createSum3 _ _ _ _ _ = error "Invalid type"
+
+createSum2_ :: Link -> Link -> Link -> Type -> State Graph ()
+createSum3_ :: Link -> Link -> Link -> Link -> Type -> State Graph ()
+createSum2_ a b c   ty = void $ createSum2 a b c   ty
+createSum3_ a b c d ty = void $ createSum3 a b c d ty
+
 addFlatOp :: O.FlatOp -> Type -> Type -> State Graph ()
 addFlatOp O.AssocL ty (tab :*: _) = addSimple ty 3 CreatePair [tab]
 
@@ -342,8 +375,8 @@ addFlatOp O.Intro1 ty (_ :*: t1) = do
     swapEM a c1
 
 addFlatOp O.Elim1 ty _ = do
-    [_, b] <- endList 2 ty
-    snocFM_ Elim1 [b] []
+    [_, c1] <- endList 2 ty
+    snocFM_ Elim1 [c1] []
 
 addFlatOp O.Drop ty _ = addSimple ty 2 Drop []
 addFlatOp O.Copy ty (tx1 :*: (tx2 :*: _)) = addSimple ty 2 Copy [tx1, tx2]
@@ -367,6 +400,38 @@ addFlatOp O.Multiply ty (tn :*: _)          = addSimple ty 3 Multiply [tn]
 addFlatOp O.Inverse  ty (tn :*: _)          = addSimple ty 2 Inverse  [tn]
 addFlatOp O.Negate   ty (tn :*: _)          = addSimple ty 2 Negate   [tn]
 addFlatOp O.Divmod   ty (tr :*: (tq :*: _)) = addSimple ty 3 Divmod   [tr, tq]
+
+addFlatOp O.AssocLS ty@(tabc :*: _) (tabc'@(tab :+: _) :*: _) = do
+    [abc, _] <- endList 2 ty
+    (a, b, c) <- destroySum2 abc tabc
+    [ab]    <- snocFM CreateSum  [a, b] [tab]
+    snocFM_ CreateSum  [ab, c] [tabc']
+
+addFlatOp O.AssocRS ty@((tab@(ta :+: tb) :+: tc) :*: _) (tabc :*: _) = do
+    [abc, _] <- endList 2 ty
+    [ab, c] <- snocFM DestroySum [abc]  [tab, tc]
+    [a, b]  <- snocFM DestroySum [ab]   [ta, tb]
+    createSum2_ a b c tabc
+
+addFlatOp O.SwapS ty@(tabc :*: _) (tbac :*: _) = do
+    [abc, _] <- endList 2 ty
+    (a, b, c) <- destroySum2 abc tabc
+    createSum2_ b a c tbac
+
+addFlatOp O.SwapDS ty@(tabcd :*: _) (tacbd :*: _) = do
+    [abc, _] <- endList 2 ty
+    (a, b, c, d) <- destroySum3 abc tabcd
+    createSum3_ a c b d tacbd
+
+addFlatOp O.Intro0 ty (ta0@(_ :+: t0) :*: _) = do
+    [a, _] <- endList 2 ty
+    [c0] <- snocFM Intro0 [] [t0]
+    snocFM_ CreateSum [a, c0] [ta0]
+
+addFlatOp O.Elim0 ty@((_ :+: t0) :*: _) (ta :*: _) = do
+    [a0, _] <- endList 2 ty
+    [_, c0] <- snocFM DestroySum [a0] [ta, t0]
+    snocFM_ Elim0 [c0] []
 
 addFlatOp op tyS tyE = error $ show op ++ ", " ++ show tyS ++ ", " ++ show tyE
 
