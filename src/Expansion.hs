@@ -246,7 +246,9 @@ splice x ys = concatMap go
 -- These are in reverse order
 singleCancel :: Map.Map FlatUOp FlatUOp
 singleCancel = Map.fromList $ [ (DestroyPair, CreatePair)
+                              , (DestroySum, CreateSum)
                               , (Elim1, Intro1)
+                              , (Elim0, Intro0)
                               ]
 
 functions1 :: Map.Map FlatUOp (Rational -> Rational)
