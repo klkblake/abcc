@@ -287,6 +287,11 @@ snoc' (UOp uop) [linkA, linkB] outTys g@(Graph nextID npgs pgs lsE)
     , Just (Node _ (UOp (ConstNumber b)) _, _) <- followLink g linkB =
         let g' = deleteNode linkA . deleteNode linkB . Graph nextID npgs pgs . delete linkA $ delete linkB lsE
         in snoc (UOp . ConstNumber $ f a b) [] outTys g'
+snoc' (UOp Quote) [link] outTys@[Type _ _ _ (Block ts (tb :*: _))] g@(Graph nextID npgs pgs lsE)
+    | Just (Node _ (ConstBlock g2) _, _) <- followLink g link =
+        let g' = deleteNode link . Graph nextID npgs pgs $ delete link lsE
+            new = Graph 1 1 [[Node 0 (ConstBlock g2) []]] [Link 0 0 0 tb, StartLink 0 ts]
+        in snoc (ConstBlock new) [] outTys g'
 snoc' uop links outTys g = snoc uop links outTys g
 
 snocM :: UOp -> [Link] -> [Type] -> State Graph [Link]
