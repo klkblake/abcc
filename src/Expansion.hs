@@ -371,13 +371,13 @@ addFlatOp :: O.FlatOp -> Type -> Type -> State Graph ()
 addFlatOp (O.LitText text) ty (tt :*: _) = addSimple ty 1 (ConstList $ map (fromIntegral . fromEnum) text) [tt]
 
 addFlatOp O.AssocL ty (tab :*: _)         = addSimple ty 3 CreatePair  [tab]
-addFlatOp O.AssocR ty (ta :*: (tb :*: _)) = addSimple ty 2 DestroyPair [ta, tb]
+addFlatOp O.AssocR ty (ta :*: tb :*: _) = addSimple ty 2 DestroyPair [ta, tb]
 
-addFlatOp O.Swap ty (_ :*: (_ :*: _)) = do
+addFlatOp O.Swap ty (_ :*: _ :*: _) = do
     [a, b, _] <- endList 3 ty
     swapEM a b
 
-addFlatOp O.SwapD ty (_ :*: (_ :*: (_ :*: _))) = do
+addFlatOp O.SwapD ty (_ :*: _ :*: _ :*: _) = do
     [_, b, c, _] <- endList 4 ty
     swapEM b c
 
@@ -411,7 +411,7 @@ addFlatOp O.Add      ty (tn :*: _)          = addSimple ty 3 Add      [tn]
 addFlatOp O.Multiply ty (tn :*: _)          = addSimple ty 3 Multiply [tn]
 addFlatOp O.Inverse  ty (tn :*: _)          = addSimple ty 2 Inverse  [tn]
 addFlatOp O.Negate   ty (tn :*: _)          = addSimple ty 2 Negate   [tn]
-addFlatOp O.Divmod   ty (tr :*: (tq :*: _)) = addSimple ty 3 Divmod   [tr, tq]
+addFlatOp O.Divmod   ty (tr :*: tq :*: _) = addSimple ty 3 Divmod   [tr, tq]
 
 addFlatOp O.AssocLS ty@(tabc :*: _) (tabc'@(tab :+: _) :*: _) = do
     [abc, _] <- endList 2 ty
@@ -459,7 +459,7 @@ addFlatOp O.Distrib ty (tabac@(tab@(ta1 :*: tb) :+: tac@(ta2 :*: tc)) :*: _) = d
     [ac] <- snocFM CreatePair [a2, c] [tac]
     snocFM_ CreateSum [ab, ac] [tabac]
 
-addFlatOp O.Factor ty@((tab@(ta :*: tb) :+: tcd@(tc :*: td)) :*: _) (tac :*: (tbd :*: _)) = do
+addFlatOp O.Factor ty@((tab@(ta :*: tb) :+: tcd@(tc :*: td)) :*: _) (tac :*: tbd :*: _) = do
     [abcd, _] <- endList 2 ty
     [ab, cd] <- snocFM DestroySum  [abcd] [tab, tcd]
     [a, b]   <- snocFM DestroyPair [ab]   [ta, tb]
@@ -491,7 +491,7 @@ addFlatOp (O.Unsealer seal) tyS tyE = do
     [a] <- endList 1 tyS
     snocFM_ (Unseal seal) [a] [tyE]
 
-addFlatOp O.AssertEQ       ty (ta :*: (tb :*: _)) = addSimple ty 3 AssertEQ [ta, tb]
+addFlatOp O.AssertEQ       ty (ta :*: tb :*: _) = addSimple ty 3 AssertEQ [ta, tb]
 addFlatOp O.DebugPrintRaw  ty (ta :*: _)          = addSimple ty 2 DebugPrintRaw  [ta]
 addFlatOp O.DebugPrintText ty (ta :*: _)          = addSimple ty 2 DebugPrintText [ta]
 
