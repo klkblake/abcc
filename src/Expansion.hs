@@ -312,33 +312,35 @@ snoc' (UOp Compose) [linkA, linkB] outTys g@(Graph nextID npgs pgs lsE)
     , Just (Node _ (ConstBlock g2) _, _) <- followLink g linkB =
         let g' = deleteNode linkA . deleteNode linkB . Graph nextID npgs pgs . delete linkA $ delete linkB lsE
             Link _ _ _ (Type _ _ _ (Block _ ty)) = linkA
-            new = append g1 ty g2
+            ([l], g1') = runState (endList 1 ty) g1
+            new = append g1' l g2
         in snoc (ConstBlock new) [] outTys g'
 snoc' uop links outTys g = snoc uop links outTys g
 
 -- The second graph is assumed to have a single StartLink
-append :: Graph -> Type -> Graph -> Graph
-append g1 ty (Graph _ _ pgs lsE) =
-    let ([l], g1') = runState (endList 1 ty) g1
+append :: Graph -> Link -> Graph -> Graph
+append g1@(Graph _ _ _ lsE1) l (Graph _ _ pgs lsE2) =
+    let (lsPre, _:lsPost) = break (== l) lsE1
         nodes = concat pgs
-        allLinks = lsE ++ concatMap (\(Node _ _ links) -> links) nodes
-        linksToNode = foldr (uncurry (IM.insertWith (++))) IM.empty . catMaybes $ map linkNode allLinks
-    in go linksToNode Map.empty l g1' $ reverse nodes
+        allLinks = lsE2 ++ concatMap (\(Node _ _ links) -> links) nodes
+        linksToNode = foldr (uncurry (IM.insertWith (flip (++)))) IM.empty . catMaybes $ map linkNode allLinks
+        Graph nextID npgs pgs' lsE = go linksToNode Map.empty g1 $ reverse nodes
+    in Graph nextID npgs pgs' $ lsPre ++ lsE ++ lsPost
   where
-    linkNode l@(Link _ ident _ _) = Just (ident, [l])
+    linkNode link@(Link _ ident _ _) = Just (ident, [link])
     linkNode StartLink {} = Nothing
-    go _ linkMap l (Graph nextID npgs pgs' _) [] = Graph nextID npgs pgs' $ map (adjust l linkMap) lsE
-    go linksToNode linkMap l g (Node ident uop links:ns) =
-        let links' = map (adjust l linkMap) links
+    go _ linkMap (Graph nextID npgs pgs' _) [] = Graph nextID npgs pgs' $ map (adjust linkMap) lsE2
+    go linksToNode linkMap g (Node ident uop links:ns) =
+        let links' = map (adjust linkMap) links
             outLinks = sortBy (compare `on` (\(Link _ _ slot _) -> slot)) $ IM.findWithDefault [] ident linksToNode
             (outLinks', g') = snoc' uop links' (map (\(Link _ _ _ ty') -> ty') outLinks) g
             linkMap' = foldr (uncurry Map.insert) linkMap $ zip outLinks outLinks'
-        in go linksToNode linkMap' l g' ns
-    adjust _ linkMap link@Link {}    = case Map.lookup link linkMap of
+        in go linksToNode linkMap' g' ns
+    adjust linkMap link@Link {}    = case Map.lookup link linkMap of
                                            Just r -> r
                                            Nothing -> error $ "Not in map: " ++ show link ++ ", " ++ show linkMap
-    adjust l _       (StartLink 0 _) = l
-    adjust _ _       (StartLink _ _) = error "Too many StartLinks"
+    adjust _       (StartLink 0 _) = l
+    adjust _       (StartLink _ _) = error "Too many StartLinks"
 
 
 snocM :: UOp -> [Link] -> [Type] -> State Graph [Link]
