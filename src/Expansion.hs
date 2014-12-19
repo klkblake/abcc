@@ -313,19 +313,25 @@ snoc' (UOp Compose) [linkA, linkB] outTys g@(Graph nextID npgs pgs lsE)
         let g' = deleteNode linkA . deleteNode linkB . Graph nextID npgs pgs . delete linkA $ delete linkB lsE
             Link _ _ _ (Type _ _ _ (Block _ ty)) = linkA
             ([l], g1') = runState (endList 1 ty) g1
-            new = append g1' l g2
+            new = snd $ append g1' l g2
         in snoc (ConstBlock new) [] outTys g'
+snoc' (UOp uop) [linkA, linkB] [outTy] g@(Graph nextID npgs pgs lsE)
+    | uop == Apply || uop == CondApply
+    , Just (Node _ (ConstBlock g1) _, _) <- followLink g linkA =
+        let g' = deleteNode linkA . Graph nextID npgs pgs $ delete linkA lsE
+            g1' = execState (endList 1 outTy) g1
+        in append g' linkB g1'
 snoc' uop links outTys g = snoc uop links outTys g
 
 -- The second graph is assumed to have a single StartLink
-append :: Graph -> Link -> Graph -> Graph
+append :: Graph -> Link -> Graph -> ([Link], Graph)
 append g1@(Graph _ _ _ lsE1) l (Graph _ _ pgs lsE2) =
     let (lsPre, _:lsPost) = break (== l) lsE1
         nodes = concat pgs
         allLinks = lsE2 ++ concatMap (\(Node _ _ links) -> links) nodes
         linksToNode = foldr (uncurry (IM.insertWith (flip (++)))) IM.empty . catMaybes $ map linkNode allLinks
         Graph nextID npgs pgs' lsE = go linksToNode Map.empty g1 $ reverse nodes
-    in Graph nextID npgs pgs' $ lsPre ++ lsE ++ lsPost
+    in (lsE, Graph nextID npgs pgs' $ lsPre ++ lsE ++ lsPost)
   where
     linkNode link@(Link _ ident _ _) = Just (ident, [link])
     linkNode StartLink {} = Nothing
