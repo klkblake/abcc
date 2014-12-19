@@ -234,12 +234,16 @@ snoc uop links outTys (Graph nextID npgs pgs lsE) =
     let newLinks = zipWith (Link npgs nextID) [0..] outTys
         lsE' = processLinks newLinks lsE links
         n = Node nextID uop links
-    in (newLinks, Graph (nextID + 1) (npgs + 1) ([n]:pgs) lsE')
+    in if any zeroIndex links || null pgs
+           then (newLinks, Graph (nextID + 1) (npgs + 1) ([n]:pgs) lsE')
+           else (newLinks, Graph (nextID + 1) npgs ((n:head pgs):tail pgs) lsE')
   where
     processLinks new ls     []   = new ++ ls
     processLinks new (l:ls) used | l `elem` used = processLinks new ls $ delete l used
                                  | otherwise     = l:processLinks new ls used
     processLinks _   []     used = error $ "Finished processing links with " ++ show used ++ " left over"
+    zeroIndex (Link idx _ _ _) = idx == 0
+    zeroIndex (StartLink _ _) = False
 
 splice :: Eq a => a -> [a] -> [a] -> [a]
 splice x ys = concatMap go
