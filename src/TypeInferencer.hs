@@ -96,7 +96,6 @@ data Node s = Term { _nodeID   :: {-# UNPACK #-} !ID
                    , _varType  ::                !VarType
                    , _repVar   ::                !(Maybe (RNode s))
                    , _terms    ::                !(TreeList (RNode s))
-                   , _merges   ::                !(TreeList (RNode s, RNode s))
                    , _varCount :: {-# UNPACK #-} !Int
                    }
 
@@ -190,17 +189,11 @@ toNetlistLabel mode var@Var {} label = ifUnseen var $ do
                            return [mkEdge ident ident' "rep"]
                        Nothing -> return []
         ts <- lift2 $ mapM fromRNode . V.toList . TL.toVector $ var^?!terms
-        let (mergesLeft, mergesRight) = unzip . V.toList . TL.toVector $ var^?!merges
         ts' <- mapM (toNetlist mode) ts
-        mergesLeft'  <- mapM (toNetlist mode) =<< lift2 (mapM fromRNode mergesLeft)
-        mergesRight' <- mapM (toNetlist mode) =<< lift2 (mapM fromRNode mergesRight)
         let thisNode = GV.Node ident label
             termEdges = zipWith (\label' t -> mkEdge ident t label') numbers ts'
-            mergesLeftEdges  = zipWith mkEdge' (map ("ML" ++) numbers) mergesLeft'
-            mergesRightEdges = zipWith mkEdge' (map ("MR" ++) numbers) mergesRight'
-        tell ([thisNode], repEdge ++ termEdges ++ mergesLeftEdges ++ mergesRightEdges)
+        tell ([thisNode], repEdge ++ termEdges)
         return (ident, True)
-    mkEdge' label' m = mkEdge ident m label'
     numbers = map (('#':) . show) [1 :: Int ..]
 
 toNetlist :: GV.Mode -> Node s -> ToNetlistT s ID
@@ -214,7 +207,7 @@ mkTerm unique sym cs = do
 mkVar :: ST s ID -> String -> VarType -> ST s (Node s)
 mkVar unique v ty = do
     ident <- unique
-    return $ Var ident v ty Nothing TL.empty TL.empty 1
+    return $ Var ident v ty Nothing TL.empty 1
 
 toRNode :: Node s -> ST s (RNode s)
 toRNode node = RNode <$> newSTRef node
@@ -281,12 +274,10 @@ merge queue n1 n2 = do
             bigTerms' = TL.concat bigTerms $ v^?!terms
         replaceNode bigNode $ varType  .~ bty
                             $ terms    .~ bigTerms'
-                            $ merges   .~ TL.concat (bigV^?!merges) (v^?!merges)
                             $ varCount .~ vc
                             $ bigV
         replaceNode node $ repVar   .~ Just bigNode
                          $ terms    .~ TL.empty
-                         $ merges   .~ TL.empty
                          $ varCount .~ 0
                          $ v
         return $ if TL.size bigTerms <= 1 && TL.size bigTerms' >= 2 && ty /= Substructural
@@ -590,7 +581,7 @@ mkAttribVar unique label ty relevant affine = do
 
 type RNodeIL s = IL.InterList (RNode s)
 
-opType :: ST s ID -> Op (RNodeIL s) -> ST s (RNode s, RNode s)
+opType :: ST s ID -> Op (RNodeIL s) -> ST s (RNode s, RNode s, Maybe (RNode s, RNode s, RNode s))
 opType unique = flip evalStateT (False, M.empty) . blockOrOp
   where
     mkRTerm' sym cs = lift $ mkRTerm unique sym cs
@@ -610,7 +601,7 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
         a'' <- a'
         State.modify $ \(_, vars) -> (True, vars)
         b'' <- b'
-        return (a'', b'')
+        return (a'', b'', Nothing)
     (.*) = seq2 $ \a' b' -> mkAttribTerm' Product [a', b']
     (.+) = seq2 $ \a' b' -> mkAttribTerm' Sum [a', b']
     infixr 1 ~>
@@ -722,11 +713,15 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
         a' <- eval a
         b' <- eval b
         c' <- eval c
-        lift $ do
-            v  <- getType c'
-            v' <- fromRNode v
-            replaceNode v $ merges .~ TL.singleton (a', b') $ v'
-        (return a' .+ return b') .* e ~> return c' .* e
+        e' <- eval e
+        m <- lift $ do
+            a'' <- getType a'
+            b'' <- getType b'
+            c'' <- getType c'
+            return (a'', b'', c'')
+        left  <- (return a' .+ return b') .* return e'
+        right <- return c' .* return e'
+        return (left, right, Just m)
     op Assert    = (a .+ b) .* e ~> b .* e
 
     op Greater = num .* num .* e ~> (num .* num .+ num .* num) .* e
@@ -742,38 +737,46 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
 
     op ApplyTail = error "To be removed."
 
-unifyBlock :: ST s ID -> RawOp -> ST s (Either (Int, Node s, Node s, Node s, Node s) (Op (RNodeIL s)))
-unifyBlock _      (Op op) = return . Right $ Op op
-unifyBlock unique (LitBlock bops) = do
-    btyOps <- unifyAll unique bops
+unifyBlock :: ST s ID -> [(RNode s, RNode s, RNode s)] -> RawOp -> ST s (Either (Int, Node s, Node s, Node s, Node s) (Op (RNodeIL s), [(RNode s, RNode s, RNode s)]))
+unifyBlock _      merges (Op op) = return $ Right (Op op, merges)
+unifyBlock unique merges (LitBlock bops) = do
+    btyOps <- unifyAll unique merges bops
     return $ case btyOps of
-                 Left  err     -> Left err
-                 Right btyOps' -> Right $ LitBlock btyOps'
+                 Left  err               -> Left err
+                 Right (btyOps', merges') -> Right (LitBlock btyOps', merges')
 
-unifyAll :: ST s ID -> [RawOp] -> ST s (Either (Int, Node s, Node s, Node s, Node s) (RNodeIL s (Op (RNodeIL s))))
-unifyAll unique [] = Right . IL.empty <$> mkAttribVar unique "a" Structural (Just False) (Just False)
-unifyAll unique (opcode:opcodes) = do
-    op <- unifyBlock unique opcode
+unifyAll :: ST s ID -> [(RNode s, RNode s, RNode s)] -> [RawOp] -> ST s (Either (Int, Node s, Node s, Node s, Node s) (RNodeIL s (Op (RNodeIL s)), [(RNode s, RNode s, RNode s)]))
+unifyAll unique merges [] = do
+    a <- mkAttribVar unique "a" Structural (Just False) (Just False)
+    return $ Right (IL.empty a, merges)
+unifyAll unique merges (opcode:opcodes) = do
+    op <- unifyBlock unique merges opcode
     case op of
         Left  err -> return $ Left err
-        Right op' -> do
-            (a, b) <- opType unique op'
-            go 0 (IL.empty a) op' opcodes b
+        Right (op', merges') -> do
+            (a, b, mmerge) <- opType unique op'
+            let merges'' = case mmerge of
+                               Just m  -> m:merges'
+                               Nothing -> merges'
+            go 0 merges'' (IL.empty a) op' opcodes b
   where
-    go i tyOps lop (rop:ops) a = do
-        rop' <- unifyBlock unique rop
+    go i merges' tyOps lop (rop:ops) a = do
+        rop' <- unifyBlock unique merges' rop
         case rop' of
             Left err -> return $ Left err
-            Right rop'' -> do
-                (b, a') <- opType unique rop''
+            Right (rop'', merges'') -> do
+                (b, a', mmerge) <- opType unique rop''
                 res <- unify unique $ V.fromList [a, b]
                 case res of
                     Just (x, y) -> do
                         a'' <- fromRNode a
                         b'  <- fromRNode b
                         return $ Left (i, a'', b', x, y)
-                    Nothing -> go (i + 1) (IL.cons a lop tyOps) rop'' ops a'
-    go _ tyOps op [] a = return . Right . IL.reverse $ IL.cons a op tyOps
+                    Nothing -> let merges''' = case mmerge of
+                                                  Just m -> m:merges''
+                                                  Nothing -> merges''
+                               in go (i + 1) merges''' (IL.cons a lop tyOps) rop'' ops a'
+    go _ merges' tyOps op [] a = return $ Right (IL.reverse $ IL.cons a op tyOps, merges')
 
 mapMTyOps :: Applicative m => (a -> m b) -> (FlatOp -> m FlatOp) -> IL.InterList a (Op (IL.InterList a)) -> m (IL.InterList b (Op (IL.InterList b)))
 mapMTyOps f g = IL.mapM f op
@@ -805,14 +808,14 @@ inferTypes mode logStages ops = do
         errorTerm prefix label x y = lift $ do
             netList <- evalStateT (execWriterT $ mapM (toNetlist mode) [x, y]) IM.empty
             return $ Graph prefix label [] (fst netList) (snd netList)
-    res <- lift $ unifyAll unique ops
+    res <- lift $ unifyAll unique [] ops
     case res of
         Left (i, a, b, x, y) -> do
             inner <- errorTerm "inner" "Could not unify:" x y
             outer <- errorTerm "outer" "While trying to unify:" a b
             let graph = showGraph $ Graph "" ("Unification failure at opcode index " ++ show i) [inner, outer] [] []
             return $ Left (i, graph "")
-        Right tyOps -> do
+        Right (tyOps, _) -> do
             let tys = IL.outerList tyOps
             writeGraph TIUnified tys
             lift $ mapMTyOps_ (deloop unique) (const $ pure ()) tyOps
