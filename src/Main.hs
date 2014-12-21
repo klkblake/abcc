@@ -53,9 +53,7 @@ flagSpecs =
     [ OptSpec ["peephole-pre"]     [] (NoArg PeepholePre)
     , OptSpec ["typecheck"]        [] (NoArg TypeCheck)
     , OptSpec ["expansion"]        [] (NoArg Expansion)
-    , OptSpec ["dump-initial"]     [] . OptionalArg $ return . Dump TIInitial
     , OptSpec ["dump-unified"]     [] . OptionalArg $ return . Dump TIUnified
-    , OptSpec ["dump-resolved"]    [] . OptionalArg $ return . Dump TIResolved
     , OptSpec ["dump-substituted"] [] . OptionalArg $ return . Dump TISubstituted
     , OptSpec ["dump-all"]         [] $ NoArg DumpAll
     , OptSpec ["verbose-graphs"]   [] $ NoArg VerboseGraphs
@@ -83,9 +81,7 @@ processFlags flags =
     processDump (Dump stage (Just file)) = Just (stage, file)
     processDump (Dump stage Nothing)     = Just (stage, defaultFile stage)
     processDump _ = Nothing
-    defaultFile TIInitial     = "initial.dot"
     defaultFile TIUnified     = "unified.dot"
-    defaultFile TIResolved    = "resolved.dot"
     defaultFile TISubstituted = "substituted.dot"
 
 doCompile :: IO ()

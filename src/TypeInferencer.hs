@@ -41,9 +41,7 @@ import qualified TreeList as TL
 import Queue (Queue)
 import qualified Queue as Q
 
-data TIStage = TIInitial
-             | TIUnified
-             | TIResolved
+data TIStage = TIUnified
              | TISubstituted
              deriving (Eq, Enum, Bounded, Show)
 
@@ -53,9 +51,6 @@ data Symbol = Product
             | Num
             | Unit
             | Sealed String
-            | Attribs
-            | Or
-            | Attrib Bool
             deriving Eq
 
 instance Show Symbol where
@@ -65,9 +60,6 @@ instance Show Symbol where
     show Num           = "N"
     show Unit          = "1"
     show (Sealed seal) = '{' : seal ++ "}"
-    show Attribs       = "tkf"
-    show Or            = "∨"
-    show (Attrib attr) = show attr
 
 arity :: Symbol -> Int
 arity Product    = 2
@@ -76,13 +68,10 @@ arity Block      = 2
 arity Num        = 0
 arity Unit       = 0
 arity (Sealed _) = 1
-arity Attribs    = 3
-arity Or         = 2
-arity (Attrib _) = 0
 
-data Stage = New | DeloopSeen | Delooped | Substituted deriving Eq
+data Stage = New | Substituted deriving Eq
 
-data VarType = Structural | Substructural | Void deriving Eq
+data VarType = Structural | Void deriving Eq
 
 newtype RNode s = RNode (STRef s (Node s))
 
@@ -105,7 +94,6 @@ nodeLabel :: Node s -> String
 nodeLabel term@Term {} = show $ term^?!symbol
 nodeLabel var@Var {}   = (var^?!name) ++ " (" ++ show (var^?!varCount) ++ ")" ++ case var^?!varType of
                                                                                      Structural    -> ""
-                                                                                     Substructural -> " kf"
                                                                                      Void          -> " void"
 
 type ToNetlistT s = WriterT ([GV.Node], [GV.Edge]) (StateT (IM.IntMap ID) (ST s))
@@ -127,37 +115,7 @@ mkEdge :: ID -> ID -> String -> Edge
 mkEdge ident ident' label = GV.Edge ident ident' Nothing Nothing label
 
 toNetlistLabel :: GV.Mode -> Node s -> String -> ToNetlistT s (ID, Bool)
-toNetlistLabel mode term@Term {} label = ifUnseen term $ do
-    case mode of
-        Verbose -> toNetlist'
-        Compact ->
-            case term^?!symbol of
-                Attribs -> do
-                    [t, k, f] <- lift2 $ childList' term
-                    rec State.modify $ IM.insert ident ident'
-                        (ident', new) <- toNetlistLabel mode t $ nodeLabel t ++ " " ++ kl ++ fl
-                        (kl, fl) <-
-                            if new
-                                then do
-                                    (kl', ke) <-
-                                        case k of
-                                            t'@Term {} | Attrib True  <- t'^?!symbol -> return ("k", [])
-                                                       | Attrib False <- t'^?!symbol -> return ("",  [])
-                                            _ -> do
-                                                ident'' <- toNetlist mode k
-                                                return ("", [mkEdge ident' ident'' "k"])
-                                    (fl', fe) <-
-                                        case f of
-                                            t'@Term {} | Attrib True  <- t'^?!symbol -> return ("f", [])
-                                                       | Attrib False <- t'^?!symbol -> return ("",  [])
-                                            _ -> do
-                                                ident'' <- toNetlist mode f
-                                                return ("", [mkEdge ident' ident'' "f"])
-                                    tell ([], ke ++ fe)
-                                    return (kl', fl')
-                                else return ("", "")
-                    return (ident', new)
-                _ -> toNetlist'
+toNetlistLabel mode term@Term {} label = ifUnseen term toNetlist'
   where
     ident = term^.nodeID
     toNetlist' = do
@@ -221,20 +179,6 @@ mkRVar unique v ty = toRNode =<< mkVar unique v ty
 fromRNode :: RNode s -> ST s (Node s)
 fromRNode (RNode ref) = readSTRef ref
 
-matchingAttrib :: Bool -> Node s -> Bool
-matchingAttrib a (Term _ (Attrib a') _ _) = a == a'
-matchingAttrib _ _ = False
-
-getType :: RNode s -> ST s (RNode s)
-getType node = do
-    t <- fromRNode node
-    return $ (t^?!children) SL.! 0
-
-getAttribs :: RNode s -> ST s (RNode s, RNode s)
-getAttribs node = do
-    (Term _ _ cs _) <- fromRNode node
-    return (cs SL.! 1, cs SL.! 2)
-
 replaceNode :: RNode s -> Node s -> ST s ()
 replaceNode (RNode ref) !n = writeSTRef ref n
 
@@ -252,7 +196,7 @@ add :: Queue (RNode s) -> RNode s -> RNode s -> ST s (Queue (RNode s))
 add queue v t = do
     v' <- fromRNode v
     replaceNode v $ terms %~ TL.cons t $ v'
-    return $ if TL.size (v'^?!terms) == 1 && v'^?!varType /= Substructural
+    return $ if TL.size (v'^?!terms) == 1
                  then Q.push queue v
                  else queue
 
@@ -280,7 +224,7 @@ merge queue n1 n2 = do
                          $ terms    .~ TL.empty
                          $ varCount .~ 0
                          $ v
-        return $ if TL.size bigTerms <= 1 && TL.size bigTerms' >= 2 && ty /= Substructural
+        return $ if TL.size bigTerms <= 1 && TL.size bigTerms' >= 2
                      then Q.push queue bigNode
                      else queue
 
@@ -323,15 +267,7 @@ commonFrontier unique queue t_list = do
         (ts, vs, j) <- splitIthChildren i
         case (V.null ts, V.null vs) of
             (False, True) -> do
-                sym <- fromJust . preview symbol <$> fromRNode (ts V.! 0)
-                case sym of
-                    Or       -> fmap Right $ genSubVar queue' i ts
-                    Attrib a -> do
-                        ts' <- V.mapM fromRNode $ V.slice 1 (V.length ts - 1) ts
-                        Right <$> if V.all (matchingAttrib a) ts'
-                                      then return queue'
-                                      else genSubVar queue' i ts
-                    _ -> commonFrontier unique queue' ts
+                commonFrontier unique queue' ts
             (_, False) -> do
                 swapChild i j
                 v <- rep (vs V.! 0)
@@ -355,13 +291,6 @@ commonFrontier unique queue t_list = do
                               splitIthChildren' v vi (j + 1) (l + 1) r
                 Var  {} -> do MV.write v r node
                               splitIthChildren' v j (j + 1) l (r - 1)
-    genSubVar queue' i ts = do
-        v <- mkRVar unique "attr" Substructural
-        queue'' <- V.foldM (`add` v) queue' ts
-        let term = t_list V.! 0
-        t <- fromRNode term
-        updateChild term t i v
-        return queue''
     swapChild i j = do
         let term0 = t_list V.! 0
             termj = t_list V.! j
@@ -380,7 +309,23 @@ commonFrontier unique queue t_list = do
 
 unify :: ST s ID -> V.Vector (RNode s) -> ST s (Maybe (Node s, Node s))
 unify unique t_list = do
-    res <- commonFrontier unique Q.empty t_list
+    [a, b] <- mapM fromRNode $ V.toList t_list
+    res <- case (a, b) of
+               (Term {}, Term {}) -> commonFrontier unique Q.empty t_list
+               (Var  {}, Term {}) -> do
+                   a' <- rep $ t_list V.! 0
+                   Right <$> add Q.empty a' (t_list V.! 1)
+               (Term {}, Var  {}) -> do
+                   b' <- rep $ t_list V.! 1
+                   Right <$> add Q.empty b' (t_list V.! 0)
+               (Var  {}, Var  {}) -> do
+                   a' <- rep $ t_list V.! 0
+                   b' <- rep $ t_list V.! 1
+                   identA <- view nodeID <$> fromRNode a'
+                   identB <- view nodeID <$> fromRNode b'
+                   Right <$> if identA /= identB
+                                 then merge Q.empty (t_list V.! 0) (t_list V.! 1)
+                                 else return Q.empty
     case res of
         Left  err   -> return $ Just err
         Right queue -> go $ Q.pop queue
@@ -399,138 +344,69 @@ unify unique t_list = do
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
 
-simplifyOr :: (RNode s -> RNode s -> ST s (RNode s)) -> RNode s -> RNode s -> ST s (RNode s)
-simplifyOr f a b = do
-    a' <- fromRNode a
-    b' <- fromRNode b
-    go a' b'
+-- TODO this should probably be removed
+substitute :: STRef s (RNode s) -> RNode s -> ST s (RNode s)
+substitute out nodeS = writeSTRef out nodeS >> go Nothing (0, nodeS) >> readSTRef out
   where
-    go t  _  | Just (Attrib True)  <- t^?symbol = return a
-    go t  _  | Just (Attrib False) <- t^?symbol = return b
-    go _  t  | Just (Attrib True)  <- t^?symbol = return b
-    go _  t  | Just (Attrib False) <- t^?symbol = return a
-    go t1 t2 | t1^.nodeID == t2^.nodeID = return a
-    go _  _  = f a b
-
-deloop :: ST s ID -> RNode s -> ST s ()
-deloop unique node = do
-    n <- fromRNode node
-    case n of
-        t@Term {} -> do
-            case t^?!stage of
-                New -> do
-                    replaceNode node $ stage .~ DeloopSeen $ t
-                    mapM_ (deloop unique) $ childList t
-                    case t^?!symbol of
-                        Or -> do
-                            [a, b] <- mapM derefVar $ childList t
-                            n' <- fromRNode =<< simplifyOr (const . const $ return node) a b
-                            case n' of
-                                t'@Term {} -> replaceNode node $ stage .~ Delooped $ t'
-                                Var     {} -> replaceNode node n'
-                        _  -> replaceNode node $ stage .~ Delooped $ t
-                DeloopSeen -> case t^?!symbol of
-                                  Or -> replaceNode node =<< mkTerm unique (Attrib False) []
-                                  _  -> return ()
-                _ -> return ()
-        Var {} -> do
-            v <- rep node
-            v' <- fromRNode v
-            let ts = TL.toVector $ v'^?!terms
-            V.mapM_ (deloop unique) ts
-            (terms', vars) <- V.foldM splitVars ([], []) ts
-            terms'' <- mapM fromRNode terms'
-            terms''' <- case terms'' of
-                            [] -> do
-                                case v'^?!varType of
-                                    Structural    -> return TL.empty
-                                    Substructural -> TL.singleton <$> mkRTerm unique (Attrib False) []
-                                    Void          -> return TL.empty
-                            [_] -> return . TL.singleton $ head terms'
-                            t:_ | Attrib a <- t^?!symbol, all (matchingAttrib a) terms'' -> return . TL.singleton $ head terms'
-                            _ -> error $ "variable " ++ v'^?!name ++ " has multiple values "
-            replaceNode v $ terms .~ terms''' $ v'
-            mapM_ (mergeVar v) vars
-  where
-    derefVar n = do
-        n' <- fromRNode n
-        case n' of
-            Term {} -> return n
-            Var  {} -> do
-                v <- fromRNode =<< rep n
-                let ts = v^?!terms
-                return $ if TL.size ts == 1
-                             then TL.toVector ts V.! 0
-                             else n
-    splitVars (ts, vars) node' = do
-        n <- fromRNode node'
-        return $ case n of
-                     Term {} -> (node':ts, vars)
-                     Var  {} -> (ts, node':vars)
-    mergeVar v v' = do
-            vr  <- rep v
-            vr' <- rep v'
-            ident  <- view nodeID <$> fromRNode vr
-            ident2 <- view nodeID <$> fromRNode vr'
-            when (ident /= ident2) . void $ merge Q.empty vr vr'
-
-substitute :: RNode s -> ST s ()
-substitute term = do
-    t <- fromRNode term
-    unless (t^?!stage == Substituted) $ do
-        replaceNode term $ stage .~ Substituted $ t
-        mapM_ go . zip [0..] $ childList t
-  where
-    go (i, node) = do
+    go term (i, node) = do
         node' <- fromRNode node
         case node' of
-            Term {} -> substitute node
+            Term {} -> subst node
             Var  {} -> do
-                t <- fromRNode term
                 v <- rep node
                 v' <- fromRNode v
                 let ts = TL.toVector $ v'^?!terms
-                when (v'^?!varType /= Void) $ case V.length ts of
-                                                  0 -> updateChild term t i $ v
-                                                  1 -> updateChild term t i $ ts V.! 0
-                                                  _ -> error "Var has multiple children"
-                V.mapM_ substitute ts
+                case term of
+                    Just term' -> do
+                        t <- fromRNode term'
+                        when (v'^?!varType /= Void) $ case V.length ts of
+                                                          0 -> updateChild term' t i $ v
+                                                          1 -> updateChild term' t i $ ts V.! 0
+                                                          _ -> error "Var has multiple children"
+                    Nothing -> do
+                        when (v'^?!varType /= Void) $ case V.length ts of
+                                                          0 -> writeSTRef out $ v
+                                                          1 -> writeSTRef out $ ts V.! 0
+                                                          _ -> error "Var has multiple children"
+                V.mapM_ subst ts
+    subst term = do
+        t <- fromRNode term
+        unless (t^?!stage == Substituted) $ do
+            replaceNode term $ stage .~ Substituted $ t
+            mapM_ (go $ Just term) . zip [0..] $ childList t
 
 purify :: H.HashTable s ID T.Type -> H.HashTable s ID ID -> STRef s ID -> Node s -> ST s T.Type
-purify seen idents nextID t | t^?!symbol == Attribs = do
+purify seen idents nextID t = do
     let ident = t^.nodeID
     purified <- H.lookup seen ident
     case purified of
         Just ty -> return ty
         Nothing -> do
-            let node = (t^?!children) SL.! 0
-            node' <- fromRNode node
-            [_, tk, tf] <- childList' t
-            let Attrib k = tk^?!symbol
-                Attrib f = tf^?!symbol
-                tType = T.Type ident k f
-            case node' of
+            let tType = T.Type ident False False
+            case t of
                 t'@Term {} -> do
                     rec let ty = tType $ rawType (t'^?!symbol) cs
                         H.insert seen ident ty
                         cs <- mapM (purify seen idents nextID <=< fromRNode) $ childList t'
                     return ty
                 Var {} -> do
-                    v <- fromRNode =<< rep node
+                    v <- case t^?!repVar of
+                             Just r  -> fromRNode =<< rep r
+                             Nothing -> return t
                     case v^?!varType of
                         Void -> do
                             let ts = TL.toVector $ v^?!terms
-                            rec let ty = tType . T.Void $ T.Type (v^.nodeID) k f ty'
+                            rec let ty = tType . T.Void $ T.Type (v^.nodeID) False False ty'
                                 H.insert seen ident ty
                                 ty' <- if V.null ts
-                                           then T.Opaque <$> getIdent node'
+                                           then T.Opaque <$> getIdent t
                                            else do
                                                t' <- fromRNode (ts V.! 0)
                                                cs <- mapM (purify seen idents nextID <=< fromRNode) $ childList t'
                                                return $ rawType (t'^?!symbol) cs
                             return ty
                         _ -> do
-                            ident' <- getIdent node'
+                            ident' <- getIdent t
                             let ty = tType $ T.Opaque ident'
                             H.insert seen ident ty
                             return ty
@@ -552,79 +428,40 @@ purify seen idents nextID t | t^?!symbol == Attribs = do
     rawType Unit          _      = T.Unit
     rawType (Sealed seal) [a]    = T.Sealed seal a
     rawType _             _      = error "Illegal term type in purify"
-purify _ _ _ t = error $ "Attempted to purify non-Attribs term " ++ show (t^?!symbol)
-
-mkAttribTerm :: ST s ID -> Symbol -> Either [RNode s] Bool -> Either [RNode s] Bool -> [RNode s] -> ST s (RNode s)
-mkAttribTerm unique sym relevant affine cs = do
-    t <- mkRTerm' sym cs
-    false <- mkRTerm' (Attrib False) []
-    k <- mkAttrib false relevant "k" fst
-    f <- mkAttrib false affine   "f" snd
-    mkRTerm' Attribs [t, k, f]
-  where
-    mkRTerm' = mkRTerm unique
-    mkAttrib false attrib label extract = case attrib of
-              Left  [] -> mkRVar unique label Substructural
-              Left  as -> foldM (simplifyOr mkOr) false =<< map extract <$> mapM getAttribs as
-              Right a  -> mkRTerm' (Attrib a) []
-    mkOr a b = mkRTerm' Or [a, b]
-
-mkAttribVar :: ST s ID -> String -> VarType -> Maybe Bool -> Maybe Bool -> ST s (RNode s)
-mkAttribVar unique label ty relevant affine = do
-    v <- mkRVar unique label ty
-    k <- mkAttrib relevant "k"
-    f <- mkAttrib affine   "f"
-    mkRTerm unique Attribs [v, k, f]
-  where
-    mkAttrib (Just a) _      = mkRTerm unique (Attrib a) []
-    mkAttrib Nothing  label' = mkRVar unique label' Substructural
 
 type RNodeIL s = IL.InterList (RNode s)
 
 opType :: ST s ID -> Op (RNodeIL s) -> ST s (RNode s, RNode s, Maybe (RNode s, RNode s, RNode s))
-opType unique = flip evalStateT (False, M.empty) . blockOrOp
+opType unique = flip evalStateT M.empty . blockOrOp
   where
     mkRTerm' sym cs = lift $ mkRTerm unique sym cs
-    mkAttribTerm' sym cs = do
-        onRight <- gets fst
-        lift $ if onRight
-                   then mkAttribTerm unique sym (Left cs) (Left cs) cs
-                   else mkAttribTerm unique sym (Left []) (Left []) cs
-    eval x' = lift $ evalStateT x' (False, M.empty)
+    eval x' = lift $ evalStateT x' M.empty
     seq2 action a' b' = do
         a'' <- a'
         b'' <- b'
         action a'' b''
 
-    a' ~> b' = do
-        State.modify $ \(_, vars) -> (False, vars)
-        a'' <- a'
-        State.modify $ \(_, vars) -> (True, vars)
-        b'' <- b'
-        return (a'', b'', Nothing)
-    (.*) = seq2 $ \a' b' -> mkAttribTerm' Product [a', b']
-    (.+) = seq2 $ \a' b' -> mkAttribTerm' Sum [a', b']
+    (~>) = seq2 $ \a' b' -> return (a', b', Nothing)
+    (.*) = seq2 $ \a' b' -> mkRTerm' Product [a', b']
+    (.+) = seq2 $ \a' b' -> mkRTerm' Sum [a', b']
     infixr 1 ~>
     infixr 7 .*
     infixr 6 .+
-    mkBlock rel aff = seq2 $ \a' b' -> lift $ mkAttribTerm unique Block rel aff [a', b']
-    mkBlockAny = seq2 $ \a' b' -> mkAttribTerm' Block [a', b']
-    mkBlockNew = mkBlock (Right False) (Right False)
-    unit = lift $ mkAttribTerm unique Unit (Right False) (Right False) []
-    num  = lift $ mkAttribTerm unique Num  (Right False) (Right False) []
+    block = seq2 $ \a' b' -> mkRTerm' Block [a', b']
+    unit = mkRTerm' Unit []
+    num  = mkRTerm' Num  []
     sealed seal v = do
         v' <- v
-        mkAttribTerm' (Sealed seal) [v']
-    void' = lift $ mkAttribVar unique "0" Void Nothing Nothing
+        mkRTerm' (Sealed seal) [v']
+    void' = lift $ mkRVar unique "0" Void
 
-    var  v = var' v Nothing Nothing
-    var' v relevant affine = do
-        (onRight, vars) <- get
+    var v = do
+        vars <- get
         case M.lookup v vars of
             Just v' -> return v'
             Nothing -> do
-                v' <- lift $ mkAttribVar unique v Structural relevant affine
-                put (onRight, M.insert v v' vars)
+                v' <- lift $ mkRVar unique v Structural
+                put $ M.insert v v' vars
                 return v'
 
     a = var "a"
@@ -637,32 +474,18 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
     xp = var "x'"
     y = var "y"
     z = var "z"
-    xDrop = var' "x" (Just False) Nothing
-    xCopy = var' "x" Nothing (Just False)
 
     mkText = do
-        v <- eval $ var' "L" (Just False) (Just False)
+        v <- eval $ var "L"
         list <- eval $ num .* return v .+ unit
         lift $ do
-            vn <- getType v
-            v' <- fromRNode vn
-            list' <- getType list
-            replaceNode vn $ terms .~ TL.singleton list' $ v'
+            v' <- fromRNode v
+            replaceNode v $ terms .~ TL.singleton list $ v'
         return v
-    
-    opMark relevant = do
-        b1 <- eval $ mkBlockAny x y
-        t      <- lift $ getType b1
-        (k, f) <- lift $ getAttribs b1
-        true <- mkRTerm' (Attrib True) []
-        b2   <- mkRTerm' Attribs $ if relevant
-                                       then [t, true, f]
-                                       else [t, k, true]
-        return b1 .* e ~> return b2 .* e
 
-    blockOrOp (LitBlock block) = do
-        let tys = IL.outerList block
-        s ~> mkBlockNew (return $ head tys) (return $ last tys) .* s
+    blockOrOp (LitBlock block') = do
+        let tys = IL.outerList block'
+        s ~> block (return $ head tys) (return $ last tys) .* s
     blockOrOp (Op op') = op op'
 
     op (LitText _) = do
@@ -675,20 +498,14 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
     op SwapD  = a .* b .* c .* d ~> a .* c .* b .* d
     op Intro1 = a ~> a .* unit
     op Elim1  = a .* unit ~> a
-    op Drop   = xDrop .* e ~> e
-    op Copy   = xCopy .* e ~> xCopy .* xCopy .* e
+    op Drop   = x .* e ~> e
+    op Copy   = x .* e ~> x .* x .* e
 
-    op Apply   = mkBlockAny x xp .* x .* e ~> xp .* e
-    op Compose = do
-        x' <- eval x
-        y' <- eval y
-        z' <- eval z
-        b1 <- eval $ mkBlockAny (return x') (return y')
-        b2 <- eval $ mkBlockAny (return y') (return z')
-        return b1 .* return b2 .* e ~> mkBlock (Left [b1, b2]) (Left [b1, b2]) (return x') (return z') .* e
-    op Quote = x .* e ~> mkBlockAny s (x .* s) .* e
-    op Relevant = opMark True
-    op Affine = opMark False
+    op Apply    = block x xp .* x .* e ~> xp .* e
+    op Compose  = block x y .* block y z .* e ~> block x z .* e
+    op Quote    = x .* e ~> block s (x .* s) .* e
+    op Relevant = block x y .* e ~> block x y .* e
+    op Affine   = block x y .* e ~> block x y .* e
 
     op IntroNum  = e ~> num .* e
     op (Digit _) = num .* e ~> num .* e
@@ -706,7 +523,7 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
     op Intro0  = a .* e ~> (a .+ void') .* e
     op Elim0   = (a .+ void') .* e ~> a .* e
 
-    op CondApply = mkBlock (Left []) (Right False) x xp .* (x .+ y) .* e ~> (xp .+ y) .* e
+    op CondApply = block x xp .* (x .+ y) .* e ~> (xp .+ y) .* e
     op Distrib   = a .* (b .+ c) .* e ~> (a .* b .+ a .* c) .* e
     op Factor    = (a .* b .+ c .* d) .* e ~> (a .+ c) .* (b .+ d) .* e
     op Merge     = do
@@ -714,14 +531,9 @@ opType unique = flip evalStateT (False, M.empty) . blockOrOp
         b' <- eval b
         c' <- eval c
         e' <- eval e
-        m <- lift $ do
-            a'' <- getType a'
-            b'' <- getType b'
-            c'' <- getType c'
-            return (a'', b'', c'')
         left  <- (return a' .+ return b') .* return e'
         right <- return c' .* return e'
-        return (left, right, Just m)
+        return (left, right, Just (a', b', c'))
     op Assert    = (a .+ b) .* e ~> b .* e
 
     op Greater = num .* num .* e ~> (num .* num .+ num .* num) .* e
@@ -747,7 +559,7 @@ unifyBlock unique merges (LitBlock bops) = do
 
 unifyAll :: ST s ID -> [(RNode s, RNode s, RNode s)] -> [RawOp] -> ST s (Either (Int, Node s, Node s, Node s, Node s) (RNodeIL s (Op (RNodeIL s)), [(RNode s, RNode s, RNode s)]))
 unifyAll unique merges [] = do
-    a <- mkAttribVar unique "a" Structural (Just False) (Just False)
+    a <- mkRVar unique "a" Structural
     return $ Right (IL.empty a, merges)
 unifyAll unique merges (opcode:opcodes) = do
     op <- unifyBlock unique merges opcode
@@ -784,12 +596,6 @@ mapMTyOps f g = IL.mapM f op
     op (LitBlock tyOps) = LitBlock <$> mapMTyOps f g tyOps
     op (Op op') = Op <$> g op'
 
-mapMTyOps_ :: Applicative m => (a -> m ()) -> (FlatOp -> m ()) -> IL.InterList a (Op (IL.InterList a)) -> m ()
-mapMTyOps_ f g = IL.mapM_ f op
-  where
-    op (LitBlock tyOps) = mapMTyOps_ f g tyOps
-    op (Op op') = g op'
-
 inferTypes :: Mode -> [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String) (IL.InterList T.Type TyOp))
 inferTypes mode logStages ops = do
     counter <- lift $ newSTRef (0 :: Int)
@@ -818,13 +624,13 @@ inferTypes mode logStages ops = do
         Right (tyOps, _) -> do
             let tys = IL.outerList tyOps
             writeGraph TIUnified tys
-            lift $ mapMTyOps_ (deloop unique) (const $ pure ()) tyOps
-            writeGraph TIResolved tys
-            lift $ mapMTyOps_ substitute (const $ pure ()) tyOps
-            writeGraph TISubstituted tys
             tyOps' <- lift $ do
+                tmp <- newSTRef undefined
+                mapMTyOps (substitute tmp) pure tyOps
+            writeGraph TISubstituted tys
+            tyOps'' <- lift $ do
                 seen   <- H.new
                 idents <- H.new
                 nextID <- newSTRef 0
-                mapMTyOps (purify seen idents nextID <=< fromRNode) pure tyOps
-            return $ Right tyOps'
+                mapMTyOps (purify seen idents nextID <=< fromRNode) pure tyOps'
+            return $ Right tyOps''
