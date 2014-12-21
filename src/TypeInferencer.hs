@@ -315,10 +315,13 @@ commonFrontier :: ST s ID -> Queue (RNode s) -> V.Vector (RNode s) -> ST s (Eith
 commonFrontier unique queue t_list = do
     t <- fromRNode $ t_list V.! 0
     ts <- V.mapM fromRNode t_list
-    case checkEqual t ts of
-        Just err -> return $ Left err
-        Nothing  -> foldM goChild (Right queue) [0 .. arity (t^?!symbol) - 1]
+    if checkIdentical t ts
+        then return $ Right queue
+        else case checkEqual t ts of
+                 Just err -> return $ Left err
+                 Nothing  -> foldM goChild (Right queue) [0 .. arity (t^?!symbol) - 1]
   where
+    checkIdentical t ts = V.all (\t' -> t^.nodeID == t'^.nodeID) ts
     checkEqual t ts =
         let diffs = V.filter (\t' -> t^?!symbol /= t'^?!symbol) ts
         in if V.null diffs
