@@ -401,28 +401,23 @@ purify idents nextID node = do
                             rec let ty = tType . T.Void $ T.Type (v^.nodeID) False False ty'
                                 replaceNode node $ purified .~ Just ty $ node'
                                 ty' <- if V.null ts
-                                           then T.Opaque <$> getIdent (node'^.nodeID)
+                                           then T.Opaque <$> getIdent
                                            else do
                                                t' <- fromRNode (ts V.! 0)
                                                cs <- mapM (purify idents nextID) $ childList t'
                                                return $ rawType (t'^?!symbol) cs
                             return ty
                         _ -> do
-                            ident' <- getIdent $ node'^.nodeID
+                            ident' <- getIdent
                             let opaque = T.Opaque ident'
                                 ty = opaque `seq` tType opaque
                             replaceNode node $ purified .~ Just ty $ node'
                             return ty
   where
-    getIdent ident = do
-        ident' <- H.lookup idents ident
-        case ident' of
-            Just ident'' -> return ident''
-            Nothing      -> do
-                ident'' <- readSTRef nextID
-                writeSTRef nextID $! ident'' + 1
-                H.insert idents ident ident''
-                return ident''
+    getIdent = do
+        ident'' <- readSTRef nextID
+        writeSTRef nextID $! ident'' + 1
+        return ident''
     rawType Product       [a, b] = T.Product a b
     rawType Sum           [a, b] = T.Sum     a b
     rawType Block         [a, b] = T.Block   a b
