@@ -76,11 +76,13 @@ data VarType = Structural | Void deriving Eq
 newtype RNode s = RNode (STRef s (Node s))
 
 data Node s = Term { _nodeID   :: {-# UNPACK #-} !ID
+                   , _purified ::                !(Maybe T.Type)
                    , _symbol   ::                !Symbol
                    , _children :: {-# UNPACK #-} !(ShortList (RNode s))
                    , _stage    ::                !Stage
                    }
             | Var  { _nodeID   :: {-# UNPACK #-} !ID
+                   , _purified ::                !(Maybe T.Type)
                    , _name     ::                 String
                    , _varType  ::                !VarType
                    , _repVar   ::                !(Maybe (RNode s))
@@ -160,12 +162,12 @@ toNetlist mode node = fst <$> toNetlistLabel mode node (nodeLabel node)
 mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Node s)
 mkTerm unique sym cs = do
     ident <- unique
-    return $ Term ident sym (SL.fromList cs) New
+    return $ Term ident Nothing sym (SL.fromList cs) New
 
 mkVar :: ST s ID -> String -> VarType -> ST s (Node s)
 mkVar unique v ty = do
     ident <- unique
-    return $ Var ident v ty Nothing TL.empty 1
+    return $ Var ident Nothing v ty Nothing TL.empty 1
 
 toRNode :: Node s -> ST s (RNode s)
 toRNode node = RNode <$> newSTRef node
@@ -375,46 +377,44 @@ substitute out nodeS = writeSTRef out nodeS >> go Nothing (0, nodeS) >> readSTRe
             replaceNode term $ stage .~ Substituted $ t
             mapM_ (go $ Just term) . zip [0..] $ childList t
 
-purify :: H.HashTable s ID T.Type -> H.HashTable s ID ID -> STRef s ID -> Node s -> ST s T.Type
-purify seen idents nextID t = do
-    let ident = t^.nodeID
-    purified <- H.lookup seen ident
-    case purified of
+purify :: H.HashTable s ID ID -> STRef s ID -> RNode s -> ST s T.Type
+purify idents nextID node = do
+    node' <- fromRNode node
+    case node'^.purified of
         Just ty -> return ty
         Nothing -> do
-            let tType = T.Type ident False False
-            case t of
-                t'@Term {} -> do
-                    rec let rty = rawType (t'^?!symbol) cs
-                            ty1 = tType rty
-                        H.insert seen ident ty1
-                        cs <- mapM (purify seen idents nextID <=< fromRNode) $ childList t'
-                    rty `seq` return ty1
+            let tType = T.Type (node'^.nodeID) False False
+            case node' of
+                t@Term {} -> do
+                    rec let rty = rawType (t^?!symbol) cs
+                            ty = tType rty
+                        replaceNode node $ purified .~ Just ty $ node'
+                        cs <- mapM (purify idents nextID) $ childList t
+                    rty `seq` return ty
                 Var {} -> do
-                    v <- case t^?!repVar of
+                    v <- case node'^?!repVar of
                              Just r  -> fromRNode =<< rep r
-                             Nothing -> return t
+                             Nothing -> return node'
                     case v^?!varType of
                         Void -> do
                             let ts = TL.toVector $ v^?!terms
                             rec let ty = tType . T.Void $ T.Type (v^.nodeID) False False ty'
-                                H.insert seen ident ty
+                                replaceNode node $ purified .~ Just ty $ node'
                                 ty' <- if V.null ts
-                                           then T.Opaque <$> getIdent t
+                                           then T.Opaque <$> getIdent (node'^.nodeID)
                                            else do
                                                t' <- fromRNode (ts V.! 0)
-                                               cs <- mapM (purify seen idents nextID <=< fromRNode) $ childList t'
+                                               cs <- mapM (purify idents nextID) $ childList t'
                                                return $ rawType (t'^?!symbol) cs
                             return ty
                         _ -> do
-                            ident' <- getIdent t
+                            ident' <- getIdent $ node'^.nodeID
                             let opaque = T.Opaque ident'
                                 ty = opaque `seq` tType opaque
-                            H.insert seen ident ty
+                            replaceNode node $ purified .~ Just ty $ node'
                             return ty
   where
-    getIdent node = do
-        let ident = node^.nodeID
+    getIdent ident = do
         ident' <- H.lookup idents ident
         case ident' of
             Just ident'' -> return ident''
@@ -633,8 +633,7 @@ inferTypes mode logStages ops = do
                 mapMTyOps (substitute tmp) pure tyOps
             writeGraph TISubstituted tys
             tyOps'' <- lift $ do
-                seen   <- H.new
                 idents <- H.new
                 nextID <- newSTRef 0
-                mapMTyOps (purify seen idents nextID <=< fromRNode) pure tyOps'
+                mapMTyOps (purify idents nextID) pure tyOps'
             return $ Right tyOps''
