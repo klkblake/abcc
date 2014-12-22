@@ -385,10 +385,11 @@ purify seen idents nextID t = do
             let tType = T.Type ident False False
             case t of
                 t'@Term {} -> do
-                    rec let ty = tType $ rawType (t'^?!symbol) cs
-                        H.insert seen ident ty
+                    rec let rty = rawType (t'^?!symbol) cs
+                            ty1 = tType rty
+                        H.insert seen ident ty1
                         cs <- mapM (purify seen idents nextID <=< fromRNode) $ childList t'
-                    return ty
+                    rty `seq` return ty1
                 Var {} -> do
                     v <- case t^?!repVar of
                              Just r  -> fromRNode =<< rep r
@@ -407,7 +408,8 @@ purify seen idents nextID t = do
                             return ty
                         _ -> do
                             ident' <- getIdent t
-                            let ty = tType $ T.Opaque ident'
+                            let opaque = T.Opaque ident'
+                                ty = opaque `seq` tType opaque
                             H.insert seen ident ty
                             return ty
   where
@@ -590,10 +592,12 @@ unifyAll unique merges (opcode:opcodes) = do
                                in go (i + 1) merges''' (IL.cons a lop tyOps) rop'' ops a'
     go _ merges' tyOps op [] a = return $ Right (IL.reverse $ IL.cons a op tyOps, merges')
 
-mapMTyOps :: Applicative m => (a -> m b) -> (FlatOp -> m FlatOp) -> IL.InterList a (Op (IL.InterList a)) -> m (IL.InterList b (Op (IL.InterList b)))
+mapMTyOps :: (Applicative m, Monad m) => (a -> m b) -> (FlatOp -> m FlatOp) -> IL.InterList a (Op (IL.InterList a)) -> m (IL.InterList b (Op (IL.InterList b)))
 mapMTyOps f g = IL.mapM f op
   where
-    op (LitBlock tyOps) = LitBlock <$> mapMTyOps f g tyOps
+    op (LitBlock tyOps) = do
+        tyOps' <- mapMTyOps f g tyOps
+        return . LitBlock $! tyOps'
     op (Op op') = Op <$> g op'
 
 inferTypes :: Mode -> [TIStage] -> [RawOp] -> Producer (TIStage, String) (ST s) (Either (Int, String) (IL.InterList T.Type TyOp))

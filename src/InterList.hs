@@ -4,8 +4,8 @@ import Prelude hiding (mapM, mapM_)
 
 import Control.Applicative
 
-data InterList a b = Empty a
-                   | Cons a b (InterList a b)
+data InterList a b = Empty !a
+                   | Cons !a !b !(InterList a b)
                    deriving Show
 
 empty :: a -> InterList a b

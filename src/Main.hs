@@ -130,7 +130,7 @@ doTypeCheck flags opts = do
                             let g = expand prog
                             print g
                             writeFile "expanded.dot" $ showGraph (toGraphViz "node" g) ""
-                        else printProg 0 prog
+                        else return () --printProg 0 prog
         Nothing   -> exitFailure
   where
     writeGraph (stage, graph) = writeFile (fromJust . lookup stage $ optDump opts) graph
