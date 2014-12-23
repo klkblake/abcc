@@ -19,7 +19,6 @@ import Control.Monad.State hiding (mapM_, modify)
 import qualified Control.Monad.State as State
 import Control.Monad.Writer hiding (Product, Sum, mapM_)
 import Data.Foldable
-import qualified Data.HashTable.ST.Basic as H
 import qualified Data.IntMap as IM
 import qualified Data.Map.Strict as M
 import Data.Maybe
@@ -42,7 +41,6 @@ import Queue (Queue)
 import qualified Queue as Q
 
 data TIStage = TIUnified
-             | TISubstituted
              deriving (Eq, Enum, Bounded, Show)
 
 data Symbol = Product
@@ -69,8 +67,6 @@ arity Num        = 0
 arity Unit       = 0
 arity (Sealed _) = 1
 
-data Stage = New | Substituted deriving Eq
-
 data VarType = Structural | Void deriving Eq
 
 newtype RNode s = RNode (STRef s (Node s))
@@ -79,7 +75,6 @@ data Node s = Term { _nodeID   :: {-# UNPACK #-} !ID
                    , _purified ::                !(Maybe T.Type)
                    , _symbol   ::                !Symbol
                    , _children :: {-# UNPACK #-} !(ShortList (RNode s))
-                   , _stage    ::                !Stage
                    }
             | Var  { _nodeID   :: {-# UNPACK #-} !ID
                    , _purified ::                !(Maybe T.Type)
@@ -162,7 +157,7 @@ toNetlist mode node = fst <$> toNetlistLabel mode node (nodeLabel node)
 mkTerm :: ST s ID -> Symbol -> [RNode s] -> ST s (Node s)
 mkTerm unique sym cs = do
     ident <- unique
-    return $ Term ident Nothing sym (SL.fromList cs) New
+    return . Term ident Nothing sym $ SL.fromList cs
 
 mkVar :: ST s ID -> String -> VarType -> ST s (Node s)
 mkVar unique v ty = do
@@ -346,39 +341,8 @@ unify unique t_list = do
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
 
--- TODO this should probably be removed
-substitute :: STRef s (RNode s) -> RNode s -> ST s (RNode s)
-substitute out nodeS = writeSTRef out nodeS >> go Nothing (0, nodeS) >> readSTRef out
-  where
-    go term (i, node) = do
-        node' <- fromRNode node
-        case node' of
-            Term {} -> subst node
-            Var  {} -> do
-                v <- rep node
-                v' <- fromRNode v
-                let ts = TL.toVector $ v'^?!terms
-                case term of
-                    Just term' -> do
-                        t <- fromRNode term'
-                        when (v'^?!varType /= Void) $ case V.length ts of
-                                                          0 -> updateChild term' t i $ v
-                                                          1 -> updateChild term' t i $ ts V.! 0
-                                                          _ -> error "Var has multiple children"
-                    Nothing -> do
-                        when (v'^?!varType /= Void) $ case V.length ts of
-                                                          0 -> writeSTRef out $ v
-                                                          1 -> writeSTRef out $ ts V.! 0
-                                                          _ -> error "Var has multiple children"
-                V.mapM_ subst ts
-    subst term = do
-        t <- fromRNode term
-        unless (t^?!stage == Substituted) $ do
-            replaceNode term $ stage .~ Substituted $ t
-            mapM_ (go $ Just term) . zip [0..] $ childList t
-
-purify :: H.HashTable s ID ID -> STRef s ID -> RNode s -> ST s T.Type
-purify idents nextID node = do
+purify :: STRef s ID -> RNode s -> ST s T.Type
+purify nextID node = do
     node' <- fromRNode node
     case node'^.purified of
         Just ty -> return ty
@@ -389,28 +353,31 @@ purify idents nextID node = do
                     rec let rty = rawType (t^?!symbol) cs
                             ty = tType rty
                         replaceNode node $ purified .~ Just ty $ node'
-                        cs <- mapM (purify idents nextID) $ childList t
+                        cs <- mapM (purify nextID) $ childList t
                     rty `seq` return ty
                 Var {} -> do
                     v <- case node'^?!repVar of
                              Just r  -> fromRNode =<< rep r
                              Nothing -> return node'
+                    let ts = TL.toVector $ v^?!terms
                     case v^?!varType of
                         Void -> do
-                            let ts = TL.toVector $ v^?!terms
                             rec let ty = tType . T.Void $ T.Type (v^.nodeID) False False ty'
                                 replaceNode node $ purified .~ Just ty $ node'
                                 ty' <- if V.null ts
                                            then T.Opaque <$> getIdent
                                            else do
                                                t' <- fromRNode (ts V.! 0)
-                                               cs <- mapM (purify idents nextID) $ childList t'
+                                               cs <- mapM (purify nextID) $ childList t'
                                                return $ rawType (t'^?!symbol) cs
                             return ty
                         _ -> do
-                            ident' <- getIdent
-                            let opaque = T.Opaque ident'
-                                ty = opaque `seq` tType opaque
+                            ty <- if V.null ts
+                                      then do
+                                          ident' <- getIdent
+                                          let opaque = T.Opaque ident'
+                                          return $ opaque `seq` tType opaque
+                                      else purify nextID $ ts V.! 0
                             replaceNode node $ purified .~ Just ty $ node'
                             return ty
   where
@@ -624,11 +591,6 @@ inferTypes mode logStages ops = do
             let tys = IL.outerList tyOps
             writeGraph TIUnified tys
             tyOps' <- lift $ do
-                tmp <- newSTRef undefined
-                mapMTyOps (substitute tmp) pure tyOps
-            writeGraph TISubstituted tys
-            tyOps'' <- lift $ do
-                idents <- H.new
                 nextID <- newSTRef 0
-                mapMTyOps (purify idents nextID) pure tyOps'
-            return $ Right tyOps''
+                mapMTyOps (purify nextID) pure tyOps
+            return $ Right tyOps'
