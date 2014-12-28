@@ -9,7 +9,7 @@ module TypeInferencer
 -- the functional inverse of the Ackermann function. Be careful to preserve
 -- this time complexity!
 
-import Prelude hiding (read, all, mapM_, elem, concat, concatMap)
+import Prelude hiding (read, any, all, mapM_, elem, concat, concatMap)
 
 import Control.Applicative
 import Control.Lens hiding (op, children)
@@ -20,6 +20,7 @@ import qualified Control.Monad.State as State
 import Control.Monad.Writer hiding (Product, Sum, mapM_)
 import Data.Foldable
 import qualified Data.IntMap as IM
+import Data.List (transpose)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.STRef
@@ -40,6 +41,8 @@ import qualified TreeList as TL
 import Queue (Queue)
 import qualified Queue as Q
 
+import Debug.Trace
+
 data TIStage = TIUnified
              deriving (Eq, Enum, Bounded, Show)
 
@@ -49,6 +52,7 @@ data Symbol = Product
             | Num
             | Unit
             | Sealed String
+            | Opaque
             deriving Eq
 
 instance Show Symbol where
@@ -58,6 +62,7 @@ instance Show Symbol where
     show Num           = "N"
     show Unit          = "1"
     show (Sealed seal) = '{' : seal ++ "}"
+    show Opaque        = "■"
 
 arity :: Symbol -> Int
 arity Product    = 2
@@ -66,6 +71,7 @@ arity Block      = 2
 arity Num        = 0
 arity Unit       = 0
 arity (Sealed _) = 1
+arity Opaque     = 0
 
 data VarType = Structural | Void deriving Eq
 
@@ -341,58 +347,6 @@ unify unique t_list = do
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
 
-purify :: STRef s ID -> RNode s -> ST s T.Type
-purify nextID node = do
-    node' <- fromRNode node
-    case node'^.purified of
-        Just ty -> return ty
-        Nothing -> do
-            let tType = T.Type (node'^.nodeID) False False
-            case node' of
-                t@Term {} -> do
-                    rec let rty = rawType (t^?!symbol) cs
-                            ty = tType rty
-                        replaceNode node $ purified .~ Just ty $ node'
-                        cs <- mapM (purify nextID) $ childList t
-                    rty `seq` return ty
-                Var {} -> do
-                    v <- case node'^?!repVar of
-                             Just r  -> fromRNode =<< rep r
-                             Nothing -> return node'
-                    let ts = TL.toVector $ v^?!terms
-                    case v^?!varType of
-                        Void -> do
-                            rec let ty = tType . T.Void $ T.Type (v^.nodeID) False False ty'
-                                replaceNode node $ purified .~ Just ty $ node'
-                                ty' <- if V.null ts
-                                           then T.Opaque <$> getIdent
-                                           else do
-                                               t' <- fromRNode (ts V.! 0)
-                                               cs <- mapM (purify nextID) $ childList t'
-                                               return $ rawType (t'^?!symbol) cs
-                            return ty
-                        _ -> do
-                            ty <- if V.null ts
-                                      then do
-                                          ident' <- getIdent
-                                          let opaque = T.Opaque ident'
-                                          return $ opaque `seq` tType opaque
-                                      else purify nextID $ ts V.! 0
-                            replaceNode node $ purified .~ Just ty $ node'
-                            return ty
-  where
-    getIdent = do
-        ident'' <- readSTRef nextID
-        writeSTRef nextID $! ident'' + 1
-        return ident''
-    rawType Product       [a, b] = T.Product a b
-    rawType Sum           [a, b] = T.Sum     a b
-    rawType Block         [a, b] = T.Block   a b
-    rawType Num           _      = T.Num
-    rawType Unit          _      = T.Unit
-    rawType (Sealed seal) [a]    = T.Sealed seal a
-    rawType _             _      = error "Illegal term type in purify"
-
 type RNodeIL s = IL.InterList (RNode s)
 
 opType :: ST s ID -> Op (RNodeIL s) -> ST s (RNode s, RNode s, Maybe (RNode s, RNode s, RNode s))
@@ -536,7 +490,7 @@ unifyAll unique merges (opcode:opcodes) = do
                                Nothing -> merges'
             go 0 merges'' (IL.empty a) op' opcodes b
   where
-    go i merges' tyOps lop (rop:ops) a = do
+    go i !merges' tyOps lop (rop:ops) a = do
         rop' <- unifyBlock unique merges' rop
         case rop' of
             Left err -> return $ Left err
@@ -552,7 +506,140 @@ unifyAll unique merges (opcode:opcodes) = do
                                                   Just m -> m:merges''
                                                   Nothing -> merges''
                                in go (i + 1) merges''' (IL.cons a lop tyOps) rop'' ops a'
-    go _ merges' tyOps op [] a = return $ Right (IL.reverse $ IL.cons a op tyOps, merges')
+    go _ !merges' tyOps op [] a = return $ Right (IL.reverse $ IL.cons a op tyOps, merges')
+
+collateMerges :: [(RNode s, RNode s, RNode s)] -> ST s (IM.IntMap (RNode s, [RNode s]))
+collateMerges = foldM go IM.empty
+  where
+    go merges (a, b, x) = do
+        x' <- rep x
+        a' <- rep a
+        b' <- rep b
+        x'' <- fromRNode x'
+        return $ IM.insertWith (\(_, as) (n, bs) -> (n, as ++ bs)) (x''^.nodeID) (x', [a', b']) merges
+
+resolveMerge :: ST s ID -> RNode s -> [RNode s] -> ST s (Either (Node s, Node s) [(RNode s, [RNode s])])
+resolveMerge unique x as = do
+    -- TODO consider Merged instead of Opaque
+    -- TODO propagate information from results
+    -- TODO multiway if
+    x' <- deref x
+    x'' <- fromRNode x'
+    as'  <- mapM deref     as
+    as'' <- mapM fromRNode as'
+    let idents = map (view nodeID) as''
+    if isTerm x'' && x''^?!symbol == Opaque
+        then return $ Right []
+        else
+            if all (== head idents) idents
+                then do
+                    res <- unify unique (V.fromList [x', head as'])
+                    return $ case res of
+                                 Just err -> Left err
+                                 Nothing -> Right []
+                else
+                    if all isTerm as'' && all (\t -> t^?!symbol == (head as'')^?!symbol) as''
+                        then do
+                            let sym = (head as'')^?!symbol
+                                n = arity sym
+                            cs <- replicateM n $ mkRVar unique "m" Structural
+                            t <- mkRTerm unique sym cs
+                            res <- unify unique $ V.fromList [x', t]
+                            let css = map (SL.toList . (^?!children)) as''
+                            case res of
+                                Just err -> return $ Left err
+                                Nothing  -> resolveMerges unique . zip cs $ transpose css
+                        else
+                            if all isTerm as'' || any (\t -> isTerm t && t^?!symbol == Opaque) as''
+                                then do
+                                    t <- mkRTerm unique Opaque []
+                                    res <- unify unique $ V.fromList [x', t]
+                                    return $ case res of
+                                                 Just err -> Left err
+                                                 Nothing  -> Right []
+                                else return $ Right [(x', as')]
+  where
+    deref node = do
+        node' <- fromRNode node
+        case node' of
+            Var  {} -> do
+                var  <- rep node
+                var' <- fromRNode var
+                return $ if TL.size (var'^?!terms) == 0
+                             then var
+                             else TL.toVector (var'^?!terms) V.! 0
+            Term {} -> return node
+    isTerm Term {} = True
+    isTerm Var  {} = False
+
+resolveMerges :: ST s ID -> [(RNode s, [RNode s])] -> ST s (Either (Node s, Node s) [(RNode s, [RNode s])])
+resolveMerges unique merges = go [] merges
+  where
+    go unhandled [] = return $ Right unhandled
+    go unhandled ((x, as):ms) = do
+        res <- resolveMerge unique x as
+        case res of
+            Left err  -> return $ Left err
+            Right ms' -> go (ms' ++ unhandled) ms
+
+purify :: STRef s ID -> RNode s -> ST s T.Type
+purify nextID node = do
+    node' <- fromRNode node
+    case node'^.purified of
+        Just ty -> return ty
+        Nothing -> do
+            let tType = T.Type (node'^.nodeID) False False
+            case node' of
+                t@Term {} | t^?!symbol == Opaque -> do
+                    ty <- do
+                        ident' <- getIdent
+                        let opaque = T.Opaque ident'
+                        return $ opaque `seq` tType opaque
+                    replaceNode node $ purified .~ Just ty $ node'
+                    return ty
+                t@Term {} -> do
+                    rec let rty = rawType (t^?!symbol) cs
+                            ty = tType rty
+                        replaceNode node $ purified .~ Just ty $ node'
+                        cs <- mapM (purify nextID) $ childList t
+                    rty `seq` return ty
+                Var {} -> do
+                    v <- case node'^?!repVar of
+                             Just r  -> fromRNode =<< rep r
+                             Nothing -> return node'
+                    let ts = TL.toVector $ v^?!terms
+                    case v^?!varType of
+                        Void -> do
+                            rec let ty = tType . T.Void $ T.Type (v^.nodeID) False False ty'
+                                replaceNode node $ purified .~ Just ty $ node'
+                                ty' <- if V.null ts
+                                           then T.Opaque <$> getIdent
+                                           else do
+                                               t' <- fromRNode (ts V.! 0)
+                                               cs <- mapM (purify nextID) $ childList t'
+                                               return $ rawType (t'^?!symbol) cs
+                            return ty
+                        _ -> do
+                            ty <- if V.null ts
+                                      then do
+                                          ident' <- getIdent
+                                          let opaque = T.Opaque ident'
+                                          return $ opaque `seq` tType opaque
+                                      else purify nextID $ ts V.! 0
+                            replaceNode node $ purified .~ Just ty $ node'
+                            return ty
+  where
+    getIdent = do
+        ident'' <- readSTRef nextID
+        writeSTRef nextID $! ident'' + 1
+        return ident''
+    rawType Product       [a, b] = T.Product a b
+    rawType Sum           [a, b] = T.Sum     a b
+    rawType Block         [a, b] = T.Block   a b
+    rawType Num           _      = T.Num
+    rawType Unit          _      = T.Unit
+    rawType (Sealed seal) [a]    = T.Sealed seal a
+    rawType _             _      = error "Illegal term type in purify"
 
 mapMTyOps :: (Applicative m, Monad m) => (a -> m b) -> (FlatOp -> m FlatOp) -> IL.InterList a (Op (IL.InterList a)) -> m (IL.InterList b (Op (IL.InterList b)))
 mapMTyOps f g = IL.mapM f op
@@ -587,9 +674,21 @@ inferTypes mode logStages ops = do
             outer <- errorTerm "outer" "While trying to unify:" a b
             let graph = showGraph $ Graph "" ("Unification failure at opcode index " ++ show i) [inner, outer] [] []
             return $ Left (i, graph "")
-        Right (tyOps, _) -> do
+        Right (tyOps, mergeList) -> do
             let tys = IL.outerList tyOps
-            writeGraph TIUnified tys
+            --writeGraph TIUnified tys
+            merges <- lift $ collateMerges mergeList
+            let merges' = IM.elems merges
+            -- TODO handle error case
+            traceShow (length merges') () `seq` return ()
+            Right merges'' <- lift $ resolveMerges unique merges'
+            traceShow (length merges'') () `seq` return ()
+            Right merges''' <- lift $ resolveMerges unique merges''
+            traceShow (length merges''') () `seq` return ()
+            Right merges'''' <- lift $ resolveMerges unique merges'''
+            traceShow (length merges'''') () `seq` return ()
+            Right unhandled <- lift $ uncurry (resolveMerge unique) $ head merges''''
+            writeGraph TIUnified $ concatMap (\(x, as) -> x:as) merges''''
             tyOps' <- lift $ do
                 nextID <- newSTRef 0
                 mapMTyOps (purify nextID) pure tyOps
