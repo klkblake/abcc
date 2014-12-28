@@ -32,10 +32,7 @@ helpText prog = unlines [ prog ++ " - A compiler for Awelon Bytecode"
                         , "\t--expansion              Run the expansion pass"
                         , "\t--dump-<stage>[=FILE]    Dump the internal state of the typechecker at a particular stage to a GraphViz file"
                         , "\t\tStages:"
-                        , "\t\t  initial        After the opcodes have had types assigned to them"
                         , "\t\t  unified        After the inputs and outputs of adjacent opcodes have been unified"
-                        , "\t\t  resolved       After the substructural attributes have been resolved"
-                        , "\t\t  substituted    After the variables have been eliminated from the terms"
                         , "\t--dump-all               Equivalent to specifying all of the above --dump-<stage> flags"
                         , "\t--verbose-graphs         Output graphs that more accurately reflect the type inferencer state"
                         ]
@@ -54,7 +51,6 @@ flagSpecs =
     , OptSpec ["typecheck"]        [] (NoArg TypeCheck)
     , OptSpec ["expansion"]        [] (NoArg Expansion)
     , OptSpec ["dump-unified"]     [] . OptionalArg $ return . Dump TIUnified
-    , OptSpec ["dump-substituted"] [] . OptionalArg $ return . Dump TISubstituted
     , OptSpec ["dump-all"]         [] $ NoArg DumpAll
     , OptSpec ["verbose-graphs"]   [] $ NoArg VerboseGraphs
     ]
@@ -82,7 +78,6 @@ processFlags flags =
     processDump (Dump stage Nothing)     = Just (stage, defaultFile stage)
     processDump _ = Nothing
     defaultFile TIUnified     = "unified.dot"
-    defaultFile TISubstituted = "substituted.dot"
 
 doCompile :: IO ()
 doCompile = do
