@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, TupleSections, FlexibleInstances, FlexibleContexts, RecursiveDo, TemplateHaskell, Rank2Types, BangPatterns #-}
+{-# LANGUAGE TypeFamilies, TupleSections, FlexibleInstances, FlexibleContexts, RecursiveDo, TemplateHaskell, Rank2Types, BangPatterns, MultiWayIf #-}
 module TypeInferencer
     ( inferTypes
     , TIStage (..)
@@ -522,42 +522,36 @@ resolveMerge :: ST s ID -> RNode s -> [RNode s] -> ST s (Either (Node s, Node s)
 resolveMerge unique x as = do
     -- TODO consider Merged instead of Opaque
     -- TODO propagate information from results
+    -- TODO collate after each resolve pass
     -- TODO multiway if
     x' <- deref x
     x'' <- fromRNode x'
     as'  <- mapM deref     as
     as'' <- mapM fromRNode as'
     let idents = map (view nodeID) as''
-    if isTerm x'' && x''^?!symbol == Opaque
-        then return $ Right []
-        else
-            if all (== head idents) idents
-                then do
-                    res <- unify unique (V.fromList [x', head as'])
-                    return $ case res of
-                                 Just err -> Left err
-                                 Nothing -> Right []
-                else
-                    if all isTerm as'' && all (\t -> t^?!symbol == (head as'')^?!symbol) as''
-                        then do
-                            let sym = (head as'')^?!symbol
-                                n = arity sym
-                            cs <- replicateM n $ mkRVar unique "m" Structural
-                            t <- mkRTerm unique sym cs
-                            res <- unify unique $ V.fromList [x', t]
-                            let css = map (SL.toList . (^?!children)) as''
-                            case res of
-                                Just err -> return $ Left err
-                                Nothing  -> resolveMerges unique . zip cs $ transpose css
-                        else
-                            if all isTerm as'' || any (\t -> isTerm t && t^?!symbol == Opaque) as''
-                                then do
-                                    t <- mkRTerm unique Opaque []
-                                    res <- unify unique $ V.fromList [x', t]
-                                    return $ case res of
-                                                 Just err -> Left err
-                                                 Nothing  -> Right []
-                                else return $ Right [(x', as')]
+    if | isTerm x'' && x''^?!symbol == Opaque -> return $ Right []
+       | all (== head idents) idents -> do
+           res <- unify unique (V.fromList [x', head as'])
+           return $ case res of
+                        Just err -> Left err
+                        Nothing -> Right []
+       | all isTerm as'' && all (\t -> t^?!symbol == (head as'')^?!symbol) as'' -> do
+           let sym = (head as'')^?!symbol
+               n = arity sym
+           cs <- replicateM n $ mkRVar unique "m" Structural
+           t <- mkRTerm unique sym cs
+           res <- unify unique $ V.fromList [x', t]
+           let css = map (SL.toList . (^?!children)) as''
+           case res of
+               Just err -> return $ Left err
+               Nothing  -> resolveMerges unique . zip cs $ transpose css
+       | all isTerm as'' || any (\t -> isTerm t && t^?!symbol == Opaque) as'' -> do
+           t <- mkRTerm unique Opaque []
+           res <- unify unique $ V.fromList [x', t]
+           return $ case res of
+                        Just err -> Left err
+                        Nothing  -> Right []
+       | otherwise -> return $ Right [(x', as')]
   where
     deref node = do
         node' <- fromRNode node
@@ -675,7 +669,7 @@ inferTypes mode logStages ops = do
             let graph = showGraph $ Graph "" ("Unification failure at opcode index " ++ show i) [inner, outer] [] []
             return $ Left (i, graph "")
         Right (tyOps, mergeList) -> do
-            let tys = IL.outerList tyOps
+            --let tys = IL.outerList tyOps
             --writeGraph TIUnified tys
             merges <- lift $ collateMerges mergeList
             let merges' = IM.elems merges
