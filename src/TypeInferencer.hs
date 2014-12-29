@@ -9,21 +9,22 @@ module TypeInferencer
 -- the functional inverse of the Ackermann function. Be careful to preserve
 -- this time complexity!
 
-import Prelude hiding (read, any, all, mapM_, elem, concat, concatMap)
+import Prelude hiding (read, any, all, mapM, mapM_, elem, concat, concatMap)
 
 import Control.Applicative
 import Control.Lens hiding (op, children)
-import Control.Monad hiding (mapM_)
+import Control.Monad hiding (mapM, mapM_)
 import Control.Monad.ST
-import Control.Monad.State hiding (mapM_, modify)
+import Control.Monad.State hiding (mapM, mapM_, modify)
 import qualified Control.Monad.State as State
-import Control.Monad.Writer hiding (Product, Sum, mapM_)
+import Control.Monad.Writer hiding (Product, Sum, mapM, mapM_)
 import Data.Foldable
 import qualified Data.IntMap as IM
 import Data.List (transpose)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.STRef
+import Data.Traversable
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
 import Pipes hiding ((~>))
@@ -507,12 +508,24 @@ unifyAll unique merges (opcode:opcodes) = do
                                                   Nothing -> merges''
                                in go (i + 1) merges''' (IL.cons a lop tyOps) rop'' ops a'
     go _ !merges' tyOps op [] a = return $ Right (IL.reverse $ IL.cons a op tyOps, merges')
+    
+deref :: RNode s -> ST s (RNode s)
+deref node = do
+    node' <- fromRNode node
+    case node' of
+        Var  {} -> do
+            var  <- rep node
+            var' <- fromRNode var
+            return $ if TL.size (var'^?!terms) == 0
+                         then var
+                         else TL.toVector (var'^?!terms) V.! 0
+        Term {} -> return node
 
 collateMerges :: [(RNode s, [RNode s])] -> ST s [(RNode s, [RNode s])]
 collateMerges = fmap IM.elems . foldM go IM.empty
   where
     go merges (x, as) = do
-        x' <- rep x
+        x' <- deref x
         x'' <- fromRNode x'
         return $ IM.insertWith (\(_, bs) (n, cs) -> (n, bs ++ cs)) (x''^.nodeID) (x', as) merges
 
@@ -520,7 +533,6 @@ resolveMerge :: ST s ID -> RNode s -> [RNode s] -> ST s (Either (Node s, Node s)
 resolveMerge unique x as = do
     -- TODO consider Merged instead of Opaque
     -- TODO propagate information from results
-    -- TODO collate after each resolve pass
     x' <- deref x
     x'' <- fromRNode x'
     as'  <- mapM deref     as
@@ -550,16 +562,6 @@ resolveMerge unique x as = do
                         Nothing  -> Right []
        | otherwise -> return $ Right [(x', as')]
   where
-    deref node = do
-        node' <- fromRNode node
-        case node' of
-            Var  {} -> do
-                var  <- rep node
-                var' <- fromRNode var
-                return $ if TL.size (var'^?!terms) == 0
-                             then var
-                             else TL.toVector (var'^?!terms) V.! 0
-            Term {} -> return node
     isTerm Term {} = True
     isTerm Var  {} = False
 
@@ -671,11 +673,11 @@ inferTypes mode logStages ops = do
             merges <- lift $ collateMerges mergeList
             -- TODO handle error case
             traceShow (length merges) () `seq` return ()
-            Right merges' <- lift $ resolveMerges unique merges
+            Right merges' <- lift $ mapM collateMerges =<< resolveMerges unique merges
             traceShow (length merges') () `seq` return ()
-            Right merges'' <- lift $ resolveMerges unique merges'
+            Right merges'' <- lift $ mapM collateMerges =<< resolveMerges unique merges'
             traceShow (length merges'') () `seq` return ()
-            Right merges''' <- lift $ resolveMerges unique merges''
+            Right merges''' <- lift $ mapM collateMerges =<< resolveMerges unique merges''
             traceShow (length merges''') () `seq` return ()
             Right unhandled <- lift $ uncurry (resolveMerge unique) $ head merges'''
             writeGraph TIUnified $ concatMap (\(x, as) -> x:as) merges'''
