@@ -349,7 +349,7 @@ unify unique t_list = do
 
 type RNodeIL s = IL.InterList (RNode s)
 
-opType :: ST s ID -> Op (RNodeIL s) -> ST s (RNode s, RNode s, Maybe (RNode s, RNode s, RNode s))
+opType :: ST s ID -> Op (RNodeIL s) -> ST s (RNode s, RNode s, Maybe (RNode s, [RNode s]))
 opType unique = flip evalStateT M.empty . blockOrOp
   where
     mkRTerm' sym cs = lift $ mkRTerm unique sym cs
@@ -451,7 +451,7 @@ opType unique = flip evalStateT M.empty . blockOrOp
         e' <- eval e
         left  <- (return a' .+ return b') .* return e'
         right <- return c' .* return e'
-        return (left, right, Just (a', b', c'))
+        return (left, right, Just (c', [a', b']))
     op Assert    = (a .+ b) .* e ~> b .* e
 
     op Greater = num .* num .* e ~> (num .* num .+ num .* num) .* e
@@ -467,7 +467,7 @@ opType unique = flip evalStateT M.empty . blockOrOp
 
     op ApplyTail = error "To be removed."
 
-unifyBlock :: ST s ID -> [(RNode s, RNode s, RNode s)] -> RawOp -> ST s (Either (Int, Node s, Node s, Node s, Node s) (Op (RNodeIL s), [(RNode s, RNode s, RNode s)]))
+unifyBlock :: ST s ID -> [(RNode s, [RNode s])] -> RawOp -> ST s (Either (Int, Node s, Node s, Node s, Node s) (Op (RNodeIL s), [(RNode s, [RNode s])]))
 unifyBlock _      merges (Op op) = return $ Right (Op op, merges)
 unifyBlock unique merges (LitBlock bops) = do
     btyOps <- unifyAll unique merges bops
@@ -475,7 +475,7 @@ unifyBlock unique merges (LitBlock bops) = do
                  Left  err               -> Left err
                  Right (btyOps', merges') -> Right (LitBlock btyOps', merges')
 
-unifyAll :: ST s ID -> [(RNode s, RNode s, RNode s)] -> [RawOp] -> ST s (Either (Int, Node s, Node s, Node s, Node s) (RNodeIL s (Op (RNodeIL s)), [(RNode s, RNode s, RNode s)]))
+unifyAll :: ST s ID -> [(RNode s, [RNode s])] -> [RawOp] -> ST s (Either (Int, Node s, Node s, Node s, Node s) (RNodeIL s (Op (RNodeIL s)), [(RNode s, [RNode s])]))
 unifyAll unique merges [] = do
     a <- mkRVar unique "a" Structural
     return $ Right (IL.empty a, merges)
@@ -508,22 +508,19 @@ unifyAll unique merges (opcode:opcodes) = do
                                in go (i + 1) merges''' (IL.cons a lop tyOps) rop'' ops a'
     go _ !merges' tyOps op [] a = return $ Right (IL.reverse $ IL.cons a op tyOps, merges')
 
-collateMerges :: [(RNode s, RNode s, RNode s)] -> ST s (IM.IntMap (RNode s, [RNode s]))
-collateMerges = foldM go IM.empty
+collateMerges :: [(RNode s, [RNode s])] -> ST s [(RNode s, [RNode s])]
+collateMerges = fmap IM.elems . foldM go IM.empty
   where
-    go merges (a, b, x) = do
+    go merges (x, as) = do
         x' <- rep x
-        a' <- rep a
-        b' <- rep b
         x'' <- fromRNode x'
-        return $ IM.insertWith (\(_, as) (n, bs) -> (n, as ++ bs)) (x''^.nodeID) (x', [a', b']) merges
+        return $ IM.insertWith (\(_, bs) (n, cs) -> (n, bs ++ cs)) (x''^.nodeID) (x', as) merges
 
 resolveMerge :: ST s ID -> RNode s -> [RNode s] -> ST s (Either (Node s, Node s) [(RNode s, [RNode s])])
 resolveMerge unique x as = do
     -- TODO consider Merged instead of Opaque
     -- TODO propagate information from results
     -- TODO collate after each resolve pass
-    -- TODO multiway if
     x' <- deref x
     x'' <- fromRNode x'
     as'  <- mapM deref     as
@@ -672,17 +669,16 @@ inferTypes mode logStages ops = do
             --let tys = IL.outerList tyOps
             --writeGraph TIUnified tys
             merges <- lift $ collateMerges mergeList
-            let merges' = IM.elems merges
             -- TODO handle error case
+            traceShow (length merges) () `seq` return ()
+            Right merges' <- lift $ resolveMerges unique merges
             traceShow (length merges') () `seq` return ()
             Right merges'' <- lift $ resolveMerges unique merges'
             traceShow (length merges'') () `seq` return ()
             Right merges''' <- lift $ resolveMerges unique merges''
             traceShow (length merges''') () `seq` return ()
-            Right merges'''' <- lift $ resolveMerges unique merges'''
-            traceShow (length merges'''') () `seq` return ()
-            Right unhandled <- lift $ uncurry (resolveMerge unique) $ head merges''''
-            writeGraph TIUnified $ concatMap (\(x, as) -> x:as) merges''''
+            Right unhandled <- lift $ uncurry (resolveMerge unique) $ head merges'''
+            writeGraph TIUnified $ concatMap (\(x, as) -> x:as) merges'''
             tyOps' <- lift $ do
                 nextID <- newSTRef 0
                 mapMTyOps (purify nextID) pure tyOps
