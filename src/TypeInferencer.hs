@@ -311,6 +311,7 @@ commonFrontier unique queue t_list = do
             else return queue'
     processTerms v queue' = add queue' v
 
+-- All RNodes except the first are mangled.
 unify :: ST s ID -> V.Vector (RNode s) -> ST s (Maybe (Node s, Node s))
 unify unique t_list = do
     [a, b] <- mapM fromRNode $ V.toList t_list
@@ -516,7 +517,7 @@ deref node = do
         Var  {} -> do
             var  <- rep node
             var' <- fromRNode var
-            return $ if TL.size (var'^?!terms) == 0
+            return $ if TL.size (var'^?!terms) == 0 || var'^?!varType == Void
                          then var
                          else TL.toVector (var'^?!terms) V.! 0
         Term {} -> return node
@@ -577,34 +578,32 @@ resolveMerges unique merges = go [] merges
 
 purify :: STRef s ID -> RNode s -> ST s T.Type
 purify nextID node = do
-    node' <- fromRNode node
-    case node'^.purified of
+    node' <- deref node --fromRNode node
+    node'' <- fromRNode node' --fromRNode node
+    case node''^.purified of
         Just ty -> return ty
         Nothing -> do
-            let tType = T.Type (node'^.nodeID) False False
-            case node' of
+            let tType = T.Type (node''^.nodeID) False False
+            case node'' of
                 t@Term {} | t^?!symbol == Opaque -> do
                     ty <- do
                         ident' <- getIdent
                         let opaque = T.Opaque ident'
                         return $ opaque `seq` tType opaque
-                    replaceNode node $ purified .~ Just ty $ node'
+                    replaceNode node' $ purified .~ Just ty $ node''
                     return ty
                 t@Term {} -> do
                     rec let rty = rawType (t^?!symbol) cs
                             ty = tType rty
-                        replaceNode node $ purified .~ Just ty $ node'
+                        replaceNode node' $ purified .~ Just ty $ node''
                         cs <- mapM (purify nextID) $ childList t
                     rty `seq` return ty
                 Var {} -> do
-                    v <- case node'^?!repVar of
-                             Just r  -> fromRNode =<< rep r
-                             Nothing -> return node'
-                    let ts = TL.toVector $ v^?!terms
-                    case v^?!varType of
+                    case node''^?!varType of
                         Void -> do
-                            rec let ty = tType . T.Void $ T.Type (v^.nodeID) False False ty'
-                                replaceNode node $ purified .~ Just ty $ node'
+                            rec let ty = tType . T.Void $ T.Type (node''^.nodeID) False False ty'
+                                replaceNode node' $ purified .~ Just ty $ node''
+                                let ts = TL.toVector $ node''^?!terms
                                 ty' <- if V.null ts
                                            then T.Opaque <$> getIdent
                                            else do
@@ -613,13 +612,11 @@ purify nextID node = do
                                                return $ rawType (t'^?!symbol) cs
                             return ty
                         _ -> do
-                            ty <- if V.null ts
-                                      then do
-                                          ident' <- getIdent
-                                          let opaque = T.Opaque ident'
-                                          return $ opaque `seq` tType opaque
-                                      else purify nextID $ ts V.! 0
-                            replaceNode node $ purified .~ Just ty $ node'
+                            ty <- do
+                                ident' <- getIdent
+                                let opaque = T.Opaque ident'
+                                return $ opaque `seq` tType opaque
+                            replaceNode node' $ purified .~ Just ty $ node''
                             return ty
   where
     getIdent = do
