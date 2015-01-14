@@ -329,7 +329,7 @@ unify unique t_list = do
                    identA <- view nodeID <$> fromRNode a'
                    identB <- view nodeID <$> fromRNode b'
                    Right <$> if identA /= identB
-                                 then merge Q.empty (t_list V.! 0) (t_list V.! 1)
+                                 then merge Q.empty a' b'
                                  else return Q.empty
     case res of
         Left  err   -> return $ Just err
@@ -519,7 +519,9 @@ deref node = do
             var' <- fromRNode var
             return $ if TL.size (var'^?!terms) == 0 || var'^?!varType == Void
                          then var
-                         else TL.toVector (var'^?!terms) V.! 0
+                         else if TL.size (var'^?!terms) > 1
+                                  then error "Unresolved variable"
+                                  else TL.toVector (var'^?!terms) V.! 0
         Term {} -> return node
 
 collateMerges :: [(RNode s, [RNode s])] -> ST s [(RNode s, [RNode s])]
@@ -578,8 +580,8 @@ resolveMerges unique merges = go [] merges
 
 purify :: STRef s ID -> RNode s -> ST s T.Type
 purify nextID node = do
-    node' <- deref node --fromRNode node
-    node'' <- fromRNode node' --fromRNode node
+    node' <- deref node
+    node'' <- fromRNode node'
     case node''^.purified of
         Just ty -> return ty
         Nothing -> do
@@ -607,6 +609,7 @@ purify nextID node = do
                                 ty' <- if V.null ts
                                            then T.Opaque <$> getIdent
                                            else do
+                                               when (V.length ts > 1) $ error "Unresolved void variable"
                                                t' <- fromRNode (ts V.! 0)
                                                cs <- mapM (purify nextID) $ childList t'
                                                return $ rawType (t'^?!symbol) cs
