@@ -13,14 +13,16 @@ import Prelude hiding (read, any, all, mapM, mapM_, elem, concat, concatMap)
 
 import Control.Applicative
 import Control.Lens hiding (op, children)
-import Control.Monad hiding (mapM, mapM_)
+import Control.Monad hiding (mapM, mapM_, forM)
+import Control.Monad.Except hiding (mapM, mapM_, forM)
 import Control.Monad.ST
-import Control.Monad.State hiding (mapM, mapM_, modify)
+import Control.Monad.State hiding (mapM, mapM_, forM, modify)
 import qualified Control.Monad.State as State
-import Control.Monad.Writer hiding (Product, Sum, mapM, mapM_)
+import Control.Monad.Writer hiding (Product, Sum, mapM, mapM_, forM)
 import Data.Foldable
+import qualified Data.HashTable.ST.Basic as H
 import qualified Data.IntMap as IM
-import Data.List (transpose)
+import Data.List (sort, transpose)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.STRef
@@ -349,6 +351,23 @@ unify unique t_list = do
                     Left  err     -> return $ Just err
                     Right queue'' -> go $ Q.pop queue''
 
+unify' :: ST s ID -> V.Vector (RNode s) -> ST s (Maybe (Node s, Node s))
+unify' unique t_list = do
+    res <- unify unique t_list
+    case res of
+        Just err -> return $ Just err
+        Nothing -> do
+            let a = t_list V.! 0
+                b = t_list V.! 1
+            a' <- fromRNode a
+            b' <- fromRNode b
+            case (a', b') of
+                (Term {}, Term {}) -> do
+                    v <- mkVar unique "u" Structural
+                    replaceNode b $ terms .~ TL.singleton a $ v
+                _ -> return ()
+            return Nothing
+
 type RNodeIL s = IL.InterList (RNode s)
 
 opType :: ST s ID -> Op (RNodeIL s) -> ST s (RNode s, RNode s, Maybe (RNode s, [RNode s]))
@@ -532,21 +551,77 @@ collateMerges = fmap IM.elems . foldM go IM.empty
         x'' <- fromRNode x'
         return $ IM.insertWith (\(_, bs) (n, cs) -> (n, bs ++ cs)) (x''^.nodeID) (x', as) merges
 
-resolveMerge :: ST s ID -> RNode s -> [RNode s] -> ST s (Either (Node s, Node s) [(RNode s, [RNode s])])
-resolveMerge unique x as = do
+-- Arguments must be in derefed form
+-- TODO Handle merged nodes
+imposeStructure :: ST s ID -> RNode s -> RNode s -> ExceptT (Node s, Node s) (ST s) [(RNode s, RNode s)]
+imposeStructure unique x y = do
+    seen <- lift $ H.new
+    go seen x y
+  where
+    --go :: H.HashTable s ID (RNode s) -> RNode s -> RNode s -> ExceptT (Node s, Node s) (ST s) [(RNode s, RNode s)]
+    go seen a b = do
+        a' <- lift $ fromRNode a
+        let ident = a'^.nodeID
+        s <- lift $ H.lookup seen ident
+        case s of
+            Just s' -> do
+                merr <- lift . unify' unique $ V.fromList [s', b]
+                case merr of
+                    Just err -> throwError err
+                    Nothing  -> return []
+            Nothing -> do
+                b' <- lift $ fromRNode b
+                case (a', b') of
+                    (Term {}, Term {}) -> if a'^?!symbol /= b'^?!symbol
+                                              then throwError (a', b')
+                                              else do
+                                                  lift $ H.insert seen ident b
+                                                  goChildren seen a' b'
+                    (Term {}, Var  {}) -> do
+                        let sym = a'^?!symbol
+                            n = arity sym
+                        cs <- lift . replicateM n $ mkRVar unique "m" Structural
+                        t <- lift $ mkRTerm unique sym cs
+                        res <- lift . unify unique $ V.fromList [b, t]
+                        case res of
+                            Just err -> throwError err
+                            Nothing  -> do
+                                lift $ H.insert seen ident b
+                                goChildren seen a' =<< lift (fromRNode b)
+                    -- if the same var occurs in multiple places, the
+                    -- corresponding nodes should be unified.
+                    (Var  {}, _) -> do
+                        lift $ H.insert seen ident b
+                        return [(a, b)]
+    goChildren seen a b = concat <$> zipWithM (goDeref seen) (childList a) (childList b)
+    goDeref seen a b = do
+        a' <- lift $ deref a
+        b' <- lift $ deref b
+        go seen a' b'
+
+resolveMerge :: ST s ID -> H.HashTable s [ID] (RNode s) -> H.HashTable s ID [RNode s] -> RNode s -> [RNode s] -> ST s (Either (Node s, Node s) [(RNode s, [RNode s])])
+resolveMerge unique seenForwards seenBackwards x as = do
     -- TODO consider Merged instead of Opaque
-    -- TODO propagate information from results
     x' <- deref x
     x'' <- fromRNode x'
     as'  <- mapM deref     as
     as'' <- mapM fromRNode as'
-    let idents = map (view nodeID) as''
-    if | isTerm x'' && x''^?!symbol == Opaque -> return $ Right []
-       | all (== head idents) idents -> do
-           res <- unify unique (V.fromList [x', head as'])
+    let ident = x''^.nodeID
+    let idents = sort $ map (view nodeID) as''
+    trace ("resolve: " ++ show ident ++ " " ++ nodeLabel x'' ++ ": " ++ concatMap (\a -> show (a^.nodeID) ++ " " ++ nodeLabel a) as'') $ return ()
+    seenF <- H.lookup seenForwards idents
+    seenB <- H.lookup seenBackwards ident
+    if | Just s <- seenF -> do
+           res <- unify' unique $ V.fromList [s, x']
            return $ case res of
                         Just err -> Left err
-                        Nothing -> Right []
+                        Nothing  -> Right []
+       | Just ts <- seenB, all (not . isTerm) as'' -> do
+           let unifyList = zipWith (\a b -> [a, b]) as' ts
+           res <- fmap catMaybes . forM unifyList $ unify unique . V.fromList
+           return $ case res of
+                        err:_ -> Left err
+                        []    -> Right []
        | all isTerm as'' && all (\t -> t^?!symbol == (head as'')^?!symbol) as'' -> do
            let sym = (head as'')^?!symbol
                n = arity sym
@@ -556,24 +631,41 @@ resolveMerge unique x as = do
            let css = map (SL.toList . (^?!children)) as''
            case res of
                Just err -> return $ Left err
-               Nothing  -> resolveMerges unique . zip cs $ transpose css
+               Nothing  -> do
+                   H.insert seenForwards idents x'
+                   return . Right . zip cs $ transpose css
+       | isTerm x'' && x''^?!symbol == Opaque -> do
+           return $ Right []
+       | isTerm x'' -> do
+           res <- runExceptT $ mapM (imposeStructure unique x') as'
+           return $ fmap (map (\(a, b) -> (a, [b])) . concat) res
+       | all (== head idents) idents -> do
+           res <- unify' unique (V.fromList [x', head as'])
+           case res of
+               Just err -> return $ Left err
+               Nothing  -> do
+                   H.insert seenForwards idents x'
+                   return $ Right []
        | all isTerm as'' || any (\t -> isTerm t && t^?!symbol == Opaque) as'' -> do
            t <- mkRTerm unique Opaque []
            res <- unify unique $ V.fromList [x', t]
-           return $ case res of
-                        Just err -> Left err
-                        Nothing  -> Right []
+           case res of
+               Just err -> return $ Left err
+               Nothing  -> do
+                   H.insert seenForwards idents x'
+                   return $ Right []
        | otherwise -> return $ Right [(x', as')]
   where
     isTerm Term {} = True
     isTerm Var  {} = False
 
-resolveMerges :: ST s ID -> [(RNode s, [RNode s])] -> ST s (Either (Node s, Node s) [(RNode s, [RNode s])])
-resolveMerges unique merges = go [] merges
+resolveMerges :: ST s ID -> H.HashTable s [ID] (RNode s) -> [(RNode s, [RNode s])] -> ST s (Either (Node s, Node s) [(RNode s, [RNode s])])
+resolveMerges unique seenForwards merges = go [] merges
   where
     go unhandled [] = return $ Right unhandled
     go unhandled ((x, as):ms) = do
-        res <- resolveMerge unique x as
+        seenBackwards <- H.new
+        res <- resolveMerge unique seenForwards seenBackwards x as
         case res of
             Left err  -> return $ Left err
             Right ms' -> go (ms' ++ unhandled) ms
@@ -668,19 +760,32 @@ inferTypes mode logStages ops = do
             let graph = showGraph $ Graph "" ("Unification failure at opcode index " ++ show i) [inner, outer] [] []
             return $ Left (i, graph "")
         Right (tyOps, mergeList) -> do
-            --let tys = IL.outerList tyOps
-            --writeGraph TIUnified tys
+            let tys = IL.outerList tyOps
+            writeGraph TIUnified tys
+            {-
             merges <- lift $ collateMerges mergeList
             -- TODO handle error case
+            seenForwards <- lift $ H.new
             traceShow (length merges) () `seq` return ()
-            Right merges' <- lift $ mapM collateMerges =<< resolveMerges unique merges
+            Right merges' <- lift $ mapM collateMerges =<< resolveMerges unique seenForwards merges
             traceShow (length merges') () `seq` return ()
-            Right merges'' <- lift $ mapM collateMerges =<< resolveMerges unique merges'
+            Right merges'' <- lift $ mapM collateMerges =<< resolveMerges unique seenForwards merges'
             traceShow (length merges'') () `seq` return ()
-            Right merges''' <- lift $ mapM collateMerges =<< resolveMerges unique merges''
+            Right merges''' <- lift $ mapM collateMerges =<< resolveMerges unique seenForwards merges''
             traceShow (length merges''') () `seq` return ()
-            Right unhandled <- lift $ uncurry (resolveMerge unique) $ head merges'''
-            writeGraph TIUnified $ concatMap (\(x, as) -> x:as) merges'''
+            Right merges''' <- lift $ mapM collateMerges =<< resolveMerges unique seenForwards merges''
+            traceShow (length merges''') () `seq` return ()
+            Right merges''' <- lift $ mapM collateMerges =<< resolveMerges unique seenForwards merges''
+            traceShow (length merges''') () `seq` return ()
+            Right merges''' <- lift $ mapM collateMerges =<< resolveMerges unique seenForwards merges''
+            traceShow (length merges''') () `seq` return ()
+            Right merges''' <- lift $ mapM collateMerges =<< resolveMerges unique seenForwards merges''
+            traceShow (length merges''') () `seq` return ()
+            Right merges''' <- lift $ mapM collateMerges =<< resolveMerges unique seenForwards merges''
+            traceShow (length merges''') () `seq` return ()
+            -}
+            --Right unhandled <- lift $ uncurry (resolveMerge unique seenForwards) $ head merges'''
+            --mapM_ (writeGraph TIUnified) $ map (\(x, as) -> x:as) merges'''
             tyOps' <- lift $ do
                 nextID <- newSTRef 0
                 mapMTyOps (purify nextID) pure tyOps

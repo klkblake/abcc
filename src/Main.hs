@@ -3,6 +3,7 @@ module Main where
 import Control.Monad
 import Control.Monad.Morph
 import Control.Monad.ST
+import Data.IORef
 import Data.Maybe
 import Multiarg hiding (parse, mode, Mode)
 import Pipes
@@ -105,7 +106,8 @@ doTypeCheck flags opts = do
         Just ops' -> do
             let ops'' = peepholePre ops'
             let dump = map fst $ optDump opts
-            res <- runEffect (for (hoist stToIO $ inferTypes (optGraphMode opts) dump ops'') $ lift . writeGraph)
+            counter <- newIORef (0 :: Int)
+            res <- runEffect (for (hoist stToIO $ inferTypes (optGraphMode opts) dump ops'') $ lift . writeGraph counter)
             case res of
                 Left (i, graph) -> do
                     hPutStrLn stderr $ "# Failed while unifying index " ++ show i
@@ -125,10 +127,14 @@ doTypeCheck flags opts = do
                             let g = expand prog
                             print g
                             writeFile "expanded.dot" $ showGraph (toGraphViz "node" g) ""
-                        else return () --printProg 0 prog
+                        else printProg 0 prog
+                             --return ()
         Nothing   -> exitFailure
   where
-    writeGraph (stage, graph) = writeFile (fromJust . lookup stage $ optDump opts) graph
+    writeGraph counter (stage, graph) = do
+        n <- readIORef counter
+        modifyIORef' counter (+ 1)
+        writeFile ((++ show n) . fromJust . lookup stage $ optDump opts) graph
     printProg i p = IL.mapM_ (printIndent i) (printOp i) p
     printOp i (LitBlock ops) = printProg (i + 1) ops
     printOp i (Op op) = printIndent i op
