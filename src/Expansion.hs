@@ -286,7 +286,7 @@ snoc' (UOp uop) [link] _ g@(Graph nextID npgs pgs lsE)
     , Just (Node _ (UOp uop2') links, _) <- followLink g link
     , uop2' == uop2 =
         (links, deleteNode link . Graph nextID npgs pgs $ splice link links lsE)
-snoc' (UOp CreatePair) [linkA, linkB] _ g@(Graph nextID npgs pgs lsE)
+snoc' (UOp CreatePair) [linkA@(Link _ _ 0 _), linkB@(Link _ _ 1 _)] _ g@(Graph nextID npgs pgs lsE)
     | Just (Node ident (UOp DestroyPair) links, _) <- followLink g linkA
     , Just (Node ident' _ _, _) <- followLink g linkB
     , ident == ident' =
