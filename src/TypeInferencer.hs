@@ -465,6 +465,8 @@ opType unique = flip evalStateT M.empty . blockOrOp
     op CondApply = block x xp .* (x .+ y) .* e ~> (xp .+ y) .* e
     op Distrib   = a .* (b .+ c) .* e ~> (a .* b .+ a .* c) .* e
     op Factor    = (a .* b .+ c .* d) .* e ~> (a .+ c) .* (b .+ d) .* e
+    op Merge     = (a .+ a) .* e ~> a .* e
+    {-
     op Merge     = do
         a' <- eval a
         b' <- eval b
@@ -473,12 +475,13 @@ opType unique = flip evalStateT M.empty . blockOrOp
         left  <- (return a' .+ return b') .* return e'
         right <- return c' .* return e'
         return (left, right, Just (c', [a', b']))
+        -}
     op Assert    = (a .+ b) .* e ~> b .* e
 
     op Greater = num .* num .* e ~> (num .* num .+ num .* num) .* e
 
-    op (Sealer   seal) = a ~> sealed seal a
-    op (Unsealer seal) = sealed seal a ~> a
+    op (Sealer   seal) = a .* e ~> sealed seal a .* e
+    op (Unsealer seal) = sealed seal a .* e ~> a .* e
 
     op AssertEQ = a .* b .* e ~> a .* b .* e
     op DebugPrintRaw = a .* e ~> a .* e
