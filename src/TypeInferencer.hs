@@ -392,7 +392,7 @@ opType unique = flip evalStateT M.empty . blockOrOp
     sealed seal v = do
         v' <- v
         mkRTerm' (Sealed seal) [v']
-    void' = lift $ mkRVar unique "0" Void
+    void' = lift $ mkRVar unique "0" Structural --Void
 
     var v = do
         vars <- get
