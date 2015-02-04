@@ -76,15 +76,6 @@ void slice_stack_snoc(u8 *buf, struct u8_slice *slice, u8 c) {
 	slice->data[slice->size++] = c;
 }
 
-void slice_stack_reify_trimmed(u8 *buf, struct u8_slice *slice) {
-	if (slice->data == buf) {
-		u8 *newdata = malloc(slice->size * sizeof(u8));
-		memcpy(newdata, slice->data, slice->size * sizeof(u8));
-		slice->data = newdata;
-		slice->cap = slice->size;
-	}
-}
-
 void slice_stack_free(u8 *buf, struct u8_slice *slice) {
 	if (slice->data != buf) {
 		slice_free(slice);
@@ -97,6 +88,117 @@ void slice_stack_free(u8 *buf, struct u8_slice *slice) {
 		     var ## _index < (slice).size && (var = &(slice).data[var ## _index], true); \
 		     var ## _index++)
 
+u32 jenkins_step(u32 hash, u8 data) {
+	hash = hash + data;
+	hash += hash << 10;
+	hash ^= hash >> 6;
+	return hash;
+}
+
+u32 jenkins_finalise(u32 hash) {
+	hash += hash << 3;
+	hash ^= hash >> 11;
+	hash += hash << 15;
+	// We use 0 to indicate no entry
+	if (hash == 0) {
+		hash = 1 << 31;
+	}
+	return hash;
+}
+
+u32 jenkins_hash(u8 *data, usize size) {
+	u32 hash = 0;
+	for (usize i = 0; i < size; i++) {
+		hash = jenkins_step(hash, data[i]);
+	}
+	return jenkins_finalise(hash);
+}
+
+struct string_rc {
+	usize size;
+	u32 refcount;
+	u8 data[];
+};
+DEFINE_SLICE(struct string_rc *, string_rc_ptr);
+
+void string_rc_decref(struct string_rc *str) {
+	if (--str->refcount == 0) {
+		free(str);
+	}
+}
+
+struct string_memo_table {
+	u32 *hashes;
+	struct string_rc **buckets;
+	usize size;
+	usize num_buckets; // Must be power of two
+};
+
+struct string_rc *memoise_string(struct string_memo_table *table, u8 *data, usize size) {
+	u32 hash = jenkins_hash(data, size);
+	if (table->num_buckets == 0) {
+		table->num_buckets = 64;
+		table->hashes = malloc(table->num_buckets * sizeof(u32));
+		table->buckets = malloc(table->num_buckets * sizeof(struct string_rc *));
+		memset(table->hashes, 0, table->num_buckets * sizeof(u32));
+	}
+	usize bucket_mask = table->num_buckets - 1;
+	if (table->size > table->num_buckets / 2) {
+		usize new_num_buckets = table->num_buckets * 2;
+		usize new_bucket_mask = new_num_buckets - 1;
+		u32 *new_hashes = malloc(new_num_buckets * sizeof(u32));
+		struct string_rc **new_buckets = malloc(new_num_buckets * sizeof(struct string_rc *));
+		memset(new_hashes, 0, new_num_buckets * sizeof(u32));
+		for (usize i = 0; i < table->num_buckets; i++) {
+			u32 new_hash = table->hashes[i];
+			if (new_hash == 0) {
+				continue;
+			}
+			u32 new_bucket = new_hash & new_bucket_mask;
+			while (new_hashes[new_bucket] != 0) {
+				new_bucket = (new_bucket + 1) & new_bucket_mask;
+			}
+			new_hashes[new_bucket] = new_hash;
+			new_buckets[new_bucket] = table->buckets[i];
+		}
+		free(table->hashes);
+		free(table->buckets);
+		table->num_buckets = new_num_buckets;
+		table->hashes = new_hashes;
+		table->buckets = new_buckets;
+		bucket_mask = new_bucket_mask;
+	}
+	usize bucket = hash & bucket_mask;
+	while (table->hashes[bucket] != 0) {
+		if (table->hashes[bucket] == hash) {
+			struct string_rc *str = table->buckets[bucket];
+			if (str->size == size && memcmp(str->data, data, size) == 0) {
+				str->refcount++;
+				return str;
+			}
+		}
+		bucket = (bucket + 1) & bucket_mask;
+	}
+	struct string_rc *str = malloc(sizeof(struct string_rc) + size * sizeof(u8));
+	str->size = size;
+	str->refcount = 2; // The table retains a reference to the string
+	memcpy(str->data, data, size);
+	table->hashes[bucket] = hash;
+	table->buckets[bucket] = str;
+	table->size++;
+	return str;
+}
+
+void string_memo_table_free(struct string_memo_table *table) {
+	for (usize i = 0; i < table->num_buckets; i++) {
+		if (table->hashes[i] != 0) {
+			string_rc_decref(table->buckets[i]);
+		}
+	}
+	free(table->hashes);
+	free(table->buckets);
+}
+
 #define OP_SEAL             1
 #define OP_UNSEAL           2
 #define OP_ASSERT_EQUAL     3
@@ -105,16 +207,16 @@ void slice_stack_free(u8 *buf, struct u8_slice *slice) {
 
 struct ao_stack_frame {
 	struct ao_stack_frame *next;
-	u8 *word;
-	u8 *file;
+	struct string_rc *word;
+	struct string_rc *file;
 	u32 line;
 	u32 refcount;
 };
 DEFINE_SLICE(struct ao_stack_frame *, ao_stack_frame_ptr);
 
 void ao_stack_frame_free(struct ao_stack_frame frame) {
-	free(frame.word);
-	free(frame.file);
+	string_rc_decref(frame.word);
+	string_rc_decref(frame.file);
 }
 
 void ao_stack_frame_decref(struct ao_stack_frame *frame) {
@@ -133,24 +235,26 @@ struct block {
 	struct u8_slice opcodes;
 	struct ao_stack_frame_ptr_slice frames;
 	struct u32_slice blocks;
-	struct u8_ptr_slice texts;
-	struct u8_ptr_slice sealers;
+	struct string_rc_ptr_slice texts;
+	struct string_rc_ptr_slice sealers;
 };
 DEFINE_SLICE(struct block, block);
 
 void block_free(struct block *block) {
 	slice_free(&block->opcodes);
 	foreach (frame, block->frames) {
-		ao_stack_frame_decref(*frame);
+		if (*frame) {
+			ao_stack_frame_decref(*frame);
+		}
 	}
 	slice_free(&block->frames);
 	slice_free(&block->blocks);
 	foreach (text, block->texts) {
-		free(*text);
+		string_rc_decref(*text);
 	}
 	slice_free(&block->texts);
 	foreach (sealer, block->sealers) {
-		free(*sealer);
+		string_rc_decref(*sealer);
 	}
 	slice_free(&block->sealers);
 }
@@ -205,6 +309,7 @@ struct parse_state {
 	struct block block;
 	struct parse_error_slice errors;
 	struct block_slice blocks;
+	struct string_memo_table memo_table;
 };
 
 i32 next(struct parse_state *state) {
@@ -219,10 +324,7 @@ i32 next(struct parse_state *state) {
 		state->col = 0;
 	}
 	if (c != ' ' && c != '\n') {
-		u32 hash = state->block.hash + (u8)c;
-		hash += hash << 10;
-		hash ^= hash >> 6;
-		state->block.hash = hash;
+		state->block.hash = jenkins_step(state->block.hash, c);
 	}
 	return c;
 }
@@ -243,7 +345,9 @@ void report_error_here(struct parse_state *state, u32 code) {
 void snoc_opcode(struct parse_state *state, u8 opcode) {
 	slice_snoc(&state->block.opcodes, opcode);
 	slice_snoc(&state->block.frames, state->frame);
-	state->frame->refcount++;
+	if (state->frame) {
+		state->frame->refcount++;
+	}
 }
 
 i32 eat_unknown_annotation(struct parse_state *state) {
@@ -260,7 +364,7 @@ i32 eat_unknown_annotation(struct parse_state *state) {
 b1 parse_stack_annotation(struct parse_state *state, b1 enter) {
 	i32 c;
 	u8 word_buf[4096];
-	struct u8_slice word = {word_buf, 0, sizeof(word_buf)/sizeof(u8)};
+	struct u8_slice word_slice = {word_buf, 0, sizeof(word_buf)/sizeof(u8)};
 	while ((c = next(state)) != '@') {
 		if (c == '}') {
 			report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
@@ -269,44 +373,44 @@ b1 parse_stack_annotation(struct parse_state *state, b1 enter) {
 		if (c == EOF) {
 			return false;
 		}
-		slice_stack_snoc(word_buf, &word, c);
+		slice_stack_snoc(word_buf, &word_slice, c);
 	}
-	slice_stack_snoc(word_buf, &word, '\0');
 	u8 file_buf[4096];
-	struct u8_slice file = (struct u8_slice){file_buf, 0, sizeof(file_buf)/sizeof(u8)};
+	struct u8_slice file_slice = (struct u8_slice){file_buf, 0, sizeof(file_buf)/sizeof(u8)};
 	while ((c = next(state)) != ':') {
 		if (c == '}') {
 			report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
-			slice_stack_free(word_buf, &word);
+			slice_stack_free(word_buf, &word_slice);
 			return true;
 		}
 		if (c == EOF) {
-			slice_stack_free(word_buf, &word);
+			slice_stack_free(word_buf, &word_slice);
 			return false;
 		}
-		slice_stack_snoc(file_buf, &file, c);
+		slice_stack_snoc(file_buf, &file_slice, c);
 	}
-	slice_stack_snoc(file_buf, &file, '\0');
 	u32 line = 0;
 	while ((c = next(state)) != '}') {
 		if (c < '0' || c > '9') {
 			report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
-			slice_stack_free(word_buf, &word);
-			slice_stack_free(file_buf, &file);
+			slice_stack_free(word_buf, &word_slice);
+			slice_stack_free(file_buf, &file_slice);
 			return true;
 		}
 		if (c == EOF) {
-			slice_stack_free(word_buf, &word);
-			slice_stack_free(file_buf, &file);
+			slice_stack_free(word_buf, &word_slice);
+			slice_stack_free(file_buf, &file_slice);
 			return false;
 		}
 		line = line * 10 + c - '0';
 	}
 	if (enter) {
 		struct ao_stack_frame *frame = malloc(sizeof(struct ao_stack_frame));
-		slice_stack_reify_trimmed(word_buf, &word);
-		slice_stack_reify_trimmed(file_buf, &file);
-		*frame = (struct ao_stack_frame){state->frame, word.data, file.data, line, 1};
+		struct string_rc *word = memoise_string(&state->memo_table, word_slice.data, word_slice.size);
+		struct string_rc *file = memoise_string(&state->memo_table, file_slice.data, file_slice.size);
+		slice_stack_free(word_buf, &word_slice);
+		slice_stack_free(file_buf, &file_slice);
+		*frame = (struct ao_stack_frame){state->frame, word, file, line, 1};
 		if (state->frame) {
 			state->frame->refcount++;
 		}
@@ -315,19 +419,22 @@ b1 parse_stack_annotation(struct parse_state *state, b1 enter) {
 		struct ao_stack_frame *old = state->frame;
 		if (old == NULL) {
 			report_error_here(state, PARSE_WARN_UNEXPECTED_FRAME_POP);
-			slice_stack_free(word_buf, &word);
-			slice_stack_free(file_buf, &file);
+			slice_stack_free(word_buf, &word_slice);
+			slice_stack_free(file_buf, &file_slice);
 			return true;
 		}
-		if (strcmp((char *)old->word, (char *)word.data) != 0 ||
-		    strcmp((char *)old->file, (char *)file.data) != 0 || old->line != line) {
+		if (old->word->size != word_slice.size ||
+		    old->file->size != file_slice.size ||
+		    memcmp(old->word->data, word_slice.data, word_slice.size) != 0 ||
+		    memcmp(old->file->data, file_slice.data, file_slice.size) != 0 ||
+		    old->line != line) {
 			report_error_here(state, PARSE_WARN_MISMATCHED_FRAME_POP);
-			slice_stack_free(word_buf, &word);
-			slice_stack_free(file_buf, &file);
+			slice_stack_free(word_buf, &word_slice);
+			slice_stack_free(file_buf, &file_slice);
 			return true;
 		}
-		slice_stack_free(word_buf, &word);
-		slice_stack_free(file_buf, &file);
+		slice_stack_free(word_buf, &word_slice);
+		slice_stack_free(file_buf, &file_slice);
 		state->frame = old->next;
 		ao_stack_frame_decref(old);
 	}
@@ -426,10 +533,9 @@ b1 parse_sealer(struct parse_state *state, u8 op) {
 		}
 		slice_stack_snoc(buf, &text, c);
 	}
-	slice_stack_snoc(buf, &text, '\0');
-	slice_stack_reify_trimmed(buf, &text);
 	snoc_opcode(state, op);
-	slice_snoc(&state->block.sealers, text.data);
+	slice_snoc(&state->block.sealers, memoise_string(&state->memo_table, text.data, text.size));
+	slice_stack_free(buf, &text);
 	return true;
 }
 
@@ -487,10 +593,9 @@ b1 parse_text(struct parse_state *state) {
 		}
 		slice_stack_snoc(buf, &text, c);
 	}
-	slice_stack_snoc(buf, &text, '\0');
-	slice_stack_reify_trimmed(buf, &text);
 	snoc_opcode(state, '"');
-	slice_snoc(&state->block.texts, text.data);
+	slice_snoc(&state->block.texts, memoise_string(&state->memo_table, text.data, text.size));
+	slice_stack_free(buf, &text);
 	return true;
 }
 
@@ -515,16 +620,7 @@ b1 parse_block(struct parse_state *state, b1 expect_eof) {
 			slice_trim(&state->block.blocks);
 			slice_trim(&state->block.texts);
 			slice_trim(&state->block.sealers);
-			// Finalise the hash
-			u32 hash = state->block.hash;
-			hash += hash << 3;
-			hash ^= hash >> 11;
-			hash += hash << 15;
-			// We use 0 to indicate no entry
-			if (hash == 0) {
-				hash = 1 << 31;
-			}
-			state->block.hash = hash;
+			state->block.hash = jenkins_finalise(state->block.hash);
 			slice_snoc(&state->blocks, state->block);
 			return true;
 		}
@@ -643,7 +739,9 @@ int main() {
 		printf("Parse failed.\n");
 		return 1;
 	}
-	printf("Parse succeeded.\n");
+	printf("Parse succeeded. %zu blocks.\n", state.blocks.size);
+
+	string_memo_table_free(&state.memo_table);
 	foreach (block, state.blocks) {
 		block_free(block);
 	}
