@@ -202,9 +202,9 @@ struct parse_state {
 	i32 line;
 	i32 col;
 	struct ao_stack_frame *frame;
+	struct block block;
 	struct parse_error_slice errors;
 	struct block_slice blocks;
-	struct block block;
 };
 
 i32 next(struct parse_state *state) {
@@ -493,6 +493,7 @@ b1 parse_text(struct parse_state *state) {
 }
 
 b1 parse_block(struct parse_state *state, b1 expect_eof) {
+	state->frame = NULL;
 	state->block = (struct block){};
 	while (true) {
 		i32 c = next(state);
@@ -520,10 +521,12 @@ b1 parse_block(struct parse_state *state, b1 expect_eof) {
 			slice_snoc(&state->blocks, state->block);
 			return true;
 		}
+		struct ao_stack_frame *frame;
 		struct block block;
 		b1 succeeded;
 		switch ((u8)c) {
 			case '[':
+				frame = state->frame;
 				block = state->block;
 				u32 line = state->line;
 				u32 col = state->col;
@@ -531,11 +534,12 @@ b1 parse_block(struct parse_state *state, b1 expect_eof) {
 				if (!succeeded) {
 					return false;
 				}
+				state->frame = frame;
+				state->block = block;
 				if (next(state) != ']') {
 					report_error(state, PARSE_ERR_EOF_IN_BLOCK, line, col);
 					return false;
 				}
-				state->block = block;
 				snoc_opcode(state, '[');
 				slice_snoc(&state->block.blocks, state->blocks.size - 1);
 				break;
