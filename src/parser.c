@@ -218,6 +218,12 @@ i32 next(struct parse_state *state) {
 		state->line++;
 		state->col = 0;
 	}
+	if (c != ' ' && c != '\n') {
+		u32 hash = state->block.hash + (u8)c;
+		hash += hash << 10;
+		hash ^= hash >> 6;
+		state->block.hash = hash;
+	}
 	return c;
 }
 
@@ -237,10 +243,6 @@ void report_error_here(struct parse_state *state, u32 code) {
 void snoc_opcode(struct parse_state *state, u8 opcode) {
 	slice_snoc(&state->block.opcodes, opcode);
 	slice_snoc(&state->block.frames, state->frame);
-	u32 hash = state->block.hash + opcode;
-	hash += hash << 10;
-	hash ^= hash >> 6;
-	state->block.hash = hash;
 	state->frame->refcount++;
 }
 
@@ -513,10 +515,15 @@ b1 parse_block(struct parse_state *state, b1 expect_eof) {
 			slice_trim(&state->block.blocks);
 			slice_trim(&state->block.texts);
 			slice_trim(&state->block.sealers);
+			// Finalise the hash
 			u32 hash = state->block.hash;
 			hash += hash << 3;
 			hash ^= hash >> 11;
 			hash += hash << 15;
+			// We use 0 to indicate no entry
+			if (hash == 0) {
+				hash = 1 << 31;
+			}
 			state->block.hash = hash;
 			slice_snoc(&state->blocks, state->block);
 			return true;
@@ -603,6 +610,7 @@ b1 parse_block(struct parse_state *state, b1 expect_eof) {
 	}
 }
 
+// TODO replace most usages of b1 with b32
 b1 parse(struct parse_state *state) {
 	b1 succeeded = parse_block(state, true);
 	if (state->frame != NULL) {
