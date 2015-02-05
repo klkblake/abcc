@@ -261,33 +261,41 @@ DEFINE_MEMO_TABLE(ao_stack_frame, struct ao_stack_frame,
                sizeof(struct ao_stack_frame),
                ({ *entry = data; if (data.next) { data.next->refcount++; } }));
 
-struct block {
-	// TODO pull hash out of block
-	u32 hash; // Hash of all parsed chars (excluding SP and LF), Jenkins One-at-a-Time hash.
+struct incomplete_block {
 	struct u8_slice opcodes;
 	struct ao_stack_frame_ptr_slice frames;
 	struct u32_slice blocks;
 	struct string_rc_ptr_slice texts;
 	struct string_rc_ptr_slice sealers;
 };
+
+struct block {
+	usize size;
+	u8 *opcodes;
+	struct ao_stack_frame **frames;
+	u32 *blocks;
+	struct string_rc **texts;
+	struct string_rc **sealers;
+};
 DEFINE_SLICE(struct block, block);
 
 void block_free(struct block *block) {
-	slice_free(&block->opcodes);
-	foreach (frame, block->frames) {
-		if (*frame) {
-			ao_stack_frame_decref(*frame);
+	for (usize i = 0, text_index = 0, sealer_index = 0; i < block->size; i++) {
+		if (block->frames[i]) {
+			ao_stack_frame_decref(block->frames[i]);
+		}
+		u8 opcode = block->opcodes[i];
+		if (opcode == '"') {
+			string_rc_decref(block->texts[text_index++]);
+		}
+		if (opcode == OP_SEAL || opcode == OP_UNSEAL) {
+			string_rc_decref(block->sealers[sealer_index++]);
 		}
 	}
+	slice_free(&block->opcodes);
 	slice_free(&block->frames);
 	slice_free(&block->blocks);
-	foreach (text, block->texts) {
-		string_rc_decref(*text);
-	}
 	slice_free(&block->texts);
-	foreach (sealer, block->sealers) {
-		string_rc_decref(*sealer);
-	}
 	slice_free(&block->sealers);
 }
 
@@ -338,9 +346,11 @@ struct parse_state {
 	i32 line;
 	i32 col;
 	struct ao_stack_frame *frame;
-	struct block block;
+	struct incomplete_block *block;
+	u32 hash; // Hash of all parsed chars (excluding SP and LF), Jenkins One-at-a-Time hash.
 	struct parse_error_slice errors;
 	struct block_slice blocks;
+	struct u32_slice hashes;
 	struct string_rc_memo_table string_table;
 	struct ao_stack_frame_memo_table frame_table;
 };
@@ -357,7 +367,7 @@ i32 next(struct parse_state *state) {
 		state->col = 0;
 	}
 	if (c != ' ' && c != '\n') {
-		state->block.hash = jenkins_step(state->block.hash, c);
+		state->hash = jenkins_step(state->hash, c);
 	}
 	return c;
 }
@@ -376,8 +386,8 @@ void report_error_here(struct parse_state *state, u32 code) {
 }
 
 void snoc_opcode(struct parse_state *state, u8 opcode) {
-	slice_snoc(&state->block.opcodes, opcode);
-	slice_snoc(&state->block.frames, state->frame);
+	slice_snoc(&state->block->opcodes, opcode);
+	slice_snoc(&state->block->frames, state->frame);
 	if (state->frame) {
 		state->frame->refcount++;
 	}
@@ -565,7 +575,7 @@ b1 parse_sealer(struct parse_state *state, u8 op) {
 		slice_stack_snoc(buf, &text, c);
 	}
 	snoc_opcode(state, op);
-	slice_snoc(&state->block.sealers, memoise_string_rc(&state->string_table, text.data, text.size));
+	slice_snoc(&state->block->sealers, memoise_string_rc(&state->string_table, text.data, text.size));
 	slice_stack_free(buf, &text);
 	return true;
 }
@@ -625,15 +635,15 @@ b1 parse_text(struct parse_state *state) {
 		slice_stack_snoc(buf, &text, c);
 	}
 	snoc_opcode(state, '"');
-	slice_snoc(&state->block.texts, memoise_string_rc(&state->string_table, text.data, text.size));
+	slice_snoc(&state->block->texts, memoise_string_rc(&state->string_table, text.data, text.size));
 	slice_stack_free(buf, &text);
 	return true;
 }
 
 b1 parse_block(struct parse_state *state, b1 expect_eof) {
+	struct incomplete_block block = {};
 	state->frame = NULL;
-	// TODO only store a pointer in state.
-	state->block = (struct block){};
+	state->block = &block;
 	while (true) {
 		i32 c = next(state);
 		if (c == ' ' || c == '\n') {
@@ -648,22 +658,28 @@ b1 parse_block(struct parse_state *state, b1 expect_eof) {
 			return false;
 		}
 		if (c == EOF || c == ']') {
-			slice_trim(&state->block.opcodes);
-			slice_trim(&state->block.frames);
-			slice_trim(&state->block.blocks);
-			slice_trim(&state->block.texts);
-			slice_trim(&state->block.sealers);
-			state->block.hash = jenkins_finalise(state->block.hash);
-			slice_snoc(&state->blocks, state->block);
+			slice_trim(&block.opcodes);
+			slice_trim(&block.frames);
+			slice_trim(&block.blocks);
+			slice_trim(&block.texts);
+			slice_trim(&block.sealers);
+			struct block complete_block = {
+				block.opcodes.size,
+				block.opcodes.data,
+				block.frames.data,
+				block.blocks.data,
+				block.texts.data,
+				block.sealers.data,
+			};
+			slice_snoc(&state->blocks, complete_block);
+			slice_snoc(&state->hashes, jenkins_finalise(state->hash));
 			return true;
 		}
 		struct ao_stack_frame *frame;
-		struct block block;
 		b1 succeeded;
 		switch ((u8)c) {
 			case '[':
 				frame = state->frame;
-				block = state->block;
 				u32 line = state->line;
 				u32 col = state->col;
 				succeeded = parse_block(state, false);
@@ -671,13 +687,14 @@ b1 parse_block(struct parse_state *state, b1 expect_eof) {
 					return false;
 				}
 				state->frame = frame;
-				state->block = block;
+				state->block = &block;
+				state->hash = 0;
 				if (next(state) != ']') {
 					report_error(state, PARSE_ERR_EOF_IN_BLOCK, line, col);
 					return false;
 				}
 				snoc_opcode(state, '[');
-				slice_snoc(&state->block.blocks, state->blocks.size - 1);
+				slice_snoc(&block.blocks, state->blocks.size - 1);
 				break;
 			case '{':
 				succeeded = parse_invokation(state);
@@ -779,6 +796,5 @@ int main() {
 		block_free(block);
 	}
 	slice_clear(&state.blocks);
-	// TODO free when done, only when checking for leaks
 	return 0;
 }
