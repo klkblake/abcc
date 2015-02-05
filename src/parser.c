@@ -393,7 +393,7 @@ void snoc_opcode(struct parse_state *state, u8 opcode) {
 	}
 }
 
-i32 eat_unknown_annotation(struct parse_state *state) {
+b32 eat_unknown_annotation(struct parse_state *state) {
 	report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
 	i32 c;
 	while ((c = next(state)) != '}') {
@@ -404,7 +404,7 @@ i32 eat_unknown_annotation(struct parse_state *state) {
 	return true;
 }
 
-b1 parse_stack_annotation(struct parse_state *state, b1 enter) {
+b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 	i32 c;
 	u8 word_buf[4096];
 	struct u8_slice word_slice = {word_buf, 0, sizeof(word_buf)/sizeof(u8)};
@@ -499,7 +499,7 @@ i32 match_annotation_part(struct parse_state *state, u8 *target) {
 	return 0;
 }
 
-b1 parse_annotation(struct parse_state *state) {
+b32 parse_annotation(struct parse_state *state) {
 	u8 cs[4];
 	i32 c = next(state);
 	if (c == '}') {
@@ -564,7 +564,7 @@ b1 parse_annotation(struct parse_state *state) {
 	return true;
 }
 
-b1 parse_sealer(struct parse_state *state, u8 op) {
+b32 parse_sealer(struct parse_state *state, u8 op) {
 	u8 buf[4096];
 	struct u8_slice text = {buf, 0, sizeof(buf) / sizeof(u8)};
 	i32 c;
@@ -580,13 +580,13 @@ b1 parse_sealer(struct parse_state *state, u8 op) {
 	return true;
 }
 
-b1 parse_invokation(struct parse_state *state) {
+b32 parse_invokation(struct parse_state *state) {
 	i32 type = next(state);
 	if (type == EOF) {
 		report_error_here(state, PARSE_ERR_EOF_IN_INVOCATION);
 		return false;
 	}
-	b1 succeeded;
+	b32 succeeded;
 	switch ((u8)type) {
 		case '&':
 			succeeded = parse_annotation(state);
@@ -607,7 +607,7 @@ b1 parse_invokation(struct parse_state *state) {
 	return succeeded;
 }
 
-b1 parse_text(struct parse_state *state) {
+b32 parse_text(struct parse_state *state) {
 	u32 line = state->line;
 	u32 col = state->col;
 	u8 buf[4096];
@@ -640,7 +640,7 @@ b1 parse_text(struct parse_state *state) {
 	return true;
 }
 
-b1 parse_block(struct parse_state *state, b1 expect_eof) {
+b32 parse_block(struct parse_state *state, b32 expect_eof) {
 	struct incomplete_block block = {};
 	state->frame = NULL;
 	state->block = &block;
@@ -676,7 +676,7 @@ b1 parse_block(struct parse_state *state, b1 expect_eof) {
 			return true;
 		}
 		struct ao_stack_frame *frame;
-		b1 succeeded;
+		b32 succeeded;
 		switch ((u8)c) {
 			case '[':
 				frame = state->frame;
@@ -756,9 +756,8 @@ b1 parse_block(struct parse_state *state, b1 expect_eof) {
 	}
 }
 
-// TODO replace most usages of b1 with b32
-b1 parse(struct parse_state *state) {
-	b1 succeeded = parse_block(state, true);
+b32 parse(struct parse_state *state) {
+	b32 succeeded = parse_block(state, true);
 	if (state->frame != NULL) {
 		report_error_here(state, PARSE_WARN_EOF_IN_FRAME);
 		ao_stack_frame_decref(state->frame);
@@ -781,7 +780,7 @@ void print_parse_error(struct parse_error error) {
 int main() {
 	struct parse_state state = {};
 	state.stream = stdin;
-	b1 succeeded = parse(&state);
+	b32 succeeded = parse(&state);
 	foreach (error, state.errors) {
 		print_parse_error(*error);
 	}
