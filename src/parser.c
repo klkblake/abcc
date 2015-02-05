@@ -97,6 +97,13 @@ u32 jenkins_step(u32 hash, u8 data) {
 	return hash;
 }
 
+u32 jenkins_add(u32 hash, u8 *data, usize size) {
+	for (usize i = 0; i < size; i++) {
+		hash = jenkins_step(hash, data[i]);
+	}
+	return hash;
+}
+
 u32 jenkins_finalise(u32 hash) {
 	hash += hash << 3;
 	hash ^= hash >> 11;
@@ -109,11 +116,7 @@ u32 jenkins_finalise(u32 hash) {
 }
 
 u32 jenkins_hash(u8 *data, usize size) {
-	u32 hash = 0;
-	for (usize i = 0; i < size; i++) {
-		hash = jenkins_step(hash, data[i]);
-	}
-	return jenkins_finalise(hash);
+	return jenkins_finalise(jenkins_add(0, data, size));
 }
 
 #define DEFINE_MEMO_TABLE_STRUCT(name, type) \
@@ -215,12 +218,12 @@ void string_rc_decref(struct string_rc *str) {
 }
 
 DEFINE_MEMO_TABLE(string_rc, struct string_rc,
-               ESCAPE_COMMAS(u8 *data, usize size),
-               jenkins_hash(data, size),
-               entry->size == size && memcmp(entry->data, data, size) == 0,
-               ,
-               sizeof(struct string_rc) + size * sizeof(u8),
-               ({ entry->size = size; memcpy(entry->data, data, size); }));
+                  ESCAPE_COMMAS(u8 *data, usize size),
+                  jenkins_hash(data, size),
+                  entry->size == size && memcmp(entry->data, data, size) == 0,
+                  ,
+                  sizeof(struct string_rc) + size * sizeof(u8),
+                  ({ entry->size = size; memcpy(entry->data, data, size); }));
 
 #define OP_SEAL             1
 #define OP_UNSEAL           2
@@ -254,12 +257,19 @@ void ao_stack_frame_decref(struct ao_stack_frame *frame) {
 }
 
 DEFINE_MEMO_TABLE(ao_stack_frame, struct ao_stack_frame,
-               struct ao_stack_frame data,
-               jenkins_hash((u8 *)&data, sizeof(struct ao_stack_frame) - sizeof(u32)),
-               memcmp(entry, &data, sizeof(struct ao_stack_frame) - sizeof(u32)) == 0,
-               ({ string_rc_decref(entry->word); string_rc_decref(entry->file); }),
-               sizeof(struct ao_stack_frame),
-               ({ *entry = data; if (data.next) { data.next->refcount++; } }));
+                  ESCAPE_COMMAS(struct ao_stack_frame *next, struct string_rc *word, struct string_rc *file, u32 line),
+                  ({
+                   u32 hash = 0;
+		   hash = jenkins_add(hash, (u8 *)&next, sizeof(next));
+		   hash = jenkins_add(hash, (u8 *)&word, sizeof(word));
+		   hash = jenkins_add(hash, (u8 *)&file, sizeof(file));
+		   hash = jenkins_add(hash, (u8 *)&line, sizeof(line));
+		   jenkins_finalise(hash);
+                   }),
+                  entry->next == next && entry->word == word && entry->file == file && entry->line == line,
+                  ({ string_rc_decref(word); string_rc_decref(file); }),
+                  sizeof(struct ao_stack_frame),
+                  ({ *entry = (struct ao_stack_frame){ next, word, file, line, 0 }; if (next) { next->refcount++; } }));
 
 struct incomplete_block {
 	struct u8_slice opcodes;
@@ -452,10 +462,8 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 		struct string_rc *file = memoise_string_rc(&state->string_table, file_slice.data, file_slice.size);
 		slice_stack_free(word_buf, &word_slice);
 		slice_stack_free(file_buf, &file_slice);
-		// TODO consider making memoise take loose arguments
-		struct ao_stack_frame frame = (struct ao_stack_frame){state->frame, word, file, line, 0};
-		struct ao_stack_frame *frame_ptr = memoise_ao_stack_frame(&state->frame_table, frame);
-		state->frame = frame_ptr;
+		struct ao_stack_frame *frame = memoise_ao_stack_frame(&state->frame_table, state->frame, word, file, line);
+		state->frame = frame;
 	} else {
 		struct ao_stack_frame *old = state->frame;
 		if (old == NULL) {
