@@ -114,19 +114,6 @@ u32 jenkins_hash(u8 *data, usize size) {
 	return jenkins_finalise(hash);
 }
 
-struct string_rc {
-	usize size;
-	u32 refcount;
-	u8 data[];
-};
-DEFINE_SLICE(struct string_rc *, string_rc_ptr);
-
-void string_rc_decref(struct string_rc *str) {
-	if (--str->refcount == 0) {
-		free(str);
-	}
-}
-
 #define DEFINE_MEMO_TABLE_STRUCT(name, type) \
 struct name ## _memo_table { \
 	u32 *hashes; \
@@ -188,6 +175,7 @@ type *memoise_ ## name(struct name ## _memo_table *table, args) { \
 	} \
 	type *entry = malloc(malloc_expr); \
 	init_expr; \
+	entry->refcount = 2; /* The table retains a reference to the entry */ \
 	table->hashes[bucket] = hash; \
 	table->buckets[bucket] = entry; \
 	table->size++; \
@@ -210,13 +198,25 @@ void name ## _memo_table_free(struct name ## _memo_table *table) { \
 	DEFINE_MEMOISE(name, type, ESCAPE_COMMAS(args), hash_expr, equal_expr, malloc_expr, init_expr); \
 	DEFINE_MEMO_TABLE_FREE(name);
 
+struct string_rc {
+	usize size;
+	u32 refcount;
+	u8 data[];
+};
+DEFINE_SLICE(struct string_rc *, string_rc_ptr);
+
+void string_rc_decref(struct string_rc *str) {
+	if (--str->refcount == 0) {
+		free(str);
+	}
+}
+
 DEFINE_MEMO_TABLE(string_rc, struct string_rc,
                ESCAPE_COMMAS(u8 *data, usize size),
                jenkins_hash(data, size),
                entry->size == size && memcmp(entry->data, data, size) == 0,
                sizeof(struct string_rc) + size * sizeof(u8),
-               // The table retains a reference to the string
-               ({ entry->size = size; entry->refcount = 2; memcpy(entry->data, data, size); }));
+               ({ entry->size = size; memcpy(entry->data, data, size); }));
 
 #define OP_SEAL             1
 #define OP_UNSEAL           2
@@ -248,6 +248,13 @@ void ao_stack_frame_decref(struct ao_stack_frame *frame) {
 		}
 	}
 }
+
+DEFINE_MEMO_TABLE(ao_stack_frame, struct ao_stack_frame,
+               struct ao_stack_frame data,
+               jenkins_hash((u8 *)&data, sizeof(struct ao_stack_frame) - sizeof(u32)),
+               memcmp(entry, &data, sizeof(struct ao_stack_frame) - sizeof(u32)) == 0,
+               sizeof(struct ao_stack_frame),
+               ({ *entry = data; if (data.next) { data.next->refcount++; } }));
 
 struct block {
 	u32 hash; // Hash of opcode values, Jenkins One-at-a-Time hash.
@@ -328,7 +335,8 @@ struct parse_state {
 	struct block block;
 	struct parse_error_slice errors;
 	struct block_slice blocks;
-	struct string_rc_memo_table memo_table;
+	struct string_rc_memo_table string_table;
+	struct ao_stack_frame_memo_table frame_table;
 };
 
 i32 next(struct parse_state *state) {
@@ -424,16 +432,14 @@ b1 parse_stack_annotation(struct parse_state *state, b1 enter) {
 		line = line * 10 + c - '0';
 	}
 	if (enter) {
-		struct ao_stack_frame *frame = malloc(sizeof(struct ao_stack_frame));
-		struct string_rc *word = memoise_string_rc(&state->memo_table, word_slice.data, word_slice.size);
-		struct string_rc *file = memoise_string_rc(&state->memo_table, file_slice.data, file_slice.size);
+		struct string_rc *word = memoise_string_rc(&state->string_table, word_slice.data, word_slice.size);
+		struct string_rc *file = memoise_string_rc(&state->string_table, file_slice.data, file_slice.size);
 		slice_stack_free(word_buf, &word_slice);
 		slice_stack_free(file_buf, &file_slice);
-		*frame = (struct ao_stack_frame){state->frame, word, file, line, 1};
-		if (state->frame) {
-			state->frame->refcount++;
-		}
-		state->frame = frame;
+		// TODO consider making memoise take loose arguments
+		struct ao_stack_frame frame = (struct ao_stack_frame){state->frame, word, file, line, 0};
+		struct ao_stack_frame *frame_ptr = memoise_ao_stack_frame(&state->frame_table, frame);
+		state->frame = frame_ptr;
 	} else {
 		struct ao_stack_frame *old = state->frame;
 		if (old == NULL) {
@@ -553,7 +559,7 @@ b1 parse_sealer(struct parse_state *state, u8 op) {
 		slice_stack_snoc(buf, &text, c);
 	}
 	snoc_opcode(state, op);
-	slice_snoc(&state->block.sealers, memoise_string_rc(&state->memo_table, text.data, text.size));
+	slice_snoc(&state->block.sealers, memoise_string_rc(&state->string_table, text.data, text.size));
 	slice_stack_free(buf, &text);
 	return true;
 }
@@ -613,7 +619,7 @@ b1 parse_text(struct parse_state *state) {
 		slice_stack_snoc(buf, &text, c);
 	}
 	snoc_opcode(state, '"');
-	slice_snoc(&state->block.texts, memoise_string_rc(&state->memo_table, text.data, text.size));
+	slice_snoc(&state->block.texts, memoise_string_rc(&state->string_table, text.data, text.size));
 	slice_stack_free(buf, &text);
 	return true;
 }
@@ -760,7 +766,7 @@ int main() {
 	}
 	printf("Parse succeeded. %zu blocks.\n", state.blocks.size);
 
-	string_rc_memo_table_free(&state.memo_table);
+	string_rc_memo_table_free(&state.string_table);
 	foreach (block, state.blocks) {
 		block_free(block);
 	}
