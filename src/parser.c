@@ -33,8 +33,10 @@ void slice_grow_(struct u8_slice *slice, usize size) {
 
 #define slice_trim(slice) slice_trim_((struct u8_slice *) (slice), sizeof((slice)->data[0]))
 void slice_trim_(struct u8_slice *slice, usize size) {
-	slice->cap = slice->size;
-	slice->data = realloc(slice->data, slice->cap * size);
+	if (slice->cap) {
+		slice->cap = slice->size;
+		slice->data = realloc(slice->data, slice->cap * size);
+	}
 }
 
 #define slice_bump(slice) slice_bump_((struct u8_slice *) (slice), sizeof((slice)->data[0]))
@@ -157,7 +159,7 @@ void memo_table_maybe_grow(struct void_memo_table *table) {
 }
 
 #define ESCAPE_COMMAS(...) __VA_ARGS__
-#define DEFINE_MEMOISE(name, type, args, hash_expr, equal_expr, malloc_expr, init_expr) \
+#define DEFINE_MEMOISE(name, type, args, hash_expr, equal_expr, decref_internals_expr, malloc_expr, init_expr) \
 type *memoise_ ## name(struct name ## _memo_table *table, args) { \
 	u32 hash = (hash_expr); \
 	memo_table_maybe_grow((struct void_memo_table *) table); \
@@ -168,6 +170,7 @@ type *memoise_ ## name(struct name ## _memo_table *table, args) { \
 			type *entry = table->buckets[bucket]; \
 			if (equal_expr) { \
 				entry->refcount++; \
+				decref_internals_expr; \
 				return entry; \
 			} \
 		} \
@@ -193,9 +196,9 @@ void name ## _memo_table_free(struct name ## _memo_table *table) { \
 	free(table->buckets); \
 }
 
-#define DEFINE_MEMO_TABLE(name, type, args, hash_expr, equal_expr, malloc_expr, init_expr) \
+#define DEFINE_MEMO_TABLE(name, type, args, hash_expr, equal_expr, decref_internals_expr, malloc_expr, init_expr) \
 	DEFINE_MEMO_TABLE_STRUCT(name, type); \
-	DEFINE_MEMOISE(name, type, ESCAPE_COMMAS(args), hash_expr, equal_expr, malloc_expr, init_expr); \
+	DEFINE_MEMOISE(name, type, ESCAPE_COMMAS(args), hash_expr, equal_expr, decref_internals_expr, malloc_expr, init_expr); \
 	DEFINE_MEMO_TABLE_FREE(name);
 
 struct string_rc {
@@ -215,6 +218,7 @@ DEFINE_MEMO_TABLE(string_rc, struct string_rc,
                ESCAPE_COMMAS(u8 *data, usize size),
                jenkins_hash(data, size),
                entry->size == size && memcmp(entry->data, data, size) == 0,
+               ,
                sizeof(struct string_rc) + size * sizeof(u8),
                ({ entry->size = size; memcpy(entry->data, data, size); }));
 
@@ -253,11 +257,13 @@ DEFINE_MEMO_TABLE(ao_stack_frame, struct ao_stack_frame,
                struct ao_stack_frame data,
                jenkins_hash((u8 *)&data, sizeof(struct ao_stack_frame) - sizeof(u32)),
                memcmp(entry, &data, sizeof(struct ao_stack_frame) - sizeof(u32)) == 0,
+               ({ string_rc_decref(entry->word); string_rc_decref(entry->file); }),
                sizeof(struct ao_stack_frame),
                ({ *entry = data; if (data.next) { data.next->refcount++; } }));
 
 struct block {
-	u32 hash; // Hash of opcode values, Jenkins One-at-a-Time hash.
+	// TODO pull hash out of block
+	u32 hash; // Hash of all parsed chars (excluding SP and LF), Jenkins One-at-a-Time hash.
 	struct u8_slice opcodes;
 	struct ao_stack_frame_ptr_slice frames;
 	struct u32_slice blocks;
@@ -626,6 +632,7 @@ b1 parse_text(struct parse_state *state) {
 
 b1 parse_block(struct parse_state *state, b1 expect_eof) {
 	state->frame = NULL;
+	// TODO only store a pointer in state.
 	state->block = (struct block){};
 	while (true) {
 		i32 c = next(state);
@@ -642,6 +649,7 @@ b1 parse_block(struct parse_state *state, b1 expect_eof) {
 		}
 		if (c == EOF || c == ']') {
 			slice_trim(&state->block.opcodes);
+			slice_trim(&state->block.frames);
 			slice_trim(&state->block.blocks);
 			slice_trim(&state->block.texts);
 			slice_trim(&state->block.sealers);
@@ -737,9 +745,10 @@ b1 parse(struct parse_state *state) {
 	if (state->frame != NULL) {
 		report_error_here(state, PARSE_WARN_EOF_IN_FRAME);
 		ao_stack_frame_decref(state->frame);
-		state->frame = NULL;
 	}
-	state->block = (struct block){};
+	string_rc_memo_table_free(&state->string_table);
+	ao_stack_frame_memo_table_free(&state->frame_table);
+	slice_trim(&state->blocks);
 	return succeeded;
 }
 
@@ -766,7 +775,6 @@ int main() {
 	}
 	printf("Parse succeeded. %zu blocks.\n", state.blocks.size);
 
-	string_rc_memo_table_free(&state.string_table);
 	foreach (block, state.blocks) {
 		block_free(block);
 	}
