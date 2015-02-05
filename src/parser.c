@@ -127,27 +127,27 @@ void string_rc_decref(struct string_rc *str) {
 	}
 }
 
-struct string_memo_table {
-	u32 *hashes;
-	struct string_rc **buckets;
-	usize size;
-	usize num_buckets; // Must be power of two
+#define DEFINE_MEMO_TABLE_STRUCT(name, type) \
+struct name ## _memo_table { \
+	u32 *hashes; \
+	type **buckets; \
+	usize size; \
+	usize num_buckets; /* Must be power of two */ \
 };
+DEFINE_MEMO_TABLE_STRUCT(void, void);
 
-struct string_rc *memoise_string(struct string_memo_table *table, u8 *data, usize size) {
-	u32 hash = jenkins_hash(data, size);
+void memo_table_maybe_grow(struct void_memo_table *table) {
 	if (table->num_buckets == 0) {
 		table->num_buckets = 64;
 		table->hashes = malloc(table->num_buckets * sizeof(u32));
-		table->buckets = malloc(table->num_buckets * sizeof(struct string_rc *));
+		table->buckets = malloc(table->num_buckets * sizeof(void *));
 		memset(table->hashes, 0, table->num_buckets * sizeof(u32));
 	}
-	usize bucket_mask = table->num_buckets - 1;
 	if (table->size > table->num_buckets / 2) {
 		usize new_num_buckets = table->num_buckets * 2;
 		usize new_bucket_mask = new_num_buckets - 1;
 		u32 *new_hashes = malloc(new_num_buckets * sizeof(u32));
-		struct string_rc **new_buckets = malloc(new_num_buckets * sizeof(struct string_rc *));
+		void **new_buckets = malloc(new_num_buckets * sizeof(void *));
 		memset(new_hashes, 0, new_num_buckets * sizeof(u32));
 		for (usize i = 0; i < table->num_buckets; i++) {
 			u32 new_hash = table->hashes[i];
@@ -166,38 +166,57 @@ struct string_rc *memoise_string(struct string_memo_table *table, u8 *data, usiz
 		table->num_buckets = new_num_buckets;
 		table->hashes = new_hashes;
 		table->buckets = new_buckets;
-		bucket_mask = new_bucket_mask;
 	}
-	usize bucket = hash & bucket_mask;
-	while (table->hashes[bucket] != 0) {
-		if (table->hashes[bucket] == hash) {
-			struct string_rc *str = table->buckets[bucket];
-			if (str->size == size && memcmp(str->data, data, size) == 0) {
-				str->refcount++;
-				return str;
-			}
-		}
-		bucket = (bucket + 1) & bucket_mask;
-	}
-	struct string_rc *str = malloc(sizeof(struct string_rc) + size * sizeof(u8));
-	str->size = size;
-	str->refcount = 2; // The table retains a reference to the string
-	memcpy(str->data, data, size);
-	table->hashes[bucket] = hash;
-	table->buckets[bucket] = str;
-	table->size++;
-	return str;
 }
 
-void string_memo_table_free(struct string_memo_table *table) {
-	for (usize i = 0; i < table->num_buckets; i++) {
-		if (table->hashes[i] != 0) {
-			string_rc_decref(table->buckets[i]);
-		}
-	}
-	free(table->hashes);
-	free(table->buckets);
+#define ESCAPE_COMMAS(...) __VA_ARGS__
+#define DEFINE_MEMOISE(name, type, args, hash_expr, equal_expr, malloc_expr, init_expr) \
+type *memoise_ ## name(struct name ## _memo_table *table, args) { \
+	u32 hash = (hash_expr); \
+	memo_table_maybe_grow((struct void_memo_table *) table); \
+	usize bucket_mask = table->num_buckets - 1; \
+	usize bucket = hash & bucket_mask; \
+	while (table->hashes[bucket] != 0) { \
+		if (table->hashes[bucket] == hash) { \
+			type *entry = table->buckets[bucket]; \
+			if (equal_expr) { \
+				entry->refcount++; \
+				return entry; \
+			} \
+		} \
+		bucket = (bucket + 1) & bucket_mask; \
+	} \
+	type *entry = malloc(malloc_expr); \
+	init_expr; \
+	table->hashes[bucket] = hash; \
+	table->buckets[bucket] = entry; \
+	table->size++; \
+	return entry; \
 }
+
+#define DEFINE_MEMO_TABLE_FREE(name) \
+void name ## _memo_table_free(struct name ## _memo_table *table) { \
+	for (usize i = 0; i < table->num_buckets; i++) { \
+		if (table->hashes[i] != 0) { \
+			name ## _decref(table->buckets[i]); \
+		} \
+	} \
+	free(table->hashes); \
+	free(table->buckets); \
+}
+
+#define DEFINE_MEMO_TABLE(name, type, args, hash_expr, equal_expr, malloc_expr, init_expr) \
+	DEFINE_MEMO_TABLE_STRUCT(name, type); \
+	DEFINE_MEMOISE(name, type, ESCAPE_COMMAS(args), hash_expr, equal_expr, malloc_expr, init_expr); \
+	DEFINE_MEMO_TABLE_FREE(name);
+
+DEFINE_MEMO_TABLE(string_rc, struct string_rc,
+               ESCAPE_COMMAS(u8 *data, usize size),
+               jenkins_hash(data, size),
+               entry->size == size && memcmp(entry->data, data, size) == 0,
+               sizeof(struct string_rc) + size * sizeof(u8),
+               // The table retains a reference to the string
+               ({ entry->size = size; entry->refcount = 2; memcpy(entry->data, data, size); }));
 
 #define OP_SEAL             1
 #define OP_UNSEAL           2
@@ -309,7 +328,7 @@ struct parse_state {
 	struct block block;
 	struct parse_error_slice errors;
 	struct block_slice blocks;
-	struct string_memo_table memo_table;
+	struct string_rc_memo_table memo_table;
 };
 
 i32 next(struct parse_state *state) {
@@ -406,8 +425,8 @@ b1 parse_stack_annotation(struct parse_state *state, b1 enter) {
 	}
 	if (enter) {
 		struct ao_stack_frame *frame = malloc(sizeof(struct ao_stack_frame));
-		struct string_rc *word = memoise_string(&state->memo_table, word_slice.data, word_slice.size);
-		struct string_rc *file = memoise_string(&state->memo_table, file_slice.data, file_slice.size);
+		struct string_rc *word = memoise_string_rc(&state->memo_table, word_slice.data, word_slice.size);
+		struct string_rc *file = memoise_string_rc(&state->memo_table, file_slice.data, file_slice.size);
 		slice_stack_free(word_buf, &word_slice);
 		slice_stack_free(file_buf, &file_slice);
 		*frame = (struct ao_stack_frame){state->frame, word, file, line, 1};
@@ -534,7 +553,7 @@ b1 parse_sealer(struct parse_state *state, u8 op) {
 		slice_stack_snoc(buf, &text, c);
 	}
 	snoc_opcode(state, op);
-	slice_snoc(&state->block.sealers, memoise_string(&state->memo_table, text.data, text.size));
+	slice_snoc(&state->block.sealers, memoise_string_rc(&state->memo_table, text.data, text.size));
 	slice_stack_free(buf, &text);
 	return true;
 }
@@ -594,7 +613,7 @@ b1 parse_text(struct parse_state *state) {
 		slice_stack_snoc(buf, &text, c);
 	}
 	snoc_opcode(state, '"');
-	slice_snoc(&state->block.texts, memoise_string(&state->memo_table, text.data, text.size));
+	slice_snoc(&state->block.texts, memoise_string_rc(&state->memo_table, text.data, text.size));
 	slice_stack_free(buf, &text);
 	return true;
 }
@@ -741,7 +760,7 @@ int main() {
 	}
 	printf("Parse succeeded. %zu blocks.\n", state.blocks.size);
 
-	string_memo_table_free(&state.memo_table);
+	string_rc_memo_table_free(&state.memo_table);
 	foreach (block, state.blocks) {
 		block_free(block);
 	}
