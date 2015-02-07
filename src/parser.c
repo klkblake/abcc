@@ -826,17 +826,28 @@ struct block *parse_block(struct parse_state *state, b32 expect_eof) {
 	}
 }
 
-struct block *parse(struct parse_state *state) {
-	struct block *block = parse_block(state, true);
-	if (state->frame != NULL) {
-		report_error_here(state, PARSE_WARN_EOF_IN_FRAME);
-		ao_stack_frame_decref(state->frame);
+struct parse_result {
+	// NULL if the parse failed
+	struct block *block;
+	// All the blocks transitively referenced by block, sorted
+	// topologically (leaves first)
+	struct block_ptr_slice blocks;
+	struct parse_error_slice errors;
+};
+
+struct parse_result parse(FILE *stream) {
+	struct parse_state state = {};
+	state.stream = stream;
+	struct block *block = parse_block(&state, true);
+	if (state.frame != NULL) {
+		report_error_here(&state, PARSE_WARN_EOF_IN_FRAME);
+		ao_stack_frame_decref(state.frame);
 	}
-	string_rc_memo_table_free(&state->string_table);
-	ao_stack_frame_memo_table_free(&state->frame_table);
-	block_memo_table_free(&state->block_table);
-	slice_trim(&state->blocks);
-	return block;
+	string_rc_memo_table_free(&state.string_table);
+	ao_stack_frame_memo_table_free(&state.frame_table);
+	block_memo_table_free(&state.block_table);
+	slice_trim(&state.blocks);
+	return (struct parse_result){block, state.blocks, state.errors};
 }
 
 void print_parse_error(struct parse_error error) {
@@ -849,22 +860,20 @@ void print_parse_error(struct parse_error error) {
 }
 
 int main() {
-	struct parse_state state = {};
-	state.stream = stdin;
-	struct block *block = parse(&state);
-	foreach (error, state.errors) {
+	struct parse_result result = parse(stdin);
+	foreach (error, result.errors) {
 		print_parse_error(*error);
 	}
-	slice_free(&state.errors);
-	if (!block) {
+	slice_free(&result.errors);
+	if (!result.block) {
 		printf("Parse failed.\n");
 		return 1;
 	}
-	printf("Parse succeeded. %zu blocks.\n", state.blocks.size);
+	printf("Parse succeeded. %zu blocks.\n", result.blocks.size);
 
-	foreach (block, state.blocks) {
+	foreach (block, result.blocks) {
 		block_free(*block);
 	}
-	slice_free(&state.blocks);
+	slice_free(&result.blocks);
 	return 0;
 }
