@@ -26,7 +26,10 @@ void slice_grow_(struct u8_slice *slice, usize size) {
 		slice->cap = 64;
 		slice->data = malloc(slice->cap * size);
 	} else {
-		slice->cap *= 2;
+		// XXX This causes the buffer to crawl forward in memory. This
+		// should be a big deal, but I can't get it to actually cause
+		// problems, nor to do any better with smaller factors.
+		slice->cap = slice->cap * 2;
 		slice->data = realloc(slice->data, slice->cap * size);
 	}
 }
@@ -129,6 +132,7 @@ struct name ## _memo_table { \
 DEFINE_MEMO_TABLE_STRUCT(void, void);
 
 void memo_table_maybe_grow(struct void_memo_table *table) {
+	assert(table->size <= table->num_buckets);
 	if (table->num_buckets == 0) {
 		table->num_buckets = 64;
 		table->hashes = malloc(table->num_buckets * sizeof(u32));
@@ -225,11 +229,13 @@ DEFINE_MEMO_TABLE(string_rc, struct string_rc,
                   sizeof(struct string_rc) + size * sizeof(u8),
                   ({ entry->size = size; memcpy(entry->data, data, size); }));
 
-#define OP_SEAL             1
-#define OP_UNSEAL           2
-#define OP_ASSERT_EQUAL     3
-#define OP_DEBUG_PRINT_RAW  4
-#define OP_DEBUG_PRINT_TEXT 5
+#define OP_FRAME_PUSH       1
+#define OP_FRAME_POP        2
+#define OP_SEAL             3
+#define OP_UNSEAL           4
+#define OP_ASSERT_EQUAL     5
+#define OP_DEBUG_PRINT_RAW  6
+#define OP_DEBUG_PRINT_TEXT 7
 
 struct ao_stack_frame {
 	struct ao_stack_frame *next;
@@ -290,11 +296,11 @@ struct block {
 DEFINE_SLICE(struct block, block);
 
 void block_free(struct block *block) {
-	for (usize i = 0, text_index = 0, sealer_index = 0; i < block->size; i++) {
-		if (block->frames[i]) {
-			ao_stack_frame_decref(block->frames[i]);
-		}
+	for (usize i = 0, frame_index = 0, text_index = 0, sealer_index = 0; i < block->size; i++) {
 		u8 opcode = block->opcodes[i];
+		if (opcode == OP_FRAME_PUSH) {
+			ao_stack_frame_decref(block->frames[frame_index++]);
+		}
 		if (opcode == '"') {
 			string_rc_decref(block->texts[text_index++]);
 		}
@@ -395,14 +401,6 @@ void report_error_here(struct parse_state *state, u32 code) {
 	report_error(state, code, state->line, state->col);
 }
 
-void snoc_opcode(struct parse_state *state, u8 opcode) {
-	slice_snoc(&state->block->opcodes, opcode);
-	slice_snoc(&state->block->frames, state->frame);
-	if (state->frame) {
-		state->frame->refcount++;
-	}
-}
-
 b32 eat_unknown_annotation(struct parse_state *state) {
 	report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
 	i32 c;
@@ -464,6 +462,8 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 		slice_stack_free(file_buf, &file_slice);
 		struct ao_stack_frame *frame = memoise_ao_stack_frame(&state->frame_table, state->frame, word, file, line);
 		state->frame = frame;
+		slice_snoc(&state->block->opcodes, OP_FRAME_PUSH);
+		slice_snoc(&state->block->frames, frame);
 	} else {
 		struct ao_stack_frame *old = state->frame;
 		if (old == NULL) {
@@ -477,6 +477,7 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 		    memcmp(old->word->data, word_slice.data, word_slice.size) != 0 ||
 		    memcmp(old->file->data, file_slice.data, file_slice.size) != 0 ||
 		    old->line != line) {
+			// TODO Should we pop the frame?
 			report_error_here(state, PARSE_WARN_MISMATCHED_FRAME_POP);
 			slice_stack_free(word_buf, &word_slice);
 			slice_stack_free(file_buf, &file_slice);
@@ -485,7 +486,7 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 		slice_stack_free(word_buf, &word_slice);
 		slice_stack_free(file_buf, &file_slice);
 		state->frame = old->next;
-		ao_stack_frame_decref(old);
+		slice_snoc(&state->block->opcodes, OP_FRAME_POP);
 	}
 	return true;
 }
@@ -536,7 +537,7 @@ b32 parse_annotation(struct parse_state *state) {
 	}
 	// UTF-8 encoding of ≡
 	if (cs[0] == 0xe2 && cs[1] ==0x89 && cs[2] == 0xa1 && cs[3] == '}') {
-		snoc_opcode(state, OP_ASSERT_EQUAL);
+		slice_snoc(&state->block->opcodes, OP_ASSERT_EQUAL);
 	} else if (cs[0] == 'd' && cs[1] == 'e' && cs[2] == 'b' && cs[3] == 'u') {
 		i32 m = match_annotation_part(state, (u8 *)"g print ");
 		if (m) {
@@ -565,7 +566,7 @@ b32 parse_annotation(struct parse_state *state) {
 		if (m) {
 			return m != EOF;
 		}
-		snoc_opcode(state, op);
+		slice_snoc(&state->block->opcodes, op);
 	} else {
 		return eat_unknown_annotation(state);
 	}
@@ -582,7 +583,7 @@ b32 parse_sealer(struct parse_state *state, u8 op) {
 		}
 		slice_stack_snoc(buf, &text, c);
 	}
-	snoc_opcode(state, op);
+	slice_snoc(&state->block->opcodes, op);
 	slice_snoc(&state->block->sealers, memoise_string_rc(&state->string_table, text.data, text.size));
 	slice_stack_free(buf, &text);
 	return true;
@@ -642,7 +643,7 @@ b32 parse_text(struct parse_state *state) {
 		}
 		slice_stack_snoc(buf, &text, c);
 	}
-	snoc_opcode(state, '"');
+	slice_snoc(&state->block->opcodes, '"');
 	slice_snoc(&state->block->texts, memoise_string_rc(&state->string_table, text.data, text.size));
 	slice_stack_free(buf, &text);
 	return true;
@@ -701,7 +702,7 @@ b32 parse_block(struct parse_state *state, b32 expect_eof) {
 					report_error(state, PARSE_ERR_EOF_IN_BLOCK, line, col);
 					return false;
 				}
-				snoc_opcode(state, '[');
+				slice_snoc(&state->block->opcodes, '[');
 				slice_snoc(&block.blocks, state->blocks.size - 1);
 				break;
 			case '{':
@@ -754,7 +755,7 @@ b32 parse_block(struct parse_state *state, b32 expect_eof) {
 			case 'M':
 			case 'K':
 			case '>':
-				snoc_opcode(state, c);
+				slice_snoc(&state->block->opcodes, c);
 				break;
 
 			default:
@@ -773,6 +774,7 @@ b32 parse(struct parse_state *state) {
 	string_rc_memo_table_free(&state->string_table);
 	ao_stack_frame_memo_table_free(&state->frame_table);
 	slice_trim(&state->blocks);
+	slice_free(&state->hashes);
 	return succeeded;
 }
 
