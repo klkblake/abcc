@@ -43,17 +43,17 @@ void slice_trim_(struct u8_slice *slice, usize size) {
 }
 
 #define slice_bump(slice) slice_bump_((struct u8_slice *) (slice), sizeof((slice)->data[0]))
-void slice_bump_(struct u8_slice *slice, usize size) {
+void *slice_bump_(struct u8_slice *slice, usize size) {
 	if (slice->size == slice->cap) {
 		slice_grow_(slice, size);
 	}
 	slice->size++;
+	return &slice->data[(slice->size - 1) * size];
 }
 
 #define slice_snoc(slice, elem) ({ \
 		typeof(slice) _slice = (slice); \
-		slice_bump(_slice); \
-		_slice->data[_slice->size - 1] = elem; \
+		*((typeof(_slice->data))slice_bump(_slice)) = elem; \
 	})
 
 void slice_free(void *slice) {
@@ -139,6 +139,7 @@ void memo_table_maybe_grow(struct void_memo_table *table) {
 		table->buckets = malloc(table->num_buckets * sizeof(void *));
 		memset(table->hashes, 0, table->num_buckets * sizeof(u32));
 	}
+	// Guarentee at least 50% free space for better performance
 	if (table->size > table->num_buckets / 2) {
 		usize new_num_buckets = table->num_buckets * 2;
 		usize new_bucket_mask = new_num_buckets - 1;
@@ -227,7 +228,7 @@ DEFINE_MEMO_TABLE(string_rc, struct string_rc,
                   entry->size == size && memcmp(entry->data, data, size) == 0,
                   ,
                   sizeof(struct string_rc) + size * sizeof(u8),
-                  ({ entry->size = size; memcpy(entry->data, data, size); }));
+                  { entry->size = size; memcpy(entry->data, data, size); });
 
 #define OP_FRAME_PUSH       1
 #define OP_FRAME_POP        2
@@ -273,27 +274,71 @@ DEFINE_MEMO_TABLE(ao_stack_frame, struct ao_stack_frame,
 		   jenkins_finalise(hash);
                    }),
                   entry->next == next && entry->word == word && entry->file == file && entry->line == line,
-                  ({ string_rc_decref(word); string_rc_decref(file); }),
+                  { string_rc_decref(word); string_rc_decref(file); },
                   sizeof(struct ao_stack_frame),
                   ({ *entry = (struct ao_stack_frame){ next, word, file, line, 0 }; if (next) { next->refcount++; } }));
-
-struct incomplete_block {
-	struct u8_slice opcodes;
-	struct ao_stack_frame_ptr_slice frames;
-	struct u32_slice blocks;
-	struct string_rc_ptr_slice texts;
-	struct string_rc_ptr_slice sealers;
-};
 
 struct block {
 	usize size;
 	u8 *opcodes;
 	struct ao_stack_frame **frames;
-	u32 *blocks;
+	struct block **blocks;
 	struct string_rc **texts;
 	struct string_rc **sealers;
+	// Unlike for other structs, this is not used for memory management
+	u32 refcount;
 };
 DEFINE_SLICE(struct block, block);
+DEFINE_SLICE(struct block *, block_ptr);
+
+struct incomplete_block {
+	struct u8_slice opcodes;
+	struct ao_stack_frame_ptr_slice frames;
+	struct block_ptr_slice blocks;
+	struct string_rc_ptr_slice texts;
+	struct string_rc_ptr_slice sealers;
+};
+
+b32 blocks_equal(struct block *a, struct block *b) {
+	if (a->size != b->size) {
+		return false;
+	}
+	for (usize i = 0, frame_index = 0, block_index = 0, text_index = 0, sealer_index = 0; i < a->size; i++) {
+		if (a->opcodes[i] != b->opcodes[i]) {
+			return false;
+		}
+		u8 opcode = a->opcodes[i];
+		if (opcode == OP_FRAME_PUSH) {
+			if (a->frames[frame_index] != b->frames[frame_index]) {
+				return false;
+			}
+			frame_index++;
+		}
+		if (opcode == '[') {
+			if (a->blocks[block_index] != b->blocks[block_index]) {
+				return false;
+			}
+			block_index++;
+		}
+		if (opcode == '"') {
+			if (a->texts[text_index] != b->texts[text_index]) {
+				return false;
+			}
+			text_index++;
+		}
+		if (opcode == OP_SEAL || opcode == OP_UNSEAL) {
+			if (a->sealers[sealer_index] != b->sealers[sealer_index]) {
+				return false;
+			}
+			sealer_index++;
+		}
+	}
+	return true;
+}
+
+void block_decref(struct block *block) {
+	block->refcount--;
+}
 
 void block_free(struct block *block) {
 	for (usize i = 0, frame_index = 0, text_index = 0, sealer_index = 0; i < block->size; i++) {
@@ -319,6 +364,14 @@ void block_clear(struct block *block) {
 	block_free(block);
 	*block = (struct block){};
 }
+
+DEFINE_MEMO_TABLE(block, struct block,
+                  ESCAPE_COMMAS(struct block *block, u32 bhash),
+                  bhash,
+                  blocks_equal(entry, block),
+                  { block_free(block); block->refcount = 0; },
+                  sizeof(struct block),
+                  *entry = *block);
 
 #define PARSE_WARN (1 << 31)
 #define PARSE_ERR_EOF_IN_BLOCK        0
@@ -365,10 +418,10 @@ struct parse_state {
 	struct incomplete_block *block;
 	u32 hash; // Hash of all parsed chars (excluding SP and LF), Jenkins One-at-a-Time hash.
 	struct parse_error_slice errors;
-	struct block_slice blocks;
-	struct u32_slice hashes;
+	struct block_ptr_slice blocks;
 	struct string_rc_memo_table string_table;
 	struct ao_stack_frame_memo_table frame_table;
+	struct block_memo_table block_table;
 };
 
 i32 next(struct parse_state *state) {
@@ -649,10 +702,11 @@ b32 parse_text(struct parse_state *state) {
 	return true;
 }
 
-b32 parse_block(struct parse_state *state, b32 expect_eof) {
+struct block *parse_block(struct parse_state *state, b32 expect_eof) {
 	struct incomplete_block block = {};
 	state->frame = NULL;
 	state->block = &block;
+	state->hash = 0;
 	while (true) {
 		i32 c = next(state);
 		if (c == ' ' || c == '\n') {
@@ -664,7 +718,7 @@ b32 parse_block(struct parse_state *state, b32 expect_eof) {
 		}
 		if (c == ']' && expect_eof) {
 			report_error_here(state, PARSE_ERR_UNEXPECTED_BRACKET);
-			return false;
+			return NULL;
 		}
 		if (c == EOF || c == ']') {
 			slice_trim(&block.opcodes);
@@ -679,42 +733,49 @@ b32 parse_block(struct parse_state *state, b32 expect_eof) {
 				block.blocks.data,
 				block.texts.data,
 				block.sealers.data,
+				1,
 			};
-			slice_snoc(&state->blocks, complete_block);
-			slice_snoc(&state->hashes, jenkins_finalise(state->hash));
-			return true;
+			struct block *memo_block = memoise_block(&state->block_table, &complete_block, jenkins_finalise(state->hash));
+			if (complete_block.refcount) {
+				// This field is unused, so we have the memo
+				// table implementation clear it to signal that
+				// a matching block was found.
+				slice_snoc(&state->blocks, memo_block);
+			}
+			return memo_block;
 		}
 		struct ao_stack_frame *frame;
 		b32 succeeded;
 		switch ((u8)c) {
 			case '[':
 				frame = state->frame;
+				u32 hash = state->hash;
 				u32 line = state->line;
 				u32 col = state->col;
-				succeeded = parse_block(state, false);
-				if (!succeeded) {
-					return false;
+				struct block *new_block = parse_block(state, false);
+				if (new_block == NULL) {
+					return NULL;
 				}
 				state->frame = frame;
 				state->block = &block;
-				state->hash = 0;
+				state->hash = jenkins_add(hash, (u8 *)&state->hash, sizeof(state->hash));
 				if (next(state) != ']') {
 					report_error(state, PARSE_ERR_EOF_IN_BLOCK, line, col);
-					return false;
+					return NULL;
 				}
 				slice_snoc(&state->block->opcodes, '[');
-				slice_snoc(&block.blocks, state->blocks.size - 1);
+				slice_snoc(&block.blocks, new_block);
 				break;
 			case '{':
 				succeeded = parse_invokation(state);
 				if (!succeeded) {
-					return false;
+					return NULL;
 				}
 				break;
 			case '"':
 				succeeded = parse_text(state);
 				if (!succeeded) {
-					return false;
+					return NULL;
 				}
 				break;
 
@@ -760,22 +821,22 @@ b32 parse_block(struct parse_state *state, b32 expect_eof) {
 
 			default:
 				report_error_here(state, PARSE_ERR_ILLEGAL_OPCODE);
-				return false;
+				return NULL;
 		}
 	}
 }
 
-b32 parse(struct parse_state *state) {
-	b32 succeeded = parse_block(state, true);
+struct block *parse(struct parse_state *state) {
+	struct block *block = parse_block(state, true);
 	if (state->frame != NULL) {
 		report_error_here(state, PARSE_WARN_EOF_IN_FRAME);
 		ao_stack_frame_decref(state->frame);
 	}
 	string_rc_memo_table_free(&state->string_table);
 	ao_stack_frame_memo_table_free(&state->frame_table);
+	block_memo_table_free(&state->block_table);
 	slice_trim(&state->blocks);
-	slice_free(&state->hashes);
-	return succeeded;
+	return block;
 }
 
 void print_parse_error(struct parse_error error) {
@@ -790,20 +851,20 @@ void print_parse_error(struct parse_error error) {
 int main() {
 	struct parse_state state = {};
 	state.stream = stdin;
-	b32 succeeded = parse(&state);
+	struct block *block = parse(&state);
 	foreach (error, state.errors) {
 		print_parse_error(*error);
 	}
-	slice_clear(&state.errors);
-	if (!succeeded) {
+	slice_free(&state.errors);
+	if (!block) {
 		printf("Parse failed.\n");
 		return 1;
 	}
 	printf("Parse succeeded. %zu blocks.\n", state.blocks.size);
 
 	foreach (block, state.blocks) {
-		block_free(block);
+		block_free(*block);
 	}
-	slice_clear(&state.blocks);
+	slice_free(&state.blocks);
 	return 0;
 }
