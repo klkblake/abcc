@@ -7,6 +7,7 @@
 #include "types.h"
 #include "parser.h"
 
+internal
 void slice_stack_snoc(u8 *buf, struct u8_slice *slice, u8 c) {
 	if (slice->size == slice->cap) {
 		if (slice->data == buf) {
@@ -22,12 +23,14 @@ void slice_stack_snoc(u8 *buf, struct u8_slice *slice, u8 c) {
 	slice->data[slice->size++] = c;
 }
 
+internal
 void slice_stack_free(u8 *buf, struct u8_slice *slice) {
 	if (slice->data != buf) {
 		slice_free(slice);
 	}
 }
 
+internal
 u32 jenkins_step(u32 hash, u8 data) {
 	hash = hash + data;
 	hash += hash << 10;
@@ -35,6 +38,7 @@ u32 jenkins_step(u32 hash, u8 data) {
 	return hash;
 }
 
+internal
 u32 jenkins_add(u32 hash, u8 *data, usize size) {
 	for (usize i = 0; i < size; i++) {
 		hash = jenkins_step(hash, data[i]);
@@ -42,6 +46,7 @@ u32 jenkins_add(u32 hash, u8 *data, usize size) {
 	return hash;
 }
 
+internal
 u32 jenkins_finalise(u32 hash) {
 	hash += hash << 3;
 	hash ^= hash >> 11;
@@ -53,6 +58,7 @@ u32 jenkins_finalise(u32 hash) {
 	return hash;
 }
 
+internal
 u32 jenkins_hash(u8 *data, usize size) {
 	return jenkins_finalise(jenkins_add(0, data, size));
 }
@@ -66,6 +72,7 @@ struct name ## _memo_table { \
 };
 DEFINE_MEMO_TABLE_STRUCT(void, void);
 
+internal
 void memo_table_maybe_grow(struct void_memo_table *table) {
 	assert(table->size <= table->num_buckets);
 	if (table->num_buckets == 0) {
@@ -103,6 +110,7 @@ void memo_table_maybe_grow(struct void_memo_table *table) {
 
 #define ESCAPE_COMMAS(...) __VA_ARGS__
 #define DEFINE_MEMOISE(name, type, args, hash_expr, equal_expr, decref_internals_expr, malloc_expr, init_expr) \
+internal \
 type *memoise_ ## name(struct name ## _memo_table *table, args) { \
 	u32 hash = (hash_expr); \
 	memo_table_maybe_grow((struct void_memo_table *) table); \
@@ -129,6 +137,7 @@ type *memoise_ ## name(struct name ## _memo_table *table, args) { \
 }
 
 #define DEFINE_MEMO_TABLE_FREE(name) \
+internal \
 void name ## _memo_table_free(struct name ## _memo_table *table) { \
 	for (usize i = 0; i < table->num_buckets; i++) { \
 		if (table->hashes[i] != 0) { \
@@ -147,6 +156,7 @@ void name ## _memo_table_free(struct name ## _memo_table *table) { \
 DEFINE_SLICE(struct string_rc *, string_rc_ptr);
 
 // TODO move?
+internal
 void string_rc_decref(struct string_rc *str) {
 	if (--str->refcount == 0) {
 		free(str);
@@ -163,11 +173,13 @@ DEFINE_MEMO_TABLE(string_rc, struct string_rc,
 
 DEFINE_SLICE(struct ao_stack_frame *, ao_stack_frame_ptr);
 
+internal
 void ao_stack_frame_free(struct ao_stack_frame frame) {
 	string_rc_decref(frame.word);
 	string_rc_decref(frame.file);
 }
 
+internal
 void ao_stack_frame_decref(struct ao_stack_frame *frame) {
 	if (--frame->refcount == 0) {
 		struct ao_stack_frame *next = frame->next;
@@ -179,6 +191,7 @@ void ao_stack_frame_decref(struct ao_stack_frame *frame) {
 	}
 }
 
+internal
 u32 hash_ao_stack_frame(struct ao_stack_frame *next, struct string_rc *word, struct string_rc *file, u32 line) {
                    u32 hash = 0;
 		   hash = jenkins_add(hash, (u8 *)&next, sizeof(next));
@@ -204,6 +217,7 @@ struct incomplete_block {
 	struct string_rc_ptr_slice sealers;
 };
 
+internal
 b32 blocks_equal(struct block *a, struct block *b) {
 	if (a->size != b->size) {
 		return false;
@@ -241,6 +255,7 @@ b32 blocks_equal(struct block *a, struct block *b) {
 	return true;
 }
 
+internal
 void block_decref(struct block *block) {
 	block->refcount--;
 }
@@ -317,6 +332,7 @@ struct parse_state {
 	struct block_memo_table block_table;
 };
 
+internal
 i32 next(struct parse_state *state) {
 	int c = getc(state->stream);
 	// Don't increment the column for UTF-8 continuation characters.
@@ -334,6 +350,7 @@ i32 next(struct parse_state *state) {
 	return c;
 }
 
+internal
 void report_error(struct parse_state *state, u32 code, u32 line, u32 col) {
 	struct parse_error error = {
 		code,
@@ -343,10 +360,12 @@ void report_error(struct parse_state *state, u32 code, u32 line, u32 col) {
 	slice_snoc(&state->errors, error);
 }
 
+internal
 void report_error_here(struct parse_state *state, u32 code) {
 	report_error(state, code, state->line, state->col);
 }
 
+internal
 b32 eat_unknown_annotation(struct parse_state *state) {
 	report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
 	i32 c;
@@ -358,6 +377,7 @@ b32 eat_unknown_annotation(struct parse_state *state) {
 	return true;
 }
 
+internal
 b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 	i32 c;
 	u8 word_buf[4096];
@@ -438,6 +458,7 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 }
 
 // 0 on success, 1 on failure, EOF on EOF
+internal
 i32 match_annotation_part(struct parse_state *state, u8 *target) {
 	while (*target != '\0') {
 		i32 c = next(state);
@@ -454,6 +475,7 @@ i32 match_annotation_part(struct parse_state *state, u8 *target) {
 	return 0;
 }
 
+internal
 b32 parse_annotation(struct parse_state *state) {
 	u8 cs[4];
 	i32 c = next(state);
@@ -519,6 +541,7 @@ b32 parse_annotation(struct parse_state *state) {
 	return true;
 }
 
+internal
 b32 parse_sealer(struct parse_state *state, u8 op) {
 	u8 buf[4096];
 	struct u8_slice text = {buf, 0, sizeof(buf) / sizeof(u8)};
@@ -535,6 +558,7 @@ b32 parse_sealer(struct parse_state *state, u8 op) {
 	return true;
 }
 
+internal
 b32 parse_invokation(struct parse_state *state) {
 	i32 type = next(state);
 	if (type == EOF) {
@@ -562,6 +586,7 @@ b32 parse_invokation(struct parse_state *state) {
 	return succeeded;
 }
 
+internal
 b32 parse_text(struct parse_state *state) {
 	u32 line = state->line;
 	u32 col = state->col;
@@ -595,6 +620,7 @@ b32 parse_text(struct parse_state *state) {
 	return true;
 }
 
+internal
 struct block *parse_block(struct parse_state *state, b32 expect_eof) {
 	struct incomplete_block block = {};
 	state->frame = NULL;
