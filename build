@@ -18,4 +18,4 @@ if [[ DEBUG == no ]]; then
 	CFLAGS="-O3 $CFLAGS"
 fi
 
-clang $CFLAGS -o abcc src/parser.c
+clang $CFLAGS -o abcc src/main.c src/parser.c

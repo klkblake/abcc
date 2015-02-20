@@ -5,22 +5,8 @@
 #include <assert.h>
 
 #include "types.h"
+#include "parser.h"
 
-struct u8_slice;
-void slice_grow_(struct u8_slice *slice, usize size);
-
-#define DEFINE_SLICE(type, name) \
-	struct name ## _slice { \
-		type *data; \
-		usize size; \
-		usize cap; \
-	};
-
-DEFINE_SLICE(u8, u8);
-DEFINE_SLICE(u8 *, u8_ptr);
-DEFINE_SLICE(u32, u32);
-
-#define slice_grow(slice) slice_grow_((struct u8_slice *) (slice), sizeof((slice)->data[0]))
 void slice_grow_(struct u8_slice *slice, usize size) {
 	if (slice->cap == 0) {
 		slice->cap = 64;
@@ -34,7 +20,6 @@ void slice_grow_(struct u8_slice *slice, usize size) {
 	}
 }
 
-#define slice_trim(slice) slice_trim_((struct u8_slice *) (slice), sizeof((slice)->data[0]))
 void slice_trim_(struct u8_slice *slice, usize size) {
 	if (slice->cap) {
 		slice->cap = slice->size;
@@ -42,7 +27,6 @@ void slice_trim_(struct u8_slice *slice, usize size) {
 	}
 }
 
-#define slice_bump(slice) slice_bump_((struct u8_slice *) (slice), sizeof((slice)->data[0]))
 void *slice_bump_(struct u8_slice *slice, usize size) {
 	if (slice->size == slice->cap) {
 		slice_grow_(slice, size);
@@ -50,11 +34,6 @@ void *slice_bump_(struct u8_slice *slice, usize size) {
 	slice->size++;
 	return &slice->data[(slice->size - 1) * size];
 }
-
-#define slice_snoc(slice, elem) ({ \
-		typeof(slice) _slice = (slice); \
-		*((typeof(_slice->data))slice_bump(_slice)) = elem; \
-	})
 
 void slice_free(void *slice) {
 	struct u8_slice *slice2 = slice;
@@ -86,12 +65,6 @@ void slice_stack_free(u8 *buf, struct u8_slice *slice) {
 		slice_free(slice);
 	}
 }
-
-#define foreach(var, slice) \
-	for (usize var ## _index = 0; var ## _index != (usize)-1; var ## _index = (usize)-1) \
-		for (typeof((slice).data) var; \
-		     var ## _index < (slice).size && (var = &(slice).data[var ## _index], true); \
-		     var ## _index++)
 
 u32 jenkins_step(u32 hash, u8 data) {
 	hash = hash + data;
@@ -209,15 +182,9 @@ void name ## _memo_table_free(struct name ## _memo_table *table) { \
 	DEFINE_MEMOISE(name, type, ESCAPE_COMMAS(args), hash_expr, equal_expr, decref_internals_expr, malloc_expr, init_expr); \
 	DEFINE_MEMO_TABLE_FREE(name);
 
-struct string_rc {
-	usize size;
-	u32 refcount;
-	// Intel optimisation guide recommends at least 16 byte alignment for arrays
-	u8 pad[16 - sizeof(usize) - sizeof(32)];
-	u8 data[];
-};
 DEFINE_SLICE(struct string_rc *, string_rc_ptr);
 
+// TODO move?
 void string_rc_decref(struct string_rc *str) {
 	if (--str->refcount == 0) {
 		free(str);
@@ -232,21 +199,6 @@ DEFINE_MEMO_TABLE(string_rc, struct string_rc,
                   sizeof(struct string_rc) + size * sizeof(u8),
                   { entry->size = size; memcpy(entry->data, data, size); });
 
-#define OP_FRAME_PUSH       1
-#define OP_FRAME_POP        2
-#define OP_SEAL             3
-#define OP_UNSEAL           4
-#define OP_ASSERT_EQUAL     5
-#define OP_DEBUG_PRINT_RAW  6
-#define OP_DEBUG_PRINT_TEXT 7
-
-struct ao_stack_frame {
-	struct ao_stack_frame *next;
-	struct string_rc *word;
-	struct string_rc *file;
-	u32 line;
-	u32 refcount;
-};
 DEFINE_SLICE(struct ao_stack_frame *, ao_stack_frame_ptr);
 
 void ao_stack_frame_free(struct ao_stack_frame frame) {
@@ -281,19 +233,6 @@ DEFINE_MEMO_TABLE(ao_stack_frame, struct ao_stack_frame,
                   { string_rc_decref(word); string_rc_decref(file); },
                   sizeof(struct ao_stack_frame),
                   ({ *entry = (struct ao_stack_frame){ next, word, file, line, 0 }; if (next) { next->refcount++; } }));
-
-struct block {
-	usize size;
-	u8 *opcodes;
-	struct ao_stack_frame **frames;
-	struct block **blocks;
-	struct string_rc **texts;
-	struct string_rc **sealers;
-	// Unlike for other structs, this is not used for memory management
-	u32 refcount;
-};
-DEFINE_SLICE(struct block, block);
-DEFINE_SLICE(struct block *, block_ptr);
 
 struct incomplete_block {
 	struct u8_slice opcodes;
@@ -406,13 +345,6 @@ static char *parse_warning_messages[] = {
 	"Tried to pop frame that does not match the top frame",
 	"Hit end-of-file while inside stack frame",
 };
-
-struct parse_error {
-	u32 code;
-	u32 line;
-	u32 col;
-};
-DEFINE_SLICE(struct parse_error, parse_error);
 
 struct parse_state {
 	FILE *stream;
@@ -830,15 +762,6 @@ struct block *parse_block(struct parse_state *state, b32 expect_eof) {
 	}
 }
 
-struct parse_result {
-	// NULL if the parse failed
-	struct block *block;
-	// All the blocks transitively referenced by block, sorted
-	// topologically (leaves first)
-	struct block_ptr_slice blocks;
-	struct parse_error_slice errors;
-};
-
 struct parse_result parse(FILE *stream) {
 	struct parse_state state = {};
 	state.stream = stream;
@@ -862,23 +785,4 @@ void print_parse_error(struct parse_error error) {
 		fprintf(stderr, "warning:%d:%d: %s\n", error.line + 1, error.col + 1,
 				parse_warning_messages[error.code &~ PARSE_WARN]);
 	}
-}
-
-int main() {
-	struct parse_result result = parse(stdin);
-	foreach (error, result.errors) {
-		print_parse_error(*error);
-	}
-	slice_free(&result.errors);
-	if (!result.block) {
-		printf("Parse failed.\n");
-		return 1;
-	}
-	printf("Parse succeeded. %zu blocks.\n", result.blocks.size);
-
-	foreach (block, result.blocks) {
-		block_free(*block);
-	}
-	slice_free(&result.blocks);
-	return 0;
 }

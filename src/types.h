@@ -1,3 +1,5 @@
+#ifndef TYPES_H
+
 #include <stdint.h>
 #include <sys/types.h>
 #include <stdbool.h>
@@ -17,3 +19,6 @@ typedef u32  b32;
 
 typedef size_t  usize;
 typedef ssize_t isize;
+
+#define TYPES_H
+#endif
