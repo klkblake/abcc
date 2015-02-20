@@ -1,0 +1,21 @@
+#!/bin/bash
+DEBUG=no
+
+CFLAGS="-Wall -Weverything -Wno-extra-semi -Wno-missing-prototypes -Wno-gnu-empty-initializer -Wno-gnu-statement-expression -Wno-language-extension-token -Wno-gnu-case-range -Wno-padded $CFLAGS"
+
+if [[ "$1" == debug ]]; then
+	DEBUG=yes
+	CFLAGS="-O1 -g -fsanitize=undefined $CFLAGS"
+	shift
+	if [[ "$2" == address ]]; then
+		CFLAGS="-fsanitize=address -fsanitize=leak $CFLAGS"
+	elif [[ "$2" == memory ]]; then
+		CFLAGS="-fsanitize=memory $CFLAGS"
+	fi
+fi
+
+if [[ DEBUG == no ]]; then
+	CFLAGS="-O3 $CFLAGS"
+fi
+
+clang $CFLAGS -o abcc src/parser.c

@@ -88,7 +88,7 @@ void slice_stack_free(u8 *buf, struct u8_slice *slice) {
 }
 
 #define foreach(var, slice) \
-	for (usize var ## _index = 0; var ## _index != (usize)-1; var ## _index = -1) \
+	for (usize var ## _index = 0; var ## _index != (usize)-1; var ## _index = (usize)-1) \
 		for (typeof((slice).data) var; \
 		     var ## _index < (slice).size && (var = &(slice).data[var ## _index], true); \
 		     var ## _index++)
@@ -113,7 +113,7 @@ u32 jenkins_finalise(u32 hash) {
 	hash += hash << 15;
 	// We use 0 to indicate no entry
 	if (hash == 0) {
-		hash = 1 << 31;
+		hash = 1u << 31;
 	}
 	return hash;
 }
@@ -212,6 +212,8 @@ void name ## _memo_table_free(struct name ## _memo_table *table) { \
 struct string_rc {
 	usize size;
 	u32 refcount;
+	// Intel optimisation guide recommends at least 16 byte alignment for arrays
+	u8 pad[16 - sizeof(usize) - sizeof(32)];
 	u8 data[];
 };
 DEFINE_SLICE(struct string_rc *, string_rc_ptr);
@@ -263,16 +265,18 @@ void ao_stack_frame_decref(struct ao_stack_frame *frame) {
 	}
 }
 
-DEFINE_MEMO_TABLE(ao_stack_frame, struct ao_stack_frame,
-                  ESCAPE_COMMAS(struct ao_stack_frame *next, struct string_rc *word, struct string_rc *file, u32 line),
-                  ({
+u32 hash_ao_stack_frame(struct ao_stack_frame *next, struct string_rc *word, struct string_rc *file, u32 line) {
                    u32 hash = 0;
 		   hash = jenkins_add(hash, (u8 *)&next, sizeof(next));
 		   hash = jenkins_add(hash, (u8 *)&word, sizeof(word));
 		   hash = jenkins_add(hash, (u8 *)&file, sizeof(file));
 		   hash = jenkins_add(hash, (u8 *)&line, sizeof(line));
-		   jenkins_finalise(hash);
-                   }),
+		   return jenkins_finalise(hash);
+}
+
+DEFINE_MEMO_TABLE(ao_stack_frame, struct ao_stack_frame,
+                  ESCAPE_COMMAS(struct ao_stack_frame *next, struct string_rc *word, struct string_rc *file, u32 line),
+                  hash_ao_stack_frame(next, word, file, line),
                   entry->next == next && entry->word == word && entry->file == file && entry->line == line,
                   { string_rc_decref(word); string_rc_decref(file); },
                   sizeof(struct ao_stack_frame),
@@ -373,7 +377,7 @@ DEFINE_MEMO_TABLE(block, struct block,
                   sizeof(struct block),
                   *entry = *block);
 
-#define PARSE_WARN (1 << 31)
+#define PARSE_WARN (1u << 31)
 #define PARSE_ERR_EOF_IN_BLOCK        0
 #define PARSE_ERR_EOF_IN_INVOCATION   1
 #define PARSE_ERR_EOF_IN_TEXT         2
@@ -386,7 +390,7 @@ DEFINE_MEMO_TABLE(block, struct block,
 #define PARSE_WARN_MISMATCHED_FRAME_POP (PARSE_WARN | 2)
 #define PARSE_WARN_EOF_IN_FRAME         (PARSE_WARN | 3)
 
-char *parse_error_messages[] = {
+static char *parse_error_messages[] = {
 	"Hit end-of-file while parsing block",
 	"Hit end-of-file while parsing invocation",
 	"Hit end-of-file while parsing text",
@@ -396,7 +400,7 @@ char *parse_error_messages[] = {
 	"Malformed text literal",
 };
 
-char *parse_warning_messages[] = {
+static char *parse_warning_messages[] = {
 	"Unknown annotation",
 	"Popped frame when already at top level",
 	"Tried to pop frame that does not match the top frame",
@@ -412,8 +416,8 @@ DEFINE_SLICE(struct parse_error, parse_error);
 
 struct parse_state {
 	FILE *stream;
-	i32 line;
-	i32 col;
+	u32 line;
+	u32 col;
 	struct ao_stack_frame *frame;
 	struct incomplete_block *block;
 	u32 hash; // Hash of all parsed chars (excluding SP and LF), Jenkins One-at-a-Time hash.
@@ -436,7 +440,7 @@ i32 next(struct parse_state *state) {
 		state->col = 0;
 	}
 	if (c != ' ' && c != '\n') {
-		state->hash = jenkins_step(state->hash, c);
+		state->hash = jenkins_step(state->hash, (u8)c);
 	}
 	return c;
 }
@@ -477,7 +481,7 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 		if (c == EOF) {
 			return false;
 		}
-		slice_stack_snoc(word_buf, &word_slice, c);
+		slice_stack_snoc(word_buf, &word_slice, (u8)c);
 	}
 	u8 file_buf[4096];
 	struct u8_slice file_slice = (struct u8_slice){file_buf, 0, sizeof(file_buf)/sizeof(u8)};
@@ -491,7 +495,7 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 			slice_stack_free(word_buf, &word_slice);
 			return false;
 		}
-		slice_stack_snoc(file_buf, &file_slice, c);
+		slice_stack_snoc(file_buf, &file_slice, (u8)c);
 	}
 	u32 line = 0;
 	while ((c = next(state)) != '}') {
@@ -506,7 +510,7 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 			slice_stack_free(file_buf, &file_slice);
 			return false;
 		}
-		line = line * 10 + c - '0';
+		line = line * 10 + (u8)c - '0';
 	}
 	if (enter) {
 		struct string_rc *word = memoise_string_rc(&state->string_table, word_slice.data, word_slice.size);
@@ -573,10 +577,10 @@ b32 parse_annotation(struct parse_state *state) {
 	}
 	if (c == '+') {
 		return parse_stack_annotation(state, true);
-	} else {
+	} else if (c == '-') {
 		return parse_stack_annotation(state, false);
 	}
-	cs[0] = c;
+	cs[0] = (u8)c;
 	for (i32 i = 1; i < 4; i++) {
 		c = next(state);
 		if (c == '}') {
@@ -586,7 +590,7 @@ b32 parse_annotation(struct parse_state *state) {
 		if (c == EOF) {
 			return false;
 		}
-		cs[i] = c;
+		cs[i] = (u8)c;
 	}
 	// UTF-8 encoding of ≡
 	if (cs[0] == 0xe2 && cs[1] ==0x89 && cs[2] == 0xa1 && cs[3] == '}') {
@@ -634,7 +638,7 @@ b32 parse_sealer(struct parse_state *state, u8 op) {
 		if (c == EOF) {
 			return false;
 		}
-		slice_stack_snoc(buf, &text, c);
+		slice_stack_snoc(buf, &text, (u8)c);
 	}
 	slice_snoc(&state->block->opcodes, op);
 	slice_snoc(&state->block->sealers, memoise_string_rc(&state->string_table, text.data, text.size));
@@ -694,7 +698,7 @@ b32 parse_text(struct parse_state *state) {
 				return false;
 			}
 		}
-		slice_stack_snoc(buf, &text, c);
+		slice_stack_snoc(buf, &text, (u8)c);
 	}
 	slice_snoc(&state->block->opcodes, '"');
 	slice_snoc(&state->block->texts, memoise_string_rc(&state->string_table, text.data, text.size));
@@ -816,7 +820,7 @@ struct block *parse_block(struct parse_state *state, b32 expect_eof) {
 			case 'M':
 			case 'K':
 			case '>':
-				slice_snoc(&state->block->opcodes, c);
+				slice_snoc(&state->block->opcodes, (u8)c);
 				break;
 
 			default:
@@ -851,10 +855,11 @@ struct parse_result parse(FILE *stream) {
 }
 
 void print_parse_error(struct parse_error error) {
+	// We store line, col zero indexed instead of one indexed
 	if ((error.code & PARSE_WARN) == 0) {
-		fprintf(stderr, "error:%d:%d: %s\n", error.line, error.col, parse_error_messages[error.code]);
+		fprintf(stderr, "error:%d:%d: %s\n", error.line + 1, error.col + 1, parse_error_messages[error.code]);
 	} else {
-		fprintf(stderr, "warning:%d:%d: %s\n", error.line, error.col,
+		fprintf(stderr, "warning:%d:%d: %s\n", error.line + 1, error.col + 1,
 				parse_warning_messages[error.code &~ PARSE_WARN]);
 	}
 }
