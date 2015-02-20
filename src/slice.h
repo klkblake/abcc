@@ -25,7 +25,6 @@ void *slice_bump_(struct u8_slice *slice, usize size);
 	})
 
 void slice_free(void *slice);
-void slice_clear(void *slice);
 
 #define foreach(var, slice) \
 	for (usize var ## _index = 0; var ## _index != (usize)-1; var ## _index = (usize)-1) \

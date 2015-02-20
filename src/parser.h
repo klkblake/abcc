@@ -42,7 +42,6 @@ struct block {
 DEFINE_SLICE(struct block *, block_ptr);
 
 void block_free(struct block *block);
-void block_clear(struct block *block);
 
 struct parse_error {
 	u32 code;
