@@ -620,8 +620,15 @@ b32 parse_text(struct parse_state *state) {
 	return true;
 }
 
+struct parse_block_result {
+	struct block *block;
+	// Only set if block is non-null
+	b32 eof;
+};
+
 internal
-struct block *parse_block(struct parse_state *state, b32 expect_eof) {
+struct parse_block_result parse_block(struct parse_state *state, b32 expect_eof) {
+	struct parse_block_result result = {};
 	struct incomplete_block block = {};
 	state->frame = NULL;
 	state->block = &block;
@@ -631,13 +638,12 @@ struct block *parse_block(struct parse_state *state, b32 expect_eof) {
 		if (c == ' ' || c == '\n') {
 			continue;
 		}
-		if (c == ']') {
-			int err = ungetc(']', state->stream);
-			assert(err != EOF);
+		if (c == EOF) {
+			result.eof = true;
 		}
 		if (c == ']' && expect_eof) {
 			report_error_here(state, PARSE_ERR_UNEXPECTED_BRACKET);
-			return NULL;
+			return result;
 		}
 		if (c == EOF || c == ']') {
 			slice_trim(&block.opcodes);
@@ -661,7 +667,8 @@ struct block *parse_block(struct parse_state *state, b32 expect_eof) {
 				// a matching block was found.
 				slice_snoc(&state->blocks, memo_block);
 			}
-			return memo_block;
+			result.block = memo_block;
+			return result;
 		}
 		struct ao_stack_frame *frame;
 		b32 succeeded;
@@ -671,30 +678,30 @@ struct block *parse_block(struct parse_state *state, b32 expect_eof) {
 				u32 hash = state->hash;
 				u32 line = state->line;
 				u32 col = state->col;
-				struct block *new_block = parse_block(state, false);
-				if (new_block == NULL) {
-					return NULL;
+				struct parse_block_result res = parse_block(state, false);
+				if (res.block == NULL) {
+					return res;
 				}
 				state->frame = frame;
 				state->block = &block;
 				state->hash = jenkins_add(hash, (u8 *)&state->hash, sizeof(state->hash));
-				if (next(state) != ']') {
+				if (res.eof) {
 					report_error(state, PARSE_ERR_EOF_IN_BLOCK, line, col);
-					return NULL;
+					return result;
 				}
 				slice_snoc(&state->block->opcodes, '[');
-				slice_snoc(&block.blocks, new_block);
+				slice_snoc(&block.blocks, res.block);
 				break;
 			case '{':
 				succeeded = parse_invokation(state);
 				if (!succeeded) {
-					return NULL;
+					return result;
 				}
 				break;
 			case '"':
 				succeeded = parse_text(state);
 				if (!succeeded) {
-					return NULL;
+					return result;
 				}
 				break;
 
@@ -740,7 +747,7 @@ struct block *parse_block(struct parse_state *state, b32 expect_eof) {
 
 			default:
 				report_error_here(state, PARSE_ERR_ILLEGAL_OPCODE);
-				return NULL;
+				return result;
 		}
 	}
 }
@@ -748,7 +755,7 @@ struct block *parse_block(struct parse_state *state, b32 expect_eof) {
 struct parse_result parse(FILE *stream) {
 	struct parse_state state = {};
 	state.stream = stream;
-	struct block *block = parse_block(&state, true);
+	struct parse_block_result result = parse_block(&state, true);
 	if (state.frame != NULL) {
 		report_error_here(&state, PARSE_WARN_EOF_IN_FRAME);
 		ao_stack_frame_decref(state.frame);
@@ -757,7 +764,7 @@ struct parse_result parse(FILE *stream) {
 	ao_stack_frame_memo_table_free(&state.frame_table);
 	block_memo_table_free(&state.block_table);
 	slice_trim(&state.blocks);
-	return (struct parse_result){block, state.blocks, state.errors};
+	return (struct parse_result){result.block, state.blocks, state.errors};
 }
 
 void print_parse_error(struct parse_error error) {
