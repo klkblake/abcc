@@ -1,3 +1,5 @@
+#include <stdlib.h>
+
 #include "parser.h"
 #include "peephole.h"
 
@@ -13,6 +15,7 @@ int main() {
 	struct parse_result result = parse(stdin);
 	foreach (error, result.errors) {
 		print_parse_error(*error);
+		slice_free(&error->line);
 	}
 	slice_free(&result.errors);
 	if (!result.block) {
@@ -27,6 +30,7 @@ int main() {
 
 	foreach (block, result.blocks) {
 		block_free(*block);
+		free(*block);
 	}
 	slice_free(&result.blocks);
 	return 0;

@@ -44,8 +44,9 @@ DEFINE_SLICE(struct block *, block_ptr);
 void block_free(struct block *block);
 
 struct parse_error {
+	struct u8_slice line;
 	u32 code;
-	u32 line;
+	u32 lineno;
 	u32 col;
 };
 DEFINE_SLICE(struct parse_error, parse_error);

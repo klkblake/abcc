@@ -320,10 +320,10 @@ static char *parse_warning_messages[] = {
 
 struct parse_state {
 	FILE *stream;
-	u32 line;
+	u32 lineno;
 	u32 col;
-	struct u8_slice line_data;
-	u32 char_index;
+	struct u8_slice line;
+	u32 byte_index;
 	struct ao_stack_frame *frame;
 	struct incomplete_block *block;
 	u32 hash; // Hash of all parsed chars (excluding SP and LF), Jenkins One-at-a-Time hash.
@@ -336,21 +336,21 @@ struct parse_state {
 
 internal
 i32 next(struct parse_state *state) {
-	if (state->char_index == state->line_data.size) {
-		state->line_data.size = (usize)getline((char **)&state->line_data.data, &state->line_data.cap, state->stream);
-		if (state->line_data.size == (usize)-1) {
+	if (state->byte_index == state->line.size) {
+		state->line.size = (usize)getline((char **)&state->line.data, &state->line.cap, state->stream);
+		if (state->line.size == (usize)-1) {
 			return EOF;
 		}
-		state->char_index = 0;
+		state->byte_index = 0;
 	}
-	u8 c = state->line_data.data[state->char_index++];
+	u8 c = state->line.data[state->byte_index++];
 	// Don't increment the column for UTF-8 continuation characters.
 	// TODO Proper column/line handling for arbitrary UTF-8 text
 	if (c >> 6 != 2) {
 		state->col++;
 	}
 	if (c == '\n') {
-		state->line++;
+		state->lineno++;
 		state->col = 0;
 	}
 	if (c != ' ' && c != '\n') {
@@ -360,10 +360,18 @@ i32 next(struct parse_state *state) {
 }
 
 internal
-void report_error(struct parse_state *state, u32 code, u32 line, u32 col) {
+void report_error(struct parse_state *state, u32 code, u32 lineno, u32 col) {
+	struct u8_slice line = {};
+	if (lineno == state->lineno) {
+		line.data = malloc(state->line.size);
+		line.size = state->line.size;
+		line.cap = line.size;
+		memcpy(line.data, state->line.data, line.size);
+	}
 	struct parse_error error = {
-		code,
 		line,
+		code,
+		lineno,
 		col,
 	};
 	slice_snoc(&state->errors, error);
@@ -371,7 +379,7 @@ void report_error(struct parse_state *state, u32 code, u32 line, u32 col) {
 
 internal
 void report_error_here(struct parse_state *state, u32 code) {
-	report_error(state, code, state->line, state->col);
+	report_error(state, code, state->lineno, state->col);
 }
 
 internal
@@ -597,20 +605,20 @@ b32 parse_invokation(struct parse_state *state) {
 
 internal
 b32 parse_text(struct parse_state *state) {
-	u32 line = state->line;
+	u32 lineno = state->lineno;
 	u32 col = state->col;
 	u8 buf[4096];
 	struct u8_slice text = {buf, 0, sizeof(buf) / sizeof(u8)};
 	while (true) {
 		i32 c = next(state);
 		if (c == EOF) {
-			report_error(state, PARSE_ERR_EOF_IN_TEXT, line, col);
+			report_error(state, PARSE_ERR_EOF_IN_TEXT, lineno, col);
 			return false;
 		}
 		if (c == '\n') {
 			i32 c2 = next(state);
 			if (c2 == EOF) {
-				report_error(state, PARSE_ERR_EOF_IN_TEXT, line, col);
+				report_error(state, PARSE_ERR_EOF_IN_TEXT, lineno, col);
 				return false;
 			}
 			if (c2 == '~') {
@@ -685,7 +693,7 @@ struct parse_block_result parse_block(struct parse_state *state, b32 expect_eof)
 			case '[':
 				frame = state->frame;
 				u32 hash = state->hash;
-				u32 line = state->line;
+				u32 lineno = state->lineno;
 				u32 col = state->col;
 				struct parse_block_result res = parse_block(state, false);
 				if (res.block == NULL) {
@@ -695,7 +703,7 @@ struct parse_block_result parse_block(struct parse_state *state, b32 expect_eof)
 				state->block = &block;
 				state->hash = jenkins_add(hash, (u8 *)&state->hash, sizeof(state->hash));
 				if (res.eof) {
-					report_error(state, PARSE_ERR_EOF_IN_BLOCK, line, col);
+					report_error(state, PARSE_ERR_EOF_IN_BLOCK, lineno, col);
 					return result;
 				}
 				slice_snoc(&state->block->opcodes, '[');
@@ -773,15 +781,22 @@ struct parse_result parse(FILE *stream) {
 	ao_stack_frame_memo_table_free(&state.frame_table);
 	block_memo_table_free(&state.block_table);
 	slice_trim(&state.blocks);
+	slice_free(&state.line);
 	return (struct parse_result){result.block, state.blocks, state.errors};
 }
 
 void print_parse_error(struct parse_error error) {
 	// We store line, col zero indexed instead of one indexed
 	if ((error.code & PARSE_WARN) == 0) {
-		fprintf(stderr, "error:%d:%d: %s\n", error.line + 1, error.col + 1, parse_error_messages[error.code]);
+		fprintf(stderr, "error:%d:%d: %s\n", error.lineno + 1, error.col + 1, parse_error_messages[error.code]);
 	} else {
-		fprintf(stderr, "warning:%d:%d: %s\n", error.line + 1, error.col + 1,
+		fprintf(stderr, "warning:%d:%d: %s\n", error.lineno + 1, error.col + 1,
 				parse_warning_messages[error.code &~ PARSE_WARN]);
+	}
+	if (error.line.size != 0) {
+		fwrite(error.line.data, 1, error.line.size, stderr);
+		if (error.line.data[error.line.size - 1] != '\n') {
+			fputc('\n', stderr);
+		}
 	}
 }

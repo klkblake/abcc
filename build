@@ -6,7 +6,6 @@ CFLAGS="-Wall -Weverything -Wno-extra-semi -Wno-missing-prototypes -Wno-gnu-empt
 if [[ "$1" == debug ]]; then
 	DEBUG=yes
 	CFLAGS="-O1 -g -fsanitize=undefined $CFLAGS"
-	shift
 	if [[ "$2" == address ]]; then
 		CFLAGS="-fsanitize=address -fsanitize=leak $CFLAGS"
 	elif [[ "$2" == memory ]]; then
