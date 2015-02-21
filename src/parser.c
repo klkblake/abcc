@@ -322,6 +322,8 @@ struct parse_state {
 	FILE *stream;
 	u32 line;
 	u32 col;
+	struct u8_slice line_data;
+	u32 char_index;
 	struct ao_stack_frame *frame;
 	struct incomplete_block *block;
 	u32 hash; // Hash of all parsed chars (excluding SP and LF), Jenkins One-at-a-Time hash.
@@ -334,10 +336,17 @@ struct parse_state {
 
 internal
 i32 next(struct parse_state *state) {
-	int c = getc(state->stream);
+	if (state->char_index == state->line_data.size) {
+		state->line_data.size = (usize)getline((char **)&state->line_data.data, &state->line_data.cap, state->stream);
+		if (state->line_data.size == (usize)-1) {
+			return EOF;
+		}
+		state->char_index = 0;
+	}
+	u8 c = state->line_data.data[state->char_index++];
 	// Don't increment the column for UTF-8 continuation characters.
 	// TODO Proper column/line handling for arbitrary UTF-8 text
-	if (c < 0 || ((u8)c) >> 6 != 2) {
+	if (c >> 6 != 2) {
 		state->col++;
 	}
 	if (c == '\n') {
@@ -345,7 +354,7 @@ i32 next(struct parse_state *state) {
 		state->col = 0;
 	}
 	if (c != ' ' && c != '\n') {
-		state->hash = jenkins_step(state->hash, (u8)c);
+		state->hash = jenkins_step(state->hash, c);
 	}
 	return c;
 }
