@@ -494,7 +494,7 @@ i32 match_annotation_part(struct parse_state *state, u8 *target) {
 
 internal
 b32 parse_annotation(struct parse_state *state) {
-	u8 cs[4];
+	u8 cs[3];
 	i32 c = next(state);
 	if (c == '}') {
 		report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
@@ -509,7 +509,7 @@ b32 parse_annotation(struct parse_state *state) {
 		return parse_stack_annotation(state, false);
 	}
 	cs[0] = (u8)c;
-	for (i32 i = 1; i < 4; i++) {
+	for (i32 i = 1; i < 3; i++) {
 		c = next(state);
 		if (c == '}') {
 			report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
@@ -521,10 +521,14 @@ b32 parse_annotation(struct parse_state *state) {
 		cs[i] = (u8)c;
 	}
 	// UTF-8 encoding of ≡
-	if (cs[0] == 0xe2 && cs[1] ==0x89 && cs[2] == 0xa1 && cs[3] == '}') {
+	if (cs[0] == 0xe2 && cs[1] ==0x89 && cs[2] == 0xa1) {
+		c = next(state);
+		if (c != '}') {
+			return eat_unknown_annotation(state);
+		}
 		slice_snoc(&state->block->opcodes, OP_ASSERT_EQUAL);
-	} else if (cs[0] == 'd' && cs[1] == 'e' && cs[2] == 'b' && cs[3] == 'u') {
-		i32 m = match_annotation_part(state, (u8 *)"g print ");
+	} else if (cs[0] == 'd' && cs[1] == 'e' && cs[2] == 'b') {
+		i32 m = match_annotation_part(state, (u8 *)"ug print ");
 		if (m) {
 			return m != EOF;
 		}
