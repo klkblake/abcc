@@ -59,6 +59,7 @@ void simplify(struct block *block) {
 					break; \
 				} \
 			} \
+			i--; \
 		} while (false)
 		if (MATCH2(seen, 'l', 'r')) {
 			ops[offsets[0]] = 'w';
