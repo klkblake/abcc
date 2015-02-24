@@ -1,6 +1,6 @@
 #ifndef SLICE_H
 
-#include "types.h"
+#include "abcc.h"
 
 #define DEFINE_SLICE(type, name) \
 	struct name ## _slice { \

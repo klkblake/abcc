@@ -4,7 +4,7 @@
 #include <string.h>
 #include <assert.h>
 
-#include "types.h"
+#include "abcc.h"
 #include "parser.h"
 
 internal
