@@ -11,7 +11,7 @@ struct types {
 	union type *text;
 };
 
-union type *alloc_node(struct types *types) {
+union type *alloc_type(struct types *types) {
 	if (types->used == CHUNK_SIZE) {
 		slice_snoc(&types->chunks, malloc(CHUNK_SIZE * sizeof(union type)));
 		types->used = 0;
@@ -19,8 +19,8 @@ union type *alloc_node(struct types *types) {
 	return &types->chunks.data[types->chunks.size - 1][types->used++];
 }
 
-union type *alloc_type(u64 symbol, union type *c1, union type *c2, struct types *types) {
-	union type *node = alloc_node(types);
+union type *alloc_term(u64 symbol, union type *c1, union type *c2, struct types *types) {
+	union type *node = alloc_type(types);
 	node->symbol = symbol;
 	node->next = node;
 	node->child1 = c1;
@@ -28,8 +28,8 @@ union type *alloc_type(u64 symbol, union type *c1, union type *c2, struct types 
 	return node;
 }
 
-union type *alloc_var_node(struct types *types) {
-	union type *node = alloc_node(types);
+union type *alloc_var(struct types *types) {
+	union type *node = alloc_type(types);
 	*node = (union type){};
 	node->rep = node;
 	node->var_count = VAR_COUNT_BIT | 1;
@@ -46,18 +46,18 @@ struct opcode_type_result {
 void infer_block(struct block *block, struct types *types) {
 	block->types = malloc((block->size + 1) * sizeof(union type *));
 	if (block->size == 0) {
-		block->types[0] = alloc_var_node(types);
+		block->types[0] = alloc_var(types);
 		return;
 	}
 	for (usize i = 0, block_index = 0, sealer_index = 0; i < block->size; i++) {
 		u8 op = block->opcodes[i];
 		union type *to_unify;
-#define varx() alloc_var_node(types)
+#define varx() alloc_var(types)
 #define var(name) union type *name = varx()
 #define var2(a, b)       var(a); var(b)
 #define var3(a, b, c)    var(a); var(b); var(c)
 #define var4(a, b, c, d) var(a); var(b); var(c); var(d)
-#define term2(type, c1, c2) alloc_type(SYMBOL_ ## type, c1, c2, types)
+#define term2(type, c1, c2) alloc_term(SYMBOL_ ## type, c1, c2, types)
 #define term1(type, c1) term2(type, c1, NULL)
 #define prod(c1, c2) term2(PRODUCT, c1, c2)
 #define optype(left, right) to_unify = (left); block->types[i+1] = (right); break
@@ -182,10 +182,10 @@ void infer_block(struct block *block, struct types *types) {
 
 void infer_types(struct block_ptr_slice blocks) {
 	struct types types = {};
-	types.unit   = alloc_type(SYMBOL_UNIT,   NULL, NULL, &types);
-	types.number = alloc_type(SYMBOL_NUMBER, NULL, NULL, &types);
-	types.text = alloc_type(SYMBOL_SUM,
-	                             alloc_type(SYMBOL_PRODUCT, types.number, NULL, &types),
+	types.unit   = alloc_term(SYMBOL_UNIT,   NULL, NULL, &types);
+	types.number = alloc_term(SYMBOL_NUMBER, NULL, NULL, &types);
+	types.text = alloc_term(SYMBOL_SUM,
+	                             alloc_term(SYMBOL_PRODUCT, types.number, NULL, &types),
 				     types.unit,
 				     &types);
 	types.text->child1->child2 = types.text;
