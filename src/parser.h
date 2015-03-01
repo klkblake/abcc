@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "slice.h"
+#include "type.h"
 
 // TODO move?
 struct string_rc {
@@ -32,6 +33,7 @@ struct ao_stack_frame {
 struct block {
 	usize size;
 	u8 *opcodes;
+	union type **types;
 	struct ao_stack_frame **frames;
 	struct block **blocks;
 	struct string_rc **texts;

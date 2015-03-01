@@ -675,6 +675,7 @@ struct parse_block_result parse_block(struct parse_state *state, b32 expect_eof)
 			struct block complete_block = {
 				block.opcodes.size,
 				block.opcodes.data,
+				NULL,
 				block.frames.data,
 				block.blocks.data,
 				block.texts.data,

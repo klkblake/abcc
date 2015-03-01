@@ -17,4 +17,4 @@ if [[ DEBUG == no ]]; then
 	CFLAGS="-O3 $CFLAGS"
 fi
 
-clang $CFLAGS -o abcc src/main.c src/slice.c src/parser.c src/peephole.c
+clang $CFLAGS -o abcc src/main.c src/slice.c src/parser.c src/peephole.c src/infer_types.c
