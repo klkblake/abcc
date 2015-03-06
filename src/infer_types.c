@@ -12,7 +12,7 @@ struct types {
 };
 
 union type *alloc_type(struct types *types) {
-	if (types->used == CHUNK_SIZE) {
+	if (types->used == CHUNK_SIZE || types->chunks.size == 0) {
 		slice_snoc(&types->chunks, malloc(CHUNK_SIZE * sizeof(union type)));
 		types->used = 0;
 	}
@@ -43,14 +43,6 @@ union type *set_var(union type *type) {
 	return type;
 }
 
-union type **get_term(union type **ty) {
-	// XXX this is wrong
-	while (*ty != NULL && IS_VAR(*ty) && (*ty)->terms != NULL) {
-		ty = &(*ty)->terms;
-	}
-	return ty;
-}
-
 b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types) {
 	union type **locs[8];
 	locs[0] = input;
@@ -61,11 +53,10 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 		assert(i < 8);
 		switch (c) {
 			case 'v':
-				vars[v++] = *get_term(locs[i]);
+				vars[v++] = *locs[i];
 				i--;
 				break;
 			case '1':
-				locs[i] = get_term(locs[i]);
 				if (!IS_VAR(*locs[i])) {
 					if ((*locs[i])->symbol != SYMBOL_UNIT) {
 						// TODO report error
@@ -77,7 +68,6 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 				i--;
 				break;
 			case 'N':
-				locs[i] = get_term(locs[i]);
 				if (!IS_VAR(*locs[i])) {
 					if ((*locs[i])->symbol != SYMBOL_NUMBER) {
 						// TODO report error
@@ -104,7 +94,6 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 							sym = SYMBOL_BLOCK;
 							break;
 					}
-					locs[i] = get_term(locs[i]);
 					if (!IS_VAR(*locs[i])) {
 						if ((*locs[i])->symbol != sym) {
 							// TODO report error
@@ -313,7 +302,7 @@ b32 infer_block(struct block *block, struct types *types) {
 	return true;
 }
 
-void infer_types(struct block_ptr_slice blocks) {
+b32 infer_types(struct block_ptr_slice blocks) {
 	struct types types = {};
 	types.unit   = set_term(alloc_type(&types), SYMBOL_UNIT,   NULL, NULL);
 	types.number = set_term(alloc_type(&types), SYMBOL_NUMBER, NULL, NULL);
@@ -322,6 +311,9 @@ void infer_types(struct block_ptr_slice blocks) {
 	                        types.unit);
 	types.text->child1->child2 = types.text;
 	foreach (block, blocks) {
-		infer_block(*block, &types);
+		if (!infer_block(*block, &types)) {
+			return false;
+		}
 	}
+	return true;
 }

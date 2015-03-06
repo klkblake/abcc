@@ -2,6 +2,7 @@
 
 #include "parser.h"
 #include "peephole.h"
+#include "infer_types.h"
 
 usize count_ops(struct block_ptr_slice blocks) {
 	usize ops = 0;
@@ -27,6 +28,10 @@ int main() {
 	printf("Total opcodes before simplify: %zu\n", count_ops(result.blocks));
 	peephole_simplify(result.blocks);
 	printf("Total opcodes after simplify: %zu\n", count_ops(result.blocks));
+
+	if (!infer_types(result.blocks)) {
+		printf("Type inference failed\n");
+	}
 
 	foreach (block, result.blocks) {
 		block_free(*block);

@@ -27,7 +27,7 @@ typedef __SIZE_TYPE__  usize;
 #ifdef assert
 #undef assert
 #endif
-#define assert(cond) if (cond) { __builtin_trap(); }
+#define assert(cond) if (!(cond)) { __builtin_trap(); }
 
 #define offsetof(type, member) __builtin_offsetof(type, member)
 
