@@ -29,7 +29,9 @@ int main() {
 	peephole_simplify(result.blocks);
 	printf("Total opcodes after simplify: %zu\n", count_ops(result.blocks));
 
-	if (!infer_types(result.blocks)) {
+	if (infer_types(result.blocks)) {
+		printf("Type inference succeeded\n");
+	} else {
 		printf("Type inference failed\n");
 	}
 

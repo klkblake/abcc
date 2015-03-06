@@ -274,6 +274,7 @@ void block_free(struct block *block) {
 		}
 	}
 	slice_free(&block->opcodes);
+	slice_free(&block->types);
 	slice_free(&block->frames);
 	slice_free(&block->blocks);
 	slice_free(&block->texts);

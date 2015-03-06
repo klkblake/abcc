@@ -63,6 +63,7 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 						return false;
 					}
 				} else {
+					**locs[i] = *types->unit;
 					*locs[i] = types->unit;
 				}
 				i--;
@@ -74,6 +75,7 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 						return false;
 					}
 				} else {
+					**locs[i] = *types->number;
 					*locs[i] = types->number;
 				}
 				i--;
@@ -82,7 +84,7 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 			case '+':
 			case '[':
 				{
-					usize sym = 0;
+					usize sym;
 					switch (c) {
 						case '*':
 							sym = SYMBOL_PRODUCT;
@@ -93,6 +95,8 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 						case '[':
 							sym = SYMBOL_BLOCK;
 							break;
+						default:
+							assert(false);
 					}
 					if (!IS_VAR(*locs[i])) {
 						if ((*locs[i])->symbol != sym) {
@@ -102,8 +106,8 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 					} else {
 						set_term(*locs[i], sym, var(), var());
 					}
-					locs[i+1] = &(*locs[i])->child2;
-					locs[i] = &(*locs[i])->child1;
+					locs[i+1] = &(*locs[i])->child1;
+					locs[i] = &(*locs[i])->child2;
 					i++;
 					break;
 				}
@@ -128,7 +132,10 @@ b32 infer_block(struct block *block, struct types *types) {
 		union type *input = block->types[i];
 		union type *output;
 		union type *vars[5];
-#define expect(pat) expect_((u8 *) (pat), &input, vars, types)
+#define expect(pat) if (!expect_((u8 *) (pat), &input, vars, types)) { \
+	printf("Error on opcode %lu (%c)\n", i, op); \
+	return false; \
+}
 #define output(type) output = (type); break
 #define optype(pat, type) expect(pat); output(type)
 		switch (op) {
@@ -272,9 +279,9 @@ b32 infer_block(struct block *block, struct types *types) {
 				}
 			case 'D': optype("*v*+vvv",
 			                 prod(sum(prod(vars[0], vars[1]), prod(vars[0], vars[2])), vars[3]));
-			//case 'F': optype("*+*vv*vvv",
-			//                 prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4])));
-			case 'F': //optype: *+*vv*vvv prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4]))
+			case 'F': optype("*+*vv*vvv",
+			                 prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4])));
+			//case 'F': //optype: *+*vv*vvv prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4]))
 			case 'M':
 				{
 					expect("*+vvv");
@@ -312,8 +319,13 @@ b32 infer_types(struct block_ptr_slice blocks) {
 	types.text->child1->child2 = types.text;
 	foreach (block, blocks) {
 		if (!infer_block(*block, &types)) {
+			printf("Failed in block %lu\n", block_index);
 			return false;
 		}
 	}
+	foreach (chunk, types.chunks) {
+		free(*chunk);
+	}
+	slice_free(&types.chunks);
 	return true;
 }
