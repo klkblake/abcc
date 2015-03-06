@@ -151,7 +151,9 @@ b32 infer_block(struct block *block, struct types *types) {
 					// Blocks are topologically ordered, so we know we have
 					// already processed this one
 					struct block *b = block->blocks[block_index++];
-					output(prod(block(b->types[0], b->types[b->size]), input));
+					union type *bty = block(b->types[0], b->types[b->size]);
+					bty->symbol |= POLYMORPHIC_BIT;
+					output(prod(bty, input));
 				}
 			case '"':     output(prod(types->text, input));
 			case OP_SEAL: optype("*vv",
@@ -207,12 +209,10 @@ b32 infer_block(struct block *block, struct types *types) {
 				{
 					// XXX Fully typed types are self contained (but not necessarily vice versa)
 					// Perhaps call them known types, since they may have variables?
+					// inst must *only* copy polymorphic parts of the type
 					expect("*[vv*vv");
-					//union type *b = input->child1;
-					//if (IS_FULLY_TYPED(b)) {
-					//	b = inst(b);
-					//}
-					//unify(b->child1, vars[2]);
+					//union type *b = inst(input->child1);
+					//unify(b->child1, inst(vars[2]));
 					//output(prod(b->child2, vars[3]));
 					assert(false);
 					return false;
@@ -220,25 +220,17 @@ b32 infer_block(struct block *block, struct types *types) {
 			case 'o':
 				{
 					expect("*[vv*[vvv");
-					//union type *b1 = input->child1;
-					//union type *b2 = input->child2->child1;
-					//b32 fully_typed = IS_FULLY_TYPED(b1->child1) && IS_FULLY_TYPED(b2->child2);
-					//b1 = inst(b1);
-					//b2 = inst(b2);
+					//union type *b1 = inst(input->child1);
+					//union type *b2 = inst(input->child2->child1);
 					//unify(b1->child2, b2->child1);
 					//union type *result = block(b1->child1, b2->child2);
-					//// TODO if we autoset FULLY_TYPED in
-					//// block and copy it in inst, then
-					//// this is unnecessary.
-					//if (fully_typed) {
-					//	SET_FULLY_TYPED(result);
-					//}
 					//output(prod(result, vars[4]));
 					assert(false);
 					return false;
 				}
 			case '\'':
 				{
+					// TODO make this polymorphic iff the value is constant
 					union type *s = var();
 					optype("*vv", prod(block(s, prod(vars[0], s)), vars[1]));
 				}
@@ -268,11 +260,8 @@ b32 infer_block(struct block *block, struct types *types) {
 			case '?':
 				{
 					expect("*[vv*+vvv");
-					//union type *b = input->child1;
-					//if (IS_FULLY_TYPED(b)) {
-					//	b = inst(b);
-					//}
-					//unify(b->child1, vars[2]);
+					//union type *b = inst(input->child1);
+					//unify(b->child1, inst(vars[2]));
 					//output(prod(sum(b->child2, vars[3]), vars[4]));
 					assert(false);
 					return false;
@@ -285,9 +274,9 @@ b32 infer_block(struct block *block, struct types *types) {
 			case 'M':
 				{
 					expect("*+vvv");
-					// TODO how do we handle merging blocks?
-					//unify(vars[0], vars[1]);
-					//output(prod(vars[0], vars[2]));
+					//union type *a = inst(vars[0]);
+					//unify(a, inst(vars[1]));
+					//output(prod(a, vars[2]));
 					assert(false);
 					return false;
 				}

@@ -4,12 +4,15 @@
 
 // Sealed values are pointers so they always have the high bit clear
 #define HIGH_PTR_BIT (1ull << (sizeof(void *) * 8 - 1))
-#define SYMBOL_VOID    (HIGH_PTR_BIT | 0)
-#define SYMBOL_UNIT    (HIGH_PTR_BIT | 1)
-#define SYMBOL_NUMBER  (HIGH_PTR_BIT | 2)
-#define SYMBOL_PRODUCT (HIGH_PTR_BIT | 3)
-#define SYMBOL_SUM     (HIGH_PTR_BIT | 4)
-#define SYMBOL_BLOCK   (HIGH_PTR_BIT | 5)
+#define POLYMORPHIC_BIT  0x8
+#define POLYMORPHIC_MASK (~POLYMORPHIC_BIT)
+
+#define SYMBOL_VOID       (HIGH_PTR_BIT | 0)
+#define SYMBOL_UNIT       (HIGH_PTR_BIT | 1)
+#define SYMBOL_NUMBER     (HIGH_PTR_BIT | 2)
+#define SYMBOL_PRODUCT    (HIGH_PTR_BIT | 3)
+#define SYMBOL_SUM        (HIGH_PTR_BIT | 4)
+#define SYMBOL_BLOCK      (HIGH_PTR_BIT | 5)
 
 #define IS_SEALED(sym) ((sym & HIGH_PTR_BIT) == 0)
 
