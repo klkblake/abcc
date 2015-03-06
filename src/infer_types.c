@@ -111,6 +111,8 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 					i++;
 					break;
 				}
+			default:
+				assert(false);
 		}
 	}
 	return true;
@@ -243,11 +245,11 @@ b32 infer_block(struct block *block, struct types *types) {
 
 			case '+':
 			case '*':
-			          optype("*N*Ne", input->child2);
+			          optype("*N*Nv", input->child2);
 			case '/':
 			case '-':
-			          optype("*Ne", input);
-			case 'Q': optype("*N*Ne", input);
+			          optype("*Nv", input);
+			case 'Q': optype("*N*Nv", input);
 
 			case 'L': optype("*+v+vvv", prod(sum(sum(vars[0], vars[1]), vars[2]), vars[3]));
 			case 'R': optype("*++vvvv", prod(sum(vars[0], sum(vars[1], vars[2])), vars[3]));
