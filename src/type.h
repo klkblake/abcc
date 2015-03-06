@@ -2,12 +2,16 @@
 
 #include "slice.h"
 
-#define SYMBOL_VOID    0
-#define SYMBOL_UNIT    1
-#define SYMBOL_NUMBER  2
-#define SYMBOL_PRODUCT 3
-#define SYMBOL_SUM     4
-#define SYMBOL_BLOCK   5
+// Sealed values are pointers so they always have the high bit clear
+#define HIGH_PTR_BIT (1ull << (sizeof(void *) * 8 - 1))
+#define SYMBOL_VOID    (HIGH_PTR_BIT | 0)
+#define SYMBOL_UNIT    (HIGH_PTR_BIT | 1)
+#define SYMBOL_NUMBER  (HIGH_PTR_BIT | 2)
+#define SYMBOL_PRODUCT (HIGH_PTR_BIT | 3)
+#define SYMBOL_SUM     (HIGH_PTR_BIT | 4)
+#define SYMBOL_BLOCK   (HIGH_PTR_BIT | 5)
+
+#define IS_SEALED(sym) ((sym & HIGH_PTR_BIT) == 0)
 
 union type {
 	// This node is a var if child2/var_count has its high bit set. We
@@ -31,7 +35,8 @@ union type {
 };
 DEFINE_SLICE(union type *, type_ptr);
 
-#define VAR_COUNT_BIT (1ll << (sizeof(usize) * 8 - 1))
+#define VAR_COUNT_BIT (1ull << (sizeof(usize) * 8 - 1))
+#define IS_VAR(type) (((type)->var_count & VAR_COUNT_BIT) != 0)
 
 static_assert(offsetof(union type, child2) == offsetof(union type, var_count), "child2 must be unioned with term_count");
 

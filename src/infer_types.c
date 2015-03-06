@@ -19,65 +19,189 @@ union type *alloc_type(struct types *types) {
 	return &types->chunks.data[types->chunks.size - 1][types->used++];
 }
 
-union type *alloc_term(u64 symbol, union type *c1, union type *c2, struct types *types) {
-	union type *node = alloc_type(types);
-	node->symbol = symbol;
-	node->next = node;
-	node->child1 = c1;
-	node->child2 = c2;
-	return node;
+union type *set_term(union type *type, u64 symbol, union type *c1, union type *c2) {
+	type->symbol = symbol;
+	type->next = type;
+	type->child1 = c1;
+	type->child2 = c2;
+	return type;
 }
 
-union type *alloc_var(struct types *types) {
-	union type *node = alloc_type(types);
-	*node = (union type){};
-	node->rep = node;
-	node->var_count = VAR_COUNT_BIT | 1;
-	return node;
+union type *set_sealed(union type *type, struct string_rc *seal, union type *ty) {
+	type->seal = seal;
+	type->next = type;
+	type->child1 = ty;
+	type->child2 = NULL;
+	return type;
 }
 
-struct opcode_type_result {
-	union type *input;
-	union type *output;
-};
+#define var() set_var(alloc_type(types))
+union type *set_var(union type *type) {
+	*type = (union type){};
+	type->rep = type;
+	type->var_count = VAR_COUNT_BIT | 1;
+	return type;
+}
 
-//struct opcode_type_result opcode_type(block);
+union type **get_term(union type **ty) {
+	// XXX this is wrong
+	while (*ty != NULL && IS_VAR(*ty) && (*ty)->terms != NULL) {
+		ty = &(*ty)->terms;
+	}
+	return ty;
+}
+
+b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types) {
+	union type **locs[8];
+	locs[0] = input;
+	u32 i = 0;
+	u32 v = 0;
+	u8 c;
+	while ((c = *pat++)) {
+		assert(i < 8);
+		switch (c) {
+			case 'v':
+				vars[v++] = *get_term(locs[i]);
+				i--;
+				break;
+			case '1':
+				locs[i] = get_term(locs[i]);
+				if (!IS_VAR(*locs[i])) {
+					if ((*locs[i])->symbol != SYMBOL_UNIT) {
+						// TODO report error
+						return false;
+					}
+				} else {
+					*locs[i] = types->unit;
+				}
+				i--;
+				break;
+			case 'N':
+				locs[i] = get_term(locs[i]);
+				if (!IS_VAR(*locs[i])) {
+					if ((*locs[i])->symbol != SYMBOL_NUMBER) {
+						// TODO report error
+						return false;
+					}
+				} else {
+					*locs[i] = types->number;
+				}
+				i--;
+				break;
+			case '*':
+			case '+':
+			case '[':
+				{
+					usize sym;
+					switch (c) {
+						case '*':
+							sym = SYMBOL_PRODUCT;
+							break;
+						case '+':
+							sym = SYMBOL_SUM;
+							break;
+						case '[':
+							sym = SYMBOL_BLOCK;
+							break;
+					}
+					locs[i] = get_term(locs[i]);
+					if (!IS_VAR(*locs[i])) {
+						if ((*locs[i])->symbol != sym) {
+							// TODO report error
+							return false;
+						}
+					} else {
+						set_term(*locs[i], sym, var(), var());
+					}
+					locs[i+1] = &(*locs[i])->child2;
+					locs[i] = &(*locs[i])->child1;
+					i++;
+					break;
+				}
+		}
+	}
+	return true;
+}
 
 void infer_block(struct block *block, struct types *types) {
-	block->types = malloc((block->size + 1) * sizeof(union type *));
-	if (block->size == 0) {
-		block->types[0] = alloc_var(types);
-		return;
+
+#define set_prod(type, c1, c2) set_term(type, SYMBOL_PRODUCT, c1, c2)
+
+#define prod( c1, c2) set_prod(alloc_type(types), c1, c2)
+#define sum(  c1, c2) set_term(alloc_type(types), SYMBOL_SUM,     c1, c2)
+#define block(c1, c2) set_term(alloc_type(types), SYMBOL_BLOCK,   c1, c2)
+#define sealed(seal, ty) set_sealed(alloc_type(types), seal, ty)
+
+#define expect_unit(loc) \
+	{ \
+		union type *unit = get_term(loc); \
+		if (!IS_VAR(unit)) { \
+			if (unit->symbol != SYMBOL_UNIT) { \
+				/* TODO report error */ \
+				return; \
+			} \
+		} else { \
+			(loc) = types->unit; \
+		} \
 	}
+#define expect_number(loc) \
+	{ \
+		union type *unit = get_term(loc); \
+		if (!IS_VAR(unit)) { \
+			if (unit->symbol != SYMBOL_NUMBER) { \
+				/* TODO report error */ \
+				return; \
+			} \
+		} else { \
+			(loc) = types->number; \
+		} \
+	}
+#define get_prod(var, loc) \
+	union type *var = get_term(loc); \
+	if (!IS_VAR(var)) { \
+		if (var->symbol != SYMBOL_PRODUCT) { \
+			/* TODO report error */ \
+			return; \
+		} \
+	} else
+#define get_sum(var, loc) \
+	union type *var = get_term(loc); \
+	if (!IS_VAR(var)) { \
+		if (var->symbol != SYMBOL_SUM) { \
+			/* TODO report error */ \
+			return; \
+		} \
+	} else
+#define get_sealed(var, seal_, loc) \
+	union type *var = get_term(loc); \
+	if (!IS_VAR(var)) { \
+		if (!IS_SEALED(var->symbol) || var->seal != seal_) { \
+			/* TODO report error */ \
+			return; \
+		} \
+	} else
+
+#define expect_prod(var, loc, c1, c2) \
+	get_prod(var, loc) { \
+		set_prod(var, c1, c2); \
+	}
+
+	block->types = malloc((block->size + 1) * sizeof(union type *));
+	block->types[0] = var();
 	for (usize i = 0, block_index = 0, sealer_index = 0; i < block->size; i++) {
 		u8 op = block->opcodes[i];
-		union type *to_unify;
-#define varx() alloc_var(types)
-#define var(name) union type *name = varx()
-#define var2(a, b)       var(a); var(b)
-#define var3(a, b, c)    var(a); var(b); var(c)
-#define var4(a, b, c, d) var(a); var(b); var(c); var(d)
-#define term2(type, c1, c2) alloc_term(SYMBOL_ ## type, c1, c2, types)
-#define term1(type, c1) term2(type, c1, NULL)
-#define prod(c1, c2) term2(PRODUCT, c1, c2)
-#define optype(left, right) to_unify = (left); block->types[i+1] = (right); break
-#define optype_(stmts, left, right) do { stmts; optype(left, right); } while (false)
-#define optype1(a,          left, right) optype_(var(a),           left, right)
-#define optype2(a, b,       left, right) optype_(var2(a, b),       left, right)
-#define optype3(a, b, c,    left, right) optype_(var3(a, b, c),    left, right)
-#define optype4(a, b, c, d, left, right) optype_(var4(a, b, c, d), left, right)
+		union type *input = block->types[i];
+		union type *output;
+		union type *vars[5];
+#define expect(pat) expect_((u8 *) (pat), &input, vars, types)
+#define output(type) output = (type); break
+#define optype(pat, type) expect(pat); output(type)
 		switch (op) {
 			// Identity opcodes
 			case OP_FRAME_PUSH:
 			case OP_FRAME_POP:
 			case OP_DEBUG_PRINT_RAW:
-				{
-					if (i == 0) {
-						block->types[0] = varx();
-					}
-					block->types[i+1] = block->types[i];
-					continue;
-				}
+				output(input);
 
 			// Opcodes that need additional state access
 			case '[':
@@ -85,109 +209,170 @@ void infer_block(struct block *block, struct types *types) {
 					// Blocks are topologically ordered, so we know we have
 					// already processed this one
 					struct block *b = block->blocks[block_index++];
-					block->types[i+1] = prod(term2(BLOCK, b->types[0], b->types[b->size]),
-					                         block->types[i]);
-					continue;
+					output(prod(block(b->types[0], b->types[b->size]), input));
 				}
-			case '"':
-				{
-					block->types[i+1] = prod(types->text, block->types[i]);
-					continue;
-				}
-			case OP_SEAL:
-				{
-					var2(a, e);
-					union type *sealed = term1(VOID /* overriden by next line */, a);
-					sealed->seal = block->sealers[sealer_index++];
-					optype(prod(a, e), prod(sealed, e));
-				}
+			case '"':     output(prod(types->text, input));
+			case OP_SEAL: optype("*vv",
+			                     prod(sealed(block->sealers[sealer_index++], vars[0]), vars[1]));
 			case OP_UNSEAL:
 				{
-					var2(a, e);
-					union type *sealed = term1(VOID /* overriden by next line */, a);
-					sealed->seal = block->sealers[sealer_index++];
-					optype(prod(sealed, e), prod(a, e));
+					struct string_rc *seal = block->sealers[sealer_index++];
+					expect("*vv");
+					if (!IS_VAR(vars[0])) {
+						if (vars[0]->seal != seal) {
+							return; // TODO error
+						}
+					} else {
+						set_sealed(vars[0], seal, var());
+					}
+					output(prod(vars[0]->child1, vars[1]));
 				}
 
 			// Normal opcodes
-			case OP_ASSERT_EQUAL:
-				{
-					var2(a, e);
-					union type *ty = prod(a, prod(a, e));
-					optype(ty, ty);
-				}
+			case OP_ASSERT_EQUAL: optype("*vv", input);
 			case OP_DEBUG_PRINT_TEXT:
-				optype(types->text, types->text);
-
-			case 'l': optype3(a, b, c, prod(a, prod(b, c)), prod(prod(a, b), c));
-			case 'r': optype3(a, b, c, prod(prod(a, b), c), prod(a, prod(b, c)));
-			case 'w': optype3(a, b, c, prod(a, prod(b, c)), prod(b, prod(a, c)));
-			case 'z': optype4(a, b, c, d, prod(a, prod(b, prod(c, d))), prod(a, prod(c, prod(b, d))));
-			case 'v':
-				{
-					if (i == 0) {
-						block->types[0] = varx();
+			        {
+				        if (input == types->text) {
+					        output(input);
+					        break;
 					}
-					block->types[i+1] = prod(block->types[i], types->unit);
-					continue;
+				        union type *initial = input;
+					// We use Floyd's "tortoise and hare"
+					// algorithm for cycle detection
+					for (union type *tortoise = input;
+					     vars[0] != types->text && vars[0] != tortoise;
+					     tortoise = tortoise->child1->child2, input = vars[0]) {
+						expect("+*N+*Nv11"); // Two iterations of the loop
+						if (IS_VAR(vars[0])) {
+							input->child1->child2->child1->child2 = types->text;
+							vars[0] = types->text;
+						}
+					}
+					*initial = *types->text;
+					block->types[i] = types->text;
+					output(types->text);
 				}
-			case 'c': optype1(a, prod(a, types->unit), a);
-			case '%': optype2(x, e, prod(x, e), e);
-			case '^': optype2(x, e, prod(x, e), prod(x, prod(x, e)));
 
-			case '$': // TODO figure out what the hell to do here
+			case 'l': optype("*v*vv", prod(prod(vars[0], vars[1]), vars[2]));
+			case 'r': optype("**vvv", prod(vars[0], prod(vars[1], vars[2])));
+			case 'w': optype("*v*vv", prod(vars[1], prod(vars[0], vars[2])));
+			case 'z': optype("*v*v*vv", prod(vars[0], prod(vars[2], prod(vars[1], vars[3]))));
+			case 'v': output(prod(input, types->unit));
+			case 'c': optype("*v1", vars[0]);
+			case '%': optype("*vv", vars[1]);
+			case '^': optype("*vv", prod(vars[0], prod(vars[0], vars[1])));
+
+			case '$': // TODO incorporate fixpoint stuff for semi-polymorphic recursion
+				{
+					// XXX Fully typed types are self contained (but not necessarily vice versa)
+					// Perhaps call them known types, since they may have variables?
+					expect("*[vv*vv");
+					//union type *b = input->child1;
+					//if (IS_FULLY_TYPED(b)) {
+					//	b = inst(b);
+					//}
+					//unify(b->child1, vars[2]);
+					//output(prod(b->child2, vars[3]));
+					assert(false);
+					return;
+				}
 			case 'o':
+				{
+					expect("*[vv*[vvv");
+					//union type *b1 = input->child1;
+					//union type *b2 = input->child2->child1;
+					//b32 fully_typed = IS_FULLY_TYPED(b1->child1) && IS_FULLY_TYPED(b2->child2);
+					//b1 = inst(b1);
+					//b2 = inst(b2);
+					//unify(b1->child2, b2->child1);
+					//union type *result = block(b1->child1, b2->child2);
+					//// TODO if we autoset FULLY_TYPED in
+					//// block and copy it in inst, then
+					//// this is unnecessary.
+					//if (fully_typed) {
+					//	SET_FULLY_TYPED(result);
+					//}
+					//output(prod(result, vars[4]));
+					assert(false);
+					return;
+				}
 			case '\'':
-			          assert(false);
+				{
+					union type *s = var();
+					optype("*vv", prod(block(s, prod(vars[0], s)), vars[1]));
+				}
 			case 'k':
 			case 'f':
-				  {
-					  var2(b, e);
-					  union type *ty = prod(b, e);
-					  optype(ty, ty);
-				  }
+			          optype("*[vvv", input);
 
-			case '#':
-				{
-					if (i == 0) {
-						block->types[0] = varx();
-					}
-					block->types[i+1] = prod(types->number, block->types[i]);
-					continue;
-				}
-			case '0'...'9':
-				  {
-					  var(e);
-					  union type *ty = prod(types->number, e);
-					  optype(ty, ty);
-				  }
+			case '#': output(prod(types->number, input));
+			case '0'...'9': optype("*Nv", input);
 
 			case '+':
 			case '*':
-				  {
-					  var(e);
-					  union type *ty = prod(types->number, e);
-					  optype(prod(types->number, ty), ty);
-				  }
+			          optype("*N*Ne", input->child2);
+			case '/':
+			case '-':
+			          optype("*Ne", input);
+			case 'Q': optype("*N*Ne", input);
 
-			default: assert(false);
+			case 'L': optype("*+v+vvv", prod(sum(sum(vars[0], vars[1]), vars[2]), vars[3]));
+			case 'R': optype("*++vvvv", prod(sum(vars[0], sum(vars[1], vars[2])), vars[3]));
+			case 'W': optype("*+v+vvv", prod(sum(vars[1], sum(vars[0], vars[2])), vars[3]));
+			case 'Z': optype("*+v+v+vvv",
+			                 prod(sum(vars[0], sum(vars[1], sum(vars[2], vars[3]))), vars[4]));
+			case 'V': optype("*vv", prod(sum(vars[0], var()), vars[1]));
+			case 'C': optype("*+vvv", prod(vars[0], vars[2]));
+
+			case '?':
+				{
+					expect("*[vv*+vvv");
+					//union type *b = input->child1;
+					//if (IS_FULLY_TYPED(b)) {
+					//	b = inst(b);
+					//}
+					//unify(b->child1, vars[2]);
+					//output(prod(sum(b->child2, vars[3]), vars[4]));
+					assert(false);
+					return;
+				}
+			case 'D': optype("*v*+vvv",
+			                 prod(sum(prod(vars[0], vars[1]), prod(vars[0], vars[2])), vars[3]));
+			case 'F': optype("*+*vv*vvv",
+			                 prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4])));
+			case 'M':
+				{
+					expect("*+vvv");
+					// TODO how do we handle merging blocks?
+					//unify(vars[0], vars[1]);
+					//output(prod(vars[0], vars[2]));
+					assert(false);
+					return;
+				}
+			case 'K': optype("*+vvv", prod(vars[1], vars[2]));
+
+			case '>':
+				{
+					expect("*N*Nv");
+					union type *num_pair = prod(types->number, types->number);
+					output(prod(sum(num_pair, num_pair), vars[0]));
+				}
+
+			default:
+			          assert(false);
+			          return;
 		}
-		if (i == 0) {
-			block->types[0] = to_unify;
-			continue;
-		}
-		// TODO perform unification
+		block->types[i+1] = output;
 	}
 }
 
 void infer_types(struct block_ptr_slice blocks) {
 	struct types types = {};
-	types.unit   = alloc_term(SYMBOL_UNIT,   NULL, NULL, &types);
-	types.number = alloc_term(SYMBOL_NUMBER, NULL, NULL, &types);
-	types.text = alloc_term(SYMBOL_SUM,
-	                             alloc_term(SYMBOL_PRODUCT, types.number, NULL, &types),
-				     types.unit,
-				     &types);
+	types.unit   = set_term(alloc_type(&types), SYMBOL_UNIT,   NULL, NULL);
+	types.number = set_term(alloc_type(&types), SYMBOL_NUMBER, NULL, NULL);
+	types.text   = set_term(alloc_type(&types), SYMBOL_SUM,
+	                        set_term(alloc_type(&types), SYMBOL_PRODUCT, types.number, NULL),
+	                        types.unit);
 	types.text->child1->child2 = types.text;
 	foreach (block, blocks) {
 		infer_block(*block, &types);
