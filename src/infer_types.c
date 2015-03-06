@@ -158,12 +158,11 @@ b32 infer_block(struct block *block, struct types *types) {
 					output(prod(bty, input));
 				}
 			case '"':     output(prod(types->text, input));
-			case OP_SEAL: optype("*vv",
-			                     prod(sealed(block->sealers[sealer_index++], vars[0]), vars[1]));
+			case OP_SEAL: //optype: *vv prod(sealed(block->sealers[sealer_index++], vars[0]), vars[1])
 			case OP_UNSEAL:
 				{
 					struct string_rc *seal = block->sealers[sealer_index++];
-					expect("*vv");
+					//expect: *vv
 					if (!IS_VAR(vars[0])) {
 						if (vars[0]->seal != seal) {
 							return false; // TODO error
@@ -175,7 +174,7 @@ b32 infer_block(struct block *block, struct types *types) {
 				}
 
 			// Normal opcodes
-			case OP_ASSERT_EQUAL: optype("*vv", input);
+			case OP_ASSERT_EQUAL: //optype: *vv input
 			case OP_DEBUG_PRINT_TEXT:
 			        {
 				        if (input == types->text) {
@@ -187,7 +186,7 @@ b32 infer_block(struct block *block, struct types *types) {
 					for (union type *tortoise = input;
 					     vars[0] != types->text && vars[0] != tortoise;
 					     tortoise = tortoise->child1->child2, input = vars[0]) {
-						expect("+*N+*Nv11"); // Two iterations of the loop
+						//expect: +*N+*Nv11 // Two iterations of the loop
 						if (IS_VAR(vars[0])) {
 							input->child1->child2->child1->child2 = types->text;
 							vars[0] = types->text;
@@ -198,21 +197,21 @@ b32 infer_block(struct block *block, struct types *types) {
 					output(types->text);
 				}
 
-			case 'l': optype("*v*vv", prod(prod(vars[0], vars[1]), vars[2]));
-			case 'r': optype("**vvv", prod(vars[0], prod(vars[1], vars[2])));
-			case 'w': optype("*v*vv", prod(vars[1], prod(vars[0], vars[2])));
-			case 'z': optype("*v*v*vv", prod(vars[0], prod(vars[2], prod(vars[1], vars[3]))));
+			case 'l': //optype: *v*vv prod(prod(vars[0], vars[1]), vars[2])
+			case 'r': //optype: **vvv prod(vars[0], prod(vars[1], vars[2]))
+			case 'w': //optype: *v*vv prod(vars[1], prod(vars[0], vars[2]))
+			case 'z': //optype: *v*v*vv prod(vars[0], prod(vars[2], prod(vars[1], vars[3])))
 			case 'v': output(prod(input, types->unit));
-			case 'c': optype("*v1", vars[0]);
-			case '%': optype("*vv", vars[1]);
-			case '^': optype("*vv", prod(vars[0], prod(vars[0], vars[1])));
+			case 'c': //optype: *v1 vars[0]
+			case '%': //optype: *vv vars[1]
+			case '^': //optype: *vv prod(vars[0], prod(vars[0], vars[1]))
 
 			case '$': // TODO incorporate fixpoint stuff for semi-polymorphic recursion
 				{
 					// XXX Fully typed types are self contained (but not necessarily vice versa)
 					// Perhaps call them known types, since they may have variables?
 					// inst must *only* copy polymorphic parts of the type
-					expect("*[vv*vv");
+					//expect: *[vv*vv
 					//union type *b = inst(input->child1);
 					//unify(b->child1, inst(vars[2]));
 					//output(prod(b->child2, vars[3]));
@@ -221,7 +220,7 @@ b32 infer_block(struct block *block, struct types *types) {
 				}
 			case 'o':
 				{
-					expect("*[vv*[vvv");
+					//expect: *[vv*[vvv
 					//union type *b1 = inst(input->child1);
 					//union type *b2 = inst(input->child2->child1);
 					//unify(b1->child2, b2->child1);
@@ -234,59 +233,55 @@ b32 infer_block(struct block *block, struct types *types) {
 				{
 					// TODO make this polymorphic iff the value is constant
 					union type *s = var();
-					optype("*vv", prod(block(s, prod(vars[0], s)), vars[1]));
+					//optype: *vv prod(block(s, prod(vars[0], s)), vars[1])
 				}
 			case 'k':
 			case 'f':
-			          optype("*[vvv", input);
+				//optype: *[vvv input
 
 			case '#': output(prod(types->number, input));
-			case '0'...'9': optype("*Nv", input);
+			case '0'...'9': //optype: *Nv input
 
 			case '+':
 			case '*':
-			          optype("*N*Nv", input->child2);
+				//optype: *N*Nv input->child2
 			case '/':
 			case '-':
-			          optype("*Nv", input);
-			case 'Q': optype("*N*Nv", input);
+				//optype: *Nv input
+			case 'Q': //optype: *N*Nv input
 
-			case 'L': optype("*+v+vvv", prod(sum(sum(vars[0], vars[1]), vars[2]), vars[3]));
-			case 'R': optype("*++vvvv", prod(sum(vars[0], sum(vars[1], vars[2])), vars[3]));
-			case 'W': optype("*+v+vvv", prod(sum(vars[1], sum(vars[0], vars[2])), vars[3]));
-			case 'Z': optype("*+v+v+vvv",
-			                 prod(sum(vars[0], sum(vars[1], sum(vars[2], vars[3]))), vars[4]));
-			case 'V': optype("*vv", prod(sum(vars[0], var()), vars[1]));
-			case 'C': optype("*+vvv", prod(vars[0], vars[2]));
+			case 'L': //optype: *+v+vvv prod(sum(sum(vars[0], vars[1]), vars[2]), vars[3])
+			case 'R': //optype: *++vvvv prod(sum(vars[0], sum(vars[1], vars[2])), vars[3])
+			case 'W': //optype: *+v+vvv prod(sum(vars[1], sum(vars[0], vars[2])), vars[3])
+			case 'Z': //optype: *+v+v+vvv prod(sum(vars[0], sum(vars[1], sum(vars[2], vars[3]))), vars[4])
+			case 'V': //optype: *vv prod(sum(vars[0], var()), vars[1])
+			case 'C': //optype: *+vvv prod(vars[0], vars[2])
 
 			case '?':
 				{
-					expect("*[vv*+vvv");
+					//expect: *[vv*+vvv
 					//union type *b = inst(input->child1);
 					//unify(b->child1, inst(vars[2]));
 					//output(prod(sum(b->child2, vars[3]), vars[4]));
 					assert(false);
 					return false;
 				}
-			case 'D': optype("*v*+vvv",
-			                 prod(sum(prod(vars[0], vars[1]), prod(vars[0], vars[2])), vars[3]));
-			case 'F': optype("*+*vv*vvv",
-			                 prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4])));
-			//case 'F': //optype: *+*vv*vvv prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4]))
+			case 'D': //optype: *v*+vvv prod(sum(prod(vars[0], vars[1]), prod(vars[0], vars[2])), vars[3])
+			case 'F': //optype: *+*vv*vvv prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4]))
 			case 'M':
 				{
-					expect("*+vvv");
+					//expect: *+vvv
 					//union type *a = inst(vars[0]);
 					//unify(a, inst(vars[1]));
 					//output(prod(a, vars[2]));
 					assert(false);
 					return false;
 				}
-			case 'K': optype("*+vvv", prod(vars[1], vars[2]));
+			case 'K': //optype: *+vvv prod(vars[1], vars[2])
 
 			case '>':
 				{
-					expect("*N*Nv");
+					//expect: *N*Nv
 					union type *num_pair = prod(types->number, types->number);
 					output(prod(sum(num_pair, num_pair), vars[0]));
 				}
