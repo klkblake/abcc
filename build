@@ -17,4 +17,10 @@ if [[ DEBUG == no ]]; then
 	CFLAGS="-O3 $CFLAGS"
 fi
 
-clang -std=gnu11 -x c $CFLAGS -o abcc src/main.c src/slice.c src/parser.c src/peephole.c src/infer_types.c
+CFLAGS="-std=gnu11 -x c $CFLAGS"
+
+set -e
+
+clang -o expect src/expect.c
+./expect < src/infer_types.c > src/infer_types.gen.c
+clang $CFLAGS -o abcc src/main.c src/slice.c src/parser.c src/peephole.c src/infer_types.gen.c

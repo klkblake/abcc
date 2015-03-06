@@ -18,8 +18,17 @@ typedef __SIZE_TYPE__  usize;
 #define true  1
 #define false 0
 #define internal static
+
+#ifdef static_assert
+#undef static_assert
+#endif
 #define static_assert(cond, str) _Static_assert(cond, str)
+
+#ifdef assert
+#undef assert
+#endif
 #define assert(cond) if (cond) { __builtin_trap(); }
+
 #define offsetof(type, member) __builtin_offsetof(type, member)
 
 #define ABCC_H

@@ -92,7 +92,7 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 			case '+':
 			case '[':
 				{
-					usize sym;
+					usize sym = 0;
 					switch (c) {
 						case '*':
 							sym = SYMBOL_PRODUCT;
@@ -123,7 +123,7 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 	return true;
 }
 
-void infer_block(struct block *block, struct types *types) {
+b32 infer_block(struct block *block, struct types *types) {
 
 #define set_prod(type, c1, c2) set_term(type, SYMBOL_PRODUCT, c1, c2)
 
@@ -131,60 +131,6 @@ void infer_block(struct block *block, struct types *types) {
 #define sum(  c1, c2) set_term(alloc_type(types), SYMBOL_SUM,     c1, c2)
 #define block(c1, c2) set_term(alloc_type(types), SYMBOL_BLOCK,   c1, c2)
 #define sealed(seal, ty) set_sealed(alloc_type(types), seal, ty)
-
-#define expect_unit(loc) \
-	{ \
-		union type *unit = get_term(loc); \
-		if (!IS_VAR(unit)) { \
-			if (unit->symbol != SYMBOL_UNIT) { \
-				/* TODO report error */ \
-				return; \
-			} \
-		} else { \
-			(loc) = types->unit; \
-		} \
-	}
-#define expect_number(loc) \
-	{ \
-		union type *unit = get_term(loc); \
-		if (!IS_VAR(unit)) { \
-			if (unit->symbol != SYMBOL_NUMBER) { \
-				/* TODO report error */ \
-				return; \
-			} \
-		} else { \
-			(loc) = types->number; \
-		} \
-	}
-#define get_prod(var, loc) \
-	union type *var = get_term(loc); \
-	if (!IS_VAR(var)) { \
-		if (var->symbol != SYMBOL_PRODUCT) { \
-			/* TODO report error */ \
-			return; \
-		} \
-	} else
-#define get_sum(var, loc) \
-	union type *var = get_term(loc); \
-	if (!IS_VAR(var)) { \
-		if (var->symbol != SYMBOL_SUM) { \
-			/* TODO report error */ \
-			return; \
-		} \
-	} else
-#define get_sealed(var, seal_, loc) \
-	union type *var = get_term(loc); \
-	if (!IS_VAR(var)) { \
-		if (!IS_SEALED(var->symbol) || var->seal != seal_) { \
-			/* TODO report error */ \
-			return; \
-		} \
-	} else
-
-#define expect_prod(var, loc, c1, c2) \
-	get_prod(var, loc) { \
-		set_prod(var, c1, c2); \
-	}
 
 	block->types = malloc((block->size + 1) * sizeof(union type *));
 	block->types[0] = var();
@@ -220,7 +166,7 @@ void infer_block(struct block *block, struct types *types) {
 					expect("*vv");
 					if (!IS_VAR(vars[0])) {
 						if (vars[0]->seal != seal) {
-							return; // TODO error
+							return false; // TODO error
 						}
 					} else {
 						set_sealed(vars[0], seal, var());
@@ -234,7 +180,6 @@ void infer_block(struct block *block, struct types *types) {
 			        {
 				        if (input == types->text) {
 					        output(input);
-					        break;
 					}
 				        union type *initial = input;
 					// We use Floyd's "tortoise and hare"
@@ -274,7 +219,7 @@ void infer_block(struct block *block, struct types *types) {
 					//unify(b->child1, vars[2]);
 					//output(prod(b->child2, vars[3]));
 					assert(false);
-					return;
+					return false;
 				}
 			case 'o':
 				{
@@ -294,7 +239,7 @@ void infer_block(struct block *block, struct types *types) {
 					//}
 					//output(prod(result, vars[4]));
 					assert(false);
-					return;
+					return false;
 				}
 			case '\'':
 				{
@@ -334,12 +279,13 @@ void infer_block(struct block *block, struct types *types) {
 					//unify(b->child1, vars[2]);
 					//output(prod(sum(b->child2, vars[3]), vars[4]));
 					assert(false);
-					return;
+					return false;
 				}
 			case 'D': optype("*v*+vvv",
 			                 prod(sum(prod(vars[0], vars[1]), prod(vars[0], vars[2])), vars[3]));
-			case 'F': optype("*+*vv*vvv",
-			                 prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4])));
+			//case 'F': optype("*+*vv*vvv",
+			//                 prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4])));
+			case 'F': //optype: *+*vv*vvv prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4]))
 			case 'M':
 				{
 					expect("*+vvv");
@@ -347,7 +293,7 @@ void infer_block(struct block *block, struct types *types) {
 					//unify(vars[0], vars[1]);
 					//output(prod(vars[0], vars[2]));
 					assert(false);
-					return;
+					return false;
 				}
 			case 'K': optype("*+vvv", prod(vars[1], vars[2]));
 
@@ -360,10 +306,11 @@ void infer_block(struct block *block, struct types *types) {
 
 			default:
 			          assert(false);
-			          return;
+			          return false;
 		}
 		block->types[i+1] = output;
 	}
+	return true;
 }
 
 void infer_types(struct block_ptr_slice blocks) {

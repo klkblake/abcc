@@ -1,4 +1,6 @@
 abcc
+expect
+src/infer_types.gen.c
 dist
 cabal-dev
 *.o
