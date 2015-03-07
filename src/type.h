@@ -4,6 +4,7 @@
 
 // Sealed values are pointers so they always have the high bit clear
 #define HIGH_PTR_BIT (1ull << (sizeof(void *) * 8 - 1))
+// Only blocks can be marked polymorphic
 #define POLYMORPHIC_BIT  0x8
 #define POLYMORPHIC_MASK (~POLYMORPHIC_BIT)
 
@@ -16,10 +17,16 @@
 
 #define IS_SEALED(sym) ((sym & HIGH_PTR_BIT) == 0)
 
+/*
+ * This type has complicated invariants.
+ * If child2/term_count has VAR_BIT set, then it represents a variable, else it
+ * represents a term.
+ * If symbol/sealer has its high bit set, then it is a normal term, else it is
+ * a sealer.
+ * next and rep are not guarenteed to be set to sensible values except for when
+ * returned from inst(), as they are only used in unify().
+ */
 union type {
-	// This node is a var if child2/var_count has its high bit set. We
-	// usually don't need to actually bother masking out that bit when
-	// working with var_count.
 	struct {
 		union {
 			u64 symbol;
@@ -38,10 +45,10 @@ union type {
 };
 DEFINE_SLICE(union type *, type_ptr);
 
-#define VAR_COUNT_BIT (1ull << (sizeof(usize) * 8 - 1))
-#define IS_VAR(type) (((type)->var_count & VAR_COUNT_BIT) != 0)
+#define VAR_BIT (1ull << (sizeof(usize) * 8 - 1))
+#define IS_VAR(type) (((type)->term_count & VAR_BIT) != 0)
 
-static_assert(offsetof(union type, child2) == offsetof(union type, var_count), "child2 must be unioned with term_count");
+static_assert(offsetof(union type, child1) == offsetof(union type, term_count), "child1 must be unioned with term_count");
 
 #define TYPE_H
 #endif

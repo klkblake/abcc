@@ -21,7 +21,6 @@ union type *alloc_type(struct types *types) {
 
 union type *set_term(union type *type, u64 symbol, union type *c1, union type *c2) {
 	type->symbol = symbol;
-	type->next = type;
 	type->child1 = c1;
 	type->child2 = c2;
 	return type;
@@ -29,20 +28,17 @@ union type *set_term(union type *type, u64 symbol, union type *c1, union type *c
 
 union type *set_sealed(union type *type, struct string_rc *seal, union type *ty) {
 	type->seal = seal;
-	type->next = type;
 	type->child1 = ty;
-	type->child2 = NULL;
 	return type;
 }
 
 #define var() set_var(alloc_type(types))
 union type *set_var(union type *type) {
-	*type = (union type){};
-	type->rep = type;
-	type->var_count = VAR_COUNT_BIT | 1;
+	type->term_count = VAR_BIT;
 	return type;
 }
 
+#if 0
 b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types) {
 	union type **locs[8];
 	locs[0] = input;
@@ -117,6 +113,7 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 	}
 	return true;
 }
+#endif
 
 b32 infer_block(struct block *block, struct types *types) {
 
@@ -134,12 +131,14 @@ b32 infer_block(struct block *block, struct types *types) {
 		union type *input = block->types[i];
 		union type *output;
 		union type *vars[5];
+#if 0
 #define expect(pat) if (!expect_((u8 *) (pat), &input, vars, types)) { \
 	printf("Error on opcode %lu (%c)\n", i, op); \
 	return false; \
 }
+#endif
 #define output(type) output = (type); break
-#define optype(pat, type) expect(pat); output(type)
+//#define optype(pat, type) expect(pat); output(type)
 		switch (op) {
 			// Identity opcodes
 			case OP_FRAME_PUSH:

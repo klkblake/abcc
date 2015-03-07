@@ -109,7 +109,6 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 				iprintf("if (IS_VAR(%s)) {", loc);
 			}
 			iprintf("	%s->symbol = SYMBOL_%s;", loc, sym);
-			iprintf("	%s->next = %s;", loc, loc);
 			do_indent(indent);
 			printf("	%s->child1 = ", loc);
 			u32 var2 = *var;
