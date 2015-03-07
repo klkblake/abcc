@@ -211,6 +211,7 @@ b32 infer_block(struct block *block, struct types *types) {
 					// XXX Fully typed types are self contained (but not necessarily vice versa)
 					// Perhaps call them known types, since they may have variables?
 					// inst must *only* copy polymorphic parts of the type
+
 					//expect: *[vv*vv
 					//union type *b = inst(input->child1);
 					//unify(b->child1, inst(vars[2]));
@@ -233,6 +234,7 @@ b32 infer_block(struct block *block, struct types *types) {
 				{
 					// TODO make this polymorphic iff the value is constant
 					union type *s = var();
+					(void) s;
 					//optype: *vv prod(block(s, prod(vars[0], s)), vars[1])
 				}
 			case 'k':

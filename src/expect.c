@@ -54,13 +54,13 @@ char *construct(char *directive, u32 *var) {
 	return directive;
 }
 
-char *consume(char *directive, u32 *var, u32 indent, u32 loc) {
+char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 	char c = *directive++;
 	char *sym;
 	char *type;
 	switch (c) {
 		case 'v':
-			iprintf("vars[%d] = *loc%d;", (*var)++, loc);
+			iprintf("vars[%d] = %s;", (*var)++, loc);
 			break;
 		case '1':
 		case 'N':
@@ -74,12 +74,12 @@ char *consume(char *directive, u32 *var, u32 indent, u32 loc) {
 					type = "number";
 					break;
 			}
-			iprintf("if (*loc%d == NULL) {", loc);
-			iprintf("	*loc%d = types->%s;", loc, type);
-			iprintf("} else if (IS_VAR(*loc%d)) {", loc);
-			iprintf("	**loc%d = *types->%s;", loc, type);
-			iprintf("	*loc%d = types->%s;", loc, type);
-			iprintf("} else if ((*loc%d)->symbol != SYMBOL_%s){", loc, sym);
+			iprintf("if (%s == NULL) {", loc);
+			iprintf("	%s = types->%s;", loc, type);
+			iprintf("} else if (IS_VAR(%s)) {", loc);
+			iprintf("	*%s = *types->%s;", loc, type);
+			iprintf("	%s = types->%s;", loc, type);
+			iprintf("} else if (%s->symbol != SYMBOL_%s){", loc, sym);
 			iprintf("	printf(\"Error on opcode %%lu (%%c)\\n\", i, op);");
 			iprintf("	return false;");
 			iprintf("}");
@@ -99,31 +99,35 @@ char *consume(char *directive, u32 *var, u32 indent, u32 loc) {
 					break;
 			}
 			if (loc > 0) {
-				iprintf("b32 construct%d = false;", loc);
-				iprintf("if (*loc%d == NULL) {", loc);
-				iprintf("	*loc%d = alloc_type(types);", loc);
-				iprintf("	construct%d = true;", loc);
+				iprintf("b32 construct%d = false;", varid);
+				iprintf("if (%s == NULL) {", loc);
+				iprintf("	%s = alloc_type(types);", loc);
+				iprintf("	construct%d = true;", varid);
 				iprintf("}");
-				iprintf("if (construct%d || IS_VAR(*loc%d)) {", loc, loc);
+				iprintf("if (construct%d || IS_VAR(%s)) {", varid, loc);
 			} else {
-				iprintf("if (IS_VAR(*loc%d)) {", loc);
+				iprintf("if (IS_VAR(%s)) {", loc);
 			}
-			iprintf("	(*loc%d)->symbol = SYMBOL_%s;", loc, sym);
-			iprintf("	(*loc%d)->next = *loc%d;", loc, loc);
+			iprintf("	%s->symbol = SYMBOL_%s;", loc, sym);
+			iprintf("	%s->next = %s;", loc, loc);
 			do_indent(indent);
-			printf("	(*loc%d)->child1 = ", loc);
+			printf("	%s->child1 = ", loc);
 			u32 var2 = *var;
 			char *construct_directive = construct(directive, &var2);
 			printf(";\n");
 			do_indent(indent);
-			printf("	(*loc%d)->child2 = ", loc);
+			printf("	%s->child2 = ", loc);
 			construct(construct_directive, &var2);
 			printf(";\n");
-			iprintf("} else if ((*loc%d)->symbol == SYMBOL_%s){", loc, sym);
-			iprintf("	union type **loc%d = &(*loc%d)->child1;", loc + 1, loc);
-			directive = consume(directive, var, indent + 1, loc + 1);
-			iprintf("	union type **loc%d = &(*loc%d)->child2;", loc + 2, loc);
-			directive = consume(directive, var, indent + 1, loc + 2);
+			iprintf("} else if (%s->symbol == SYMBOL_%s){", loc, sym);
+			iprintf("	union type *loc%d = %s;", varid, loc);
+			usize len = 3 /* loc */ + 10 /* varid */ + 8 /* ->childN */ + 1 /* NUL */;
+			char *loc1 = alloca(len);
+			char *loc2 = alloca(len);
+			sprintf(loc1, "loc%d->child1", varid);
+			sprintf(loc2, "loc%d->child2", varid);
+			directive = consume(directive, var, indent + 1, loc1, varid + 1);
+			directive = consume(directive, var, indent + 1, loc2, varid + 2);
 			iprintf("} else {");
 			iprintf("	printf(\"Error on opcode %%lu (%%c)\\n\", i, op);");
 			iprintf("	return false;");
@@ -138,9 +142,8 @@ char *consume(char *directive, u32 *var, u32 indent, u32 loc) {
 
 void expect(char *directive) {
 	printf("{\n");
-	printf("\tunion type **loc0 = &input;\n");
 	u32 var = 0;
-	directive = consume(directive, &var, 1, 0);
+	directive = consume(directive, &var, 1, "input", 0);
 	char c = *directive;
 	if (c != ' ' && c != '\n' && c != '\0') {
 		fprintf(stderr, "expect: Extra character after directive: '%c'\n", c);
