@@ -336,6 +336,10 @@ b32 infer_block(struct block *block, struct types *types) {
 					//expect: *[vv*vv
 					//union type *b = inst(input->child1);
 					//unify(b->child1, inst(vars[2]));
+					//struct type_ptr_map seen;
+					//remove_vars(b->child2, &seen);
+					//remove_vars(vars[3], &seen);
+					//map_free(&seen);
 					//output(prod(b->child2, vars[3]));
 					assert(false);
 					return false;
@@ -346,6 +350,11 @@ b32 infer_block(struct block *block, struct types *types) {
 					//union type *b1 = inst(input->child1);
 					//union type *b2 = inst(input->child2->child1);
 					//unify(b1->child2, b2->child1);
+					//struct type_ptr_map seen;
+					//remove_vars(b1->child1, &seen);
+					//remove_vars(b2->child2, &seen);
+					//remove_vars(vars[4], &seen);
+					//map_free(&seen);
 					//union type *result = block(b1->child1, b2->child2);
 					//output(prod(result, vars[4]));
 					assert(false);
@@ -385,6 +394,11 @@ b32 infer_block(struct block *block, struct types *types) {
 					//expect: *[vv*+vvv
 					//union type *b = inst(input->child1);
 					//unify(b->child1, inst(vars[2]));
+					//struct type_ptr_map seen;
+					//remove_vars(b->child2, &seen);
+					//remove_vars(vars[3], &seen);
+					//remove_vars(vars[4], &seen);
+					//map_free(&seen);
 					//output(prod(sum(b->child2, vars[3]), vars[4]));
 					assert(false);
 					return false;
@@ -396,6 +410,10 @@ b32 infer_block(struct block *block, struct types *types) {
 					//expect: *+vvv
 					//union type *a = inst(vars[0]);
 					//unify(a, inst(vars[1]));
+					//struct type_ptr_map seen;
+					//remove_vars(a, &seen);
+					//remove_vars(vars[2], &seen);
+					//map_free(&seen);
 					//output(prod(a, vars[2]));
 					assert(false);
 					return false;
