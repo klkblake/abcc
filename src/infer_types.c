@@ -115,9 +115,8 @@ union type *set_var(union type *type) {
 	return type;
 }
 
-// TODO Reduce the amount of copying. We only *need* to copy nodes that
-// (transitively) point to a polymorphic block, and we *must not* copy vars
-// (except inside polymorphic blocks).
+// TODO Use modified version of Tarjan's SCC algorithm as per
+// http://stackoverflow.com/questions/28924321/copying-part-of-a-graph
 union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *copied, struct types *types) {
 	struct map_get_result result = map_get(copied, type);
 	if (result.value) {
