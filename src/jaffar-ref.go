@@ -3,21 +3,23 @@ package main
 import "fmt"
 import "os"
 
-type Symbol struct {
-	name string
-	arity int
-	seen uint64
+const (
+	SYMBOL_PRODUCT = uint64(iota)
+	SYMBOL_NUMBER
+)
+
+var names = [...]string{
+	"*",
+	"N",
 }
 
-func (s *Symbol) PrintCyclic(id uint64) {
-	if s.seen != id {
-		s.seen = id
-		fmt.Printf("node_%d_%p [label=\"%s/%d\"]\n", id, s, s.name, s.arity)
-	}
+var arities = [...]uint{
+	2,
+	0,
 }
 
 type TermNode struct {
-	symbol *Symbol
+	symbol uint64
 	varNode *VarNode
 	term *TermNode
 	child []*TermNode
@@ -33,12 +35,12 @@ func (t *TermNode) PrintCyclicRoot(id uint64) {
 func (t *TermNode) PrintCyclic(id uint64) {
 	if t.seen != id {
 		t.seen = id
-		if t.symbol != nil {
-			fmt.Printf("node_%d_%p [label=\"%s\"]\n", id, t, t.symbol.name)
-		} else if t.varNode != nil {
+		if t.varNode != nil {
 			fmt.Printf("node_%d_%p [label=\"%s\"]\n", id, t, t.varNode.symbol)
 			fmt.Printf("node_%d_%p -> node_%d_%p [label=\"var\"]\n", id, t, id, t.varNode)
 			t.varNode.PrintCyclic(id)
+		} else {
+			fmt.Printf("node_%d_%p [label=\"%s\"]\n", id, t, names[t.symbol])
 		}
 		if t.term != nil {
 			fmt.Printf("node_%d_%p -> node_%d_%p [label=\"term\"]\n", id, t, id, t.term)
@@ -76,7 +78,7 @@ func (v *VarNode) PrintCyclic(id uint64) {
 }
 
 type UnificationError struct {
-	left, right *Symbol
+	left, right uint64
 }
 
 var queue []*VarNode
@@ -137,11 +139,11 @@ func commonFrontier(t_list []*TermNode) *UnificationError {
 			}
 		}
 	}
-	a := sym.arity
+	a := arities[sym]
 	t0_list := make([]*TermNode, len(t_list))
 	s0Backing := make([]int, len(t_list))
 	s1Backing := make([]int, len(t_list))
-	for i := 0; i < a; i++ {
+	for i := uint(0); i < a; i++ {
 		for j := range t_list {
 			t0_list[j] = t_list[j].child[i]
 		}
@@ -205,14 +207,14 @@ func unify(t_list []*TermNode) *UnificationError {
 }
 
 func main() {
-	f := &Symbol{ "f", 2, 0 }
+	f := SYMBOL_PRODUCT
 	x := &VarNode{ "x", nil, nil, 1, 0, 0 }
 	x.rep = x
 	z := &VarNode{ "z", nil, nil, 1, 0, 0 }
 	z.rep = z
-	x1 := &TermNode{ nil, x, nil, nil, 0 }
-	x2 := &TermNode{ nil, x, nil, nil, 0 }
-	z2 := &TermNode{ nil, z, nil, nil, 0 }
+	x1 := &TermNode{ 0, x, nil, nil, 0 }
+	x2 := &TermNode{ 0, x, nil, nil, 0 }
+	z2 := &TermNode{ 0, z, nil, nil, 0 }
 	expr1 := &TermNode{ f, nil, nil, []*TermNode{ x1, x1 }, 0 }
 	expr2 := &TermNode{ f, nil, expr1, []*TermNode{ &TermNode{ f, nil, nil, []*TermNode{ z2, z2 }, 0 }, &TermNode{ f, nil, nil, []*TermNode{ z2, x2 }, 0 } }, 0 }
 	expr1.term = expr2
