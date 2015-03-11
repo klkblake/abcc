@@ -202,8 +202,10 @@ struct UnificationError commonFrontier(struct termnode_ptr_slice t_list) {
 				add(v, t0_list.data[*k]);
 			}
 		} else {
-			// XXX Is this correct?
-			return commonFrontier(t0_list);
+			struct UnificationError err = commonFrontier(t0_list);
+			if (err.left != err.right) {
+				return err;
+			}
 		}
 	}
 	return (struct UnificationError){};
