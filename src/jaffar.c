@@ -119,7 +119,6 @@ void merge(struct VarNode *v1, struct VarNode *v2) {
 	if (k1 <= 1 && k1 + k2 > 1) {
 		slice_snoc(&queue, bigV);
 	}
-	// TODO See if we can simplify this
 	struct TermNode *t0 = v->term;
 	struct TermNode *t1 = bigV->term;
 	if (t1 == NULL) {
@@ -139,7 +138,6 @@ void merge(struct VarNode *v1, struct VarNode *v2) {
 
 struct VarNode *rep(struct VarNode *v) {
 	struct VarNode *v0 = v->rep;
-	// TODO profile use of do-while loops here
 	while (v0 != v0->rep) {
 		v0 = v0->rep;
 	}
@@ -212,16 +210,14 @@ struct UnificationError commonFrontier(struct termnode_ptr_slice t_list) {
 }
 
 struct UnificationError unify(struct termnode_ptr_slice t_list) {
-	// TODO Can we use a stack here?
 	queue = (struct varnode_ptr_slice){};
-	u64 queueidx = 0;
 	struct UnificationError err = commonFrontier(t_list);
 	if (err.left != err.right) {
 		free(queue.data);
 		return err;
 	}
-	while (queueidx < queue.size) {
-		struct VarNode *v = queue.data[queueidx++];
+	while (queue.size > 0) {
+		struct VarNode *v = queue.data[queue.size-- - 1];
 		u64 k = v->termCount;
 		if (k >= 2) {
 			struct termnode_ptr_slice t;
