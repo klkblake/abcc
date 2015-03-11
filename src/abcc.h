@@ -15,6 +15,10 @@ typedef u32  b32;
 
 typedef __SIZE_TYPE__  usize;
 
+#ifndef NULL
+#define NULL ((void *) 0)
+#endif
+
 #define true  1
 #define false 0
 #define internal static
