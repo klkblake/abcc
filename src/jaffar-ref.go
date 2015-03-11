@@ -26,33 +26,6 @@ type TermNode struct {
 	seen uint64
 }
 
-func (t *TermNode) PrintCyclicRoot(id uint64) {
-	fmt.Printf("subgraph cluster_%d {\n", id)
-	t.PrintCyclic(id)
-	fmt.Println("}")
-}
-
-func (t *TermNode) PrintCyclic(id uint64) {
-	if t.seen != id {
-		t.seen = id
-		if t.varNode != nil {
-			fmt.Printf("node_%d_%p [label=\"%s\"]\n", id, t, t.varNode.symbol)
-			fmt.Printf("node_%d_%p -> node_%d_%p [label=\"var\"]\n", id, t, id, t.varNode)
-			t.varNode.PrintCyclic(id)
-		} else {
-			fmt.Printf("node_%d_%p [label=\"%s\"]\n", id, t, names[t.symbol])
-		}
-		if t.term != nil {
-			fmt.Printf("node_%d_%p -> node_%d_%p [label=\"term\"]\n", id, t, id, t.term)
-			t.term.PrintCyclic(id)
-		}
-		for i, c := range t.child {
-			fmt.Printf("node_%d_%p -> node_%d_%p [label=\"#%d\"]\n", id, t, id, c, i)
-			c.PrintCyclic(id)
-		}
-	}
-}
-
 type VarNode struct {
 	symbol string
 	rep *VarNode
@@ -62,19 +35,46 @@ type VarNode struct {
 	seen uint64
 }
 
-func (v *VarNode) PrintCyclic(id uint64) {
+func PrintCyclicTerm(t *TermNode, id uint64) {
+	if t.seen != id {
+		t.seen = id
+		if t.varNode != nil {
+			fmt.Printf("node_%d_%p [label=\"%s\"]\n", id, t, t.varNode.symbol)
+			fmt.Printf("node_%d_%p -> node_%d_%p [label=\"var\"]\n", id, t, id, t.varNode)
+			PrintCyclicVar(t.varNode, id)
+		} else {
+			fmt.Printf("node_%d_%p [label=\"%s\"]\n", id, t, names[t.symbol])
+		}
+		if t.term != nil {
+			fmt.Printf("node_%d_%p -> node_%d_%p [label=\"term\"]\n", id, t, id, t.term)
+			PrintCyclicTerm(t.term, id)
+		}
+		for i, c := range t.child {
+			fmt.Printf("node_%d_%p -> node_%d_%p [label=\"#%d\"]\n", id, t, id, c, i)
+			PrintCyclicTerm(c, id)
+		}
+	}
+}
+
+func PrintCyclicVar(v *VarNode, id uint64) {
 	if v.seen != id {
 		v.seen = id
 		fmt.Printf("node_%d_%p [label=\"%s (%d, %d)\"]\n", id, v, v.symbol, v.varCount, v.termCount)
 		if v.rep != nil {
 			fmt.Printf("node_%d_%p -> node_%d_%p [label=\"rep\"]\n", id, v, id, v.rep)
-			v.rep.PrintCyclic(id)
+			PrintCyclicVar(v.rep, id)
 		}
 		if v.term != nil {
 			fmt.Printf("node_%d_%p -> node_%d_%p [label=\"term\"]\n", id, v, id, v.term)
-			v.term.PrintCyclic(id)
+			PrintCyclicTerm(v.term, id)
 		}
 	}
+}
+
+func PrintCyclicRoot(t *TermNode,  id uint64) {
+	fmt.Printf("subgraph cluster_%d {\n", id)
+	PrintCyclicTerm(t, id)
+	fmt.Println("}")
 }
 
 type UnificationError struct {
@@ -221,12 +221,12 @@ func main() {
 	//fmt.Printf("Expr 1: %+v\n", expr1)
 	//fmt.Printf("Expr 2: %+v\n", expr2)
 	fmt.Println("digraph {")
-	expr1.PrintCyclicRoot(1)
+	PrintCyclicRoot(expr1, 1)
 	err := unify([]*TermNode{expr1, expr2})
 	if err != nil {
 		fmt.Printf("Error: %+v\n", err)
 		os.Exit(1)
 	}
-	expr1.PrintCyclicRoot(2)
+	PrintCyclicRoot(expr1, 2)
 	fmt.Println("}")
 }
