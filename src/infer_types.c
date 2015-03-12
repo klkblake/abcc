@@ -90,7 +90,7 @@ struct types {
 
 union type *alloc_type(struct types *types) {
 	if (types->used == CHUNK_SIZE || types->chunks.size == 0) {
-		array_snoc(&types->chunks, malloc(CHUNK_SIZE * sizeof(union type)));
+		array_push(&types->chunks, malloc(CHUNK_SIZE * sizeof(union type)));
 		types->used = 0;
 	}
 	return &types->chunks.data[types->chunks.size - 1][types->used++];

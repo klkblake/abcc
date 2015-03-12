@@ -90,7 +90,7 @@ internal struct varnode_ptr_array queue;
 
 void add(struct VarNode *v, struct TermNode *t) {
 	if (v->termCount == 1) {
-		array_snoc(&queue, v);
+		array_push(&queue, v);
 	}
 	struct TermNode *t0 = v->term;
 	if (t0 == NULL) {
@@ -117,7 +117,7 @@ void merge(struct VarNode *v1, struct VarNode *v2) {
 	u64 k1 = bigV->termCount;
 	u64 k2 = v->termCount;
 	if (k1 <= 1 && k1 + k2 > 1) {
-		array_snoc(&queue, bigV);
+		array_push(&queue, bigV);
 	}
 	struct TermNode *t0 = v->term;
 	struct TermNode *t1 = bigV->term;
@@ -181,9 +181,9 @@ struct UnificationError commonFrontier(struct termnode_ptr_array t_list) {
 		s1.data = s1_backing;
 		foreach (term, t0_list) {
 			if ((*term)->varNode != NULL) {
-				array_snoc(&s0, term_index);
+				array_push(&s0, term_index);
 			} else {
-				array_snoc(&s1, term_index);
+				array_push(&s1, term_index);
 			}
 		}
 		if (s0.size != 0) {

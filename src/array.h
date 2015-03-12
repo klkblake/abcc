@@ -25,7 +25,7 @@ void *array_bump_(struct u8_array *array, usize size);
 #define array_trim(array) array_trim_((struct u8_array *) (array), sizeof((array)->data[0]))
 #define array_bump(array) array_bump_((struct u8_array *) (array), sizeof((array)->data[0]))
 
-#define array_snoc(array, elem) ({ \
+#define array_push(array, elem) ({ \
 		typeof(array) _array = (array); \
 		*((typeof(_array->data))array_bump(_array)) = elem; \
 	})

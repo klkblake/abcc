@@ -375,7 +375,7 @@ void report_error(struct parse_state *state, u32 code, u32 lineno, u32 col) {
 		lineno,
 		col,
 	};
-	array_snoc(&state->errors, error);
+	array_push(&state->errors, error);
 }
 
 internal
@@ -446,8 +446,8 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 		array_stack_free(file_buf, &file_array);
 		struct ao_stack_frame *frame = memoise_ao_stack_frame(&state->frame_table, state->frame, word, file, line);
 		state->frame = frame;
-		array_snoc(&state->block->opcodes, OP_FRAME_PUSH);
-		array_snoc(&state->block->frames, frame);
+		array_push(&state->block->opcodes, OP_FRAME_PUSH);
+		array_push(&state->block->frames, frame);
 	} else {
 		struct ao_stack_frame *old = state->frame;
 		if (old == NULL) {
@@ -470,7 +470,7 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 		array_stack_free(word_buf, &word_array);
 		array_stack_free(file_buf, &file_array);
 		state->frame = old->next;
-		array_snoc(&state->block->opcodes, OP_FRAME_POP);
+		array_push(&state->block->opcodes, OP_FRAME_POP);
 	}
 	return true;
 }
@@ -527,7 +527,7 @@ b32 parse_annotation(struct parse_state *state) {
 		if (c != '}') {
 			return eat_unknown_annotation(state);
 		}
-		array_snoc(&state->block->opcodes, OP_ASSERT_EQUAL);
+		array_push(&state->block->opcodes, OP_ASSERT_EQUAL);
 	} else if (cs[0] == 'd' && cs[1] == 'e' && cs[2] == 'b') {
 		i32 m = match_annotation_part(state, (u8 *)"ug print ");
 		if (m) {
@@ -556,7 +556,7 @@ b32 parse_annotation(struct parse_state *state) {
 		if (m) {
 			return m != EOF;
 		}
-		array_snoc(&state->block->opcodes, op);
+		array_push(&state->block->opcodes, op);
 	} else {
 		return eat_unknown_annotation(state);
 	}
@@ -574,8 +574,8 @@ b32 parse_sealer(struct parse_state *state, u8 op) {
 		}
 		array_stack_snoc(buf, &text, (u8)c);
 	}
-	array_snoc(&state->block->opcodes, op);
-	array_snoc(&state->block->sealers, memoise_string_rc(&state->string_table, text.data, text.size));
+	array_push(&state->block->opcodes, op);
+	array_push(&state->block->sealers, memoise_string_rc(&state->string_table, text.data, text.size));
 	array_stack_free(buf, &text);
 	return true;
 }
@@ -636,8 +636,8 @@ b32 parse_text(struct parse_state *state) {
 		}
 		array_stack_snoc(buf, &text, (u8)c);
 	}
-	array_snoc(&state->block->opcodes, '"');
-	array_snoc(&state->block->texts, memoise_string_rc(&state->string_table, text.data, text.size));
+	array_push(&state->block->opcodes, '"');
+	array_push(&state->block->texts, memoise_string_rc(&state->string_table, text.data, text.size));
 	array_stack_free(buf, &text);
 	return true;
 }
@@ -688,7 +688,7 @@ struct parse_block_result parse_block(struct parse_state *state, b32 expect_eof)
 				// This field is unused, so we have the memo
 				// table implementation clear it to signal that
 				// a matching block was found.
-				array_snoc(&state->blocks, memo_block);
+				array_push(&state->blocks, memo_block);
 			}
 			result.block = memo_block;
 			return result;
@@ -712,8 +712,8 @@ struct parse_block_result parse_block(struct parse_state *state, b32 expect_eof)
 					report_error(state, PARSE_ERR_EOF_IN_BLOCK, lineno, col);
 					return result;
 				}
-				array_snoc(&state->block->opcodes, '[');
-				array_snoc(&block.blocks, res.block);
+				array_push(&state->block->opcodes, '[');
+				array_push(&block.blocks, res.block);
 				break;
 			case '{':
 				succeeded = parse_invokation(state);
@@ -765,7 +765,7 @@ struct parse_block_result parse_block(struct parse_state *state, b32 expect_eof)
 			case 'M':
 			case 'K':
 			case '>':
-				array_snoc(&state->block->opcodes, (u8)c);
+				array_push(&state->block->opcodes, (u8)c);
 				break;
 
 			default:
