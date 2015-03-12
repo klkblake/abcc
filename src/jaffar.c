@@ -3,82 +3,127 @@
 #include <alloca.h>
 #include "array.h"
 
-#define SYMBOL_PRODUCT 0
-#define SYMBOL_NUMBER  1
+// ---- START type.h ----
+
+// Sealed values are pointers so they always have the high bit clear
+#define HIGH_PTR_BIT (1ull << (sizeof(void *) * 8 - 1))
+// Only blocks can be marked polymorphic
+#define POLYMORPHIC_BIT  0x8
+#define POLYMORPHIC_MASK (~POLYMORPHIC_BIT)
+
+#define SYMBOL_VOID       (HIGH_PTR_BIT | 0)
+#define SYMBOL_UNIT       (HIGH_PTR_BIT | 1)
+#define SYMBOL_NUMBER     (HIGH_PTR_BIT | 2)
+#define SYMBOL_PRODUCT    (HIGH_PTR_BIT | 3)
+#define SYMBOL_SUM        (HIGH_PTR_BIT | 4)
+#define SYMBOL_BLOCK      (HIGH_PTR_BIT | 5)
+
+#define IS_SEALED(sym) ((sym & HIGH_PTR_BIT) == 0)
+
+struct string_rc {
+	usize size;
+	u32 refcount;
+	// Intel optimisation guide recommends at least 16 byte alignment for arrays
+	u8 pad[16 - sizeof(usize) - sizeof(u32)];
+	u8 data[];
+};
+
+/*
+ * This type has complicated invariants.
+ * If child2/term_count has VAR_BIT set, then it represents a variable, else it
+ * represents a term.
+ * If symbol/sealer has its high bit set, then it is a normal term, else it is
+ * a sealer.
+ * next and rep are not guarenteed to be set to sensible values except for when
+ * returned from inst(), as they are only used in unify().
+ */
+union type {
+	struct {
+		union {
+			u64 symbol;
+			struct string_rc *seal;
+		};
+		union type *next;
+		union type *child1;
+		union type *child2;
+		u64 seen;
+	};
+	struct {
+		union type *rep;
+		union type *terms;
+		usize term_count;
+		usize var_count;
+	};
+};
+DEFINE_ARRAY(union type *, type_ptr);
+
+#define VAR_BIT (1ull << (sizeof(usize) * 8 - 1))
+#define IS_VAR(type) (((type)->term_count & VAR_BIT) != 0)
+
+// ---- END type.h ----
 
 internal char *names[] = {
-	"*",
+	"0",
+	"1",
 	"N",
+	"*",
+	"+",
+	"[->]",
 };
 
 internal u32 arities[] = {
-	2,
 	0,
+	0,
+	0,
+	2,
+	2,
+	2,
 };
 
-struct TermNode;
-struct VarNode;
-DEFINE_ARRAY(struct TermNode *, termnode_ptr);
-DEFINE_ARRAY(struct VarNode *, varnode_ptr);
-
-struct TermNode {
-	u64 symbol;
-	struct VarNode *varNode;
-	struct TermNode *term;
-	struct termnode_ptr_array child;
-	u64 seen;
-};
-
-struct VarNode {
-	char *symbol;
-	struct VarNode *rep;
-	struct TermNode *term;
-	u64 varCount;
-	u64 termCount;
-	u64 seen;
-};
-
-void PrintCyclicVar(struct VarNode *v, u64 id);
-
-void PrintCyclicTerm(struct TermNode *t, u64 id) {
+void print_type(union type *t, u64 id) {
 	if (t->seen != id) {
 		t->seen = id;
-		if (t->varNode != NULL) {
-			printf("node_%lu_%p [label=\"%s\"]\n", id, t, t->varNode->symbol);
-			printf("node_%lu_%p -> node_%lu_%p [label=\"var\"]\n", id, t, id, t->varNode);
-			PrintCyclicVar(t->varNode, id);
+		if (IS_VAR(t)) {
+			printf("node_%lu_%p [label=\"%lu, %llu\"]\n", id, t, t->var_count, t->term_count &~ VAR_BIT);
+			if (t->rep != NULL) {
+				printf("node_%lu_%p -> node_%lu_%p [label=\"rep\"]\n", id, t, id, t->rep);
+				print_type(t->rep, id);
+			}
+			if (t->terms != NULL) {
+				printf("node_%lu_%p -> node_%lu_%p [label=\"terms\"]\n", id, t, id, t->terms);
+				print_type(t->terms, id);
+			}
 		} else {
-			printf("node_%lu_%p [label=\"%s\"]\n", id, t, names[t->symbol]);
-		}
-		if (t->term != NULL) {
-			printf("node_%lu_%p -> node_%lu_%p [label=\"term\"]\n", id, t, id, t->term);
-			PrintCyclicTerm(t->term, id);
-		}
-		foreach (c, t->child) {
-			printf("node_%lu_%p -> node_%lu_%p [label=\"#%lu\"]\n", id, t, id, *c, c_index);
-			PrintCyclicTerm(*c, id);
+			if (t->next != NULL) {
+				printf("node_%lu_%p -> node_%lu_%p [label=\"next\"]\n", id, t, id, t->next);
+				print_type(t->next, id);
+			}
+			u32 arity;
+			if (IS_SEALED(t->symbol)) {
+				printf("node_%lu_%p [label=\"Sealed: \\\"", id, t);
+				fwrite(t->seal->data, 1, t->seal->size, stdout);
+				printf("\\\"\"]\n");
+				arity = 1;
+			} else {
+				printf("node_%lu_%p [label=\"%s\"]\n", id, t,
+				       names[t->symbol &~ (HIGH_PTR_BIT | POLYMORPHIC_BIT)]);
+				arity = arities[t->symbol &~ (HIGH_PTR_BIT | POLYMORPHIC_BIT)];
+			}
+			if (arity > 0){
+				printf("node_%lu_%p -> node_%lu_%p [label=\"#0\"]\n", id, t, id, t->child1);
+				print_type(t->child1, id);
+				if (arity > 1) {
+					printf("node_%lu_%p -> node_%lu_%p [label=\"#1\"]\n", id, t, id, t->child2);
+					print_type(t->child2, id);
+				}
+			}
 		}
 	}
 }
 
-void PrintCyclicVar(struct VarNode *v, u64 id) {
-	if (v->seen != id) {
-		v->seen = id;
-		printf("node_%lu_%p [label=\"%s (%lu, %lu)\"]\n", id, v, v->symbol, v->varCount, v->termCount);
-		if (v->rep != NULL) {
-			printf("node_%lu_%p -> node_%lu_%p [label=\"rep\"]\n", id, v, id, v->rep);
-			PrintCyclicVar(v->rep, id);
-		}
-		if (v->term != NULL) {
-			printf("node_%lu_%p -> node_%lu_%p [label=\"term\"]\n", id, v, id, v->term);
-			PrintCyclicTerm(v->term, id);
-		}
-	}
-}
-
-void PrintCyclicRoot(struct TermNode *t, u64 id) {
+void print_type_root(union type *t, u64 id) {
 	printf("subgraph cluster_%lu {\n", id);
-	PrintCyclicTerm(t, id);
+	print_type(t, id);
 	printf("}\n");
 }
 
@@ -86,27 +131,27 @@ struct UnificationError {
 	u64 left, right;
 };
 
-internal struct varnode_ptr_array queue;
+internal struct type_ptr_array queue;
 
-void add(struct VarNode *v, struct TermNode *t) {
-	if (v->termCount == 1) {
+void add(union type *v, union type *t) {
+	if ((v->term_count &~ VAR_BIT) == 1) {
 		array_push(&queue, v);
 	}
-	struct TermNode *t0 = v->term;
+	union type *t0 = v->terms;
 	if (t0 == NULL) {
-		v->term = t;
-		t->term = t;
+		v->terms = t;
+		t->next = t;
 	} else {
-		t->term = t0->term;
-		t0->term = t;
+		t->next = t0->next;
+		t0->next = t;
 	}
-	v->termCount++;
+	v->term_count++;
 }
 
-void merge(struct VarNode *v1, struct VarNode *v2) {
-	u64 r1 = v1->varCount;
-	u64 r2 = v2->varCount;
-	struct VarNode *bigV, *v;
+void merge(union type *v1, union type *v2) {
+	u64 r1 = v1->var_count;
+	u64 r2 = v2->var_count;
+	union type *bigV, *v;
 	if (r1 >= r2) {
 		bigV = v1;
 		v = v2;
@@ -114,35 +159,35 @@ void merge(struct VarNode *v1, struct VarNode *v2) {
 		bigV = v2;
 		v = v1;
 	}
-	u64 k1 = bigV->termCount;
-	u64 k2 = v->termCount;
+	u64 k1 = bigV->term_count &~ VAR_BIT;
+	u64 k2 = v->term_count &~ VAR_BIT;
 	if (k1 <= 1 && k1 + k2 > 1) {
 		array_push(&queue, bigV);
 	}
-	struct TermNode *t0 = v->term;
-	struct TermNode *t1 = bigV->term;
+	union type *t0 = v->terms;
+	union type *t1 = bigV->terms;
 	if (t1 == NULL) {
-		bigV->term = t0;
+		bigV->terms = t0;
 	} else if (t0 != NULL) {
-		struct TermNode *tmp = t0->term;
-		t0->term = t1->term;
-		t1->term = tmp;
+		union type *tmp = t0->next;
+		t0->next = t1->next;
+		t1->next = tmp;
 	}
 	v->rep = bigV;
-	v->term = NULL;
-	v->varCount = 0;
-	v->termCount = 0;
-	bigV->varCount = r1 + r2;
-	bigV->termCount = k1 + k2;
+	v->terms = NULL;
+	v->var_count = 0;
+	v->term_count = VAR_BIT;
+	bigV->var_count = r1 + r2;
+	bigV->term_count = (k1 + k2) | VAR_BIT;
 }
 
-struct VarNode *rep(struct VarNode *v) {
-	struct VarNode *v0 = v->rep;
+union type *rep(union type *v) {
+	union type *v0 = v->rep;
 	while (v0 != v0->rep) {
 		v0 = v0->rep;
 	}
 	while (v->rep != v0) {
-		struct VarNode *tmp = v->rep;
+		union type *tmp = v->rep;
 		v->rep = v0;
 		v = tmp;
 	}
@@ -151,7 +196,7 @@ struct VarNode *rep(struct VarNode *v) {
 
 DEFINE_ARRAY(usize, usize);
 
-struct UnificationError commonFrontier(struct termnode_ptr_array t_list) {
+struct UnificationError commonFrontier(struct type_ptr_array t_list) {
 	// TODO benchmark with and without checks for identical nodes
 	u64 sym = t_list.data[0]->symbol;
 	foreach (term, t_list) {
@@ -162,16 +207,21 @@ struct UnificationError commonFrontier(struct termnode_ptr_array t_list) {
 			};
 		}
 	}
-	u64 a = arities[sym];
-	struct termnode_ptr_array t0_list;
+	u64 a;
+	if (IS_SEALED(sym)) {
+		a = 1;
+	} else {
+		a = arities[sym &~ (HIGH_PTR_BIT | POLYMORPHIC_BIT)];
+	}
+	struct type_ptr_array t0_list;
 	t0_list.cap = t0_list.size = t_list.size;
-	t0_list.data = alloca(t0_list.cap * sizeof(struct TermNode *));
+	t0_list.data = alloca(t0_list.cap * sizeof(union type *));
 	// TODO eliminate these stacks
 	usize *s0_backing = alloca(t_list.size * sizeof(usize));
 	usize *s1_backing = alloca(t_list.size * sizeof(usize));
 	for (usize i = 0; i < a; i++) {
 		for (usize j = 0; j < t_list.size; j++) {
-			t0_list.data[j] = t_list.data[j]->child.data[i];
+			t0_list.data[j] = (&t_list.data[j]->child1)[i];
 		}
 		struct usize_array s0 = {};
 		struct usize_array s1 = {};
@@ -180,7 +230,7 @@ struct UnificationError commonFrontier(struct termnode_ptr_array t_list) {
 		s0.data = s0_backing;
 		s1.data = s1_backing;
 		foreach (term, t0_list) {
-			if ((*term)->varNode != NULL) {
+			if (IS_VAR(*term)) {
 				array_push(&s0, term_index);
 			} else {
 				array_push(&s1, term_index);
@@ -190,12 +240,12 @@ struct UnificationError commonFrontier(struct termnode_ptr_array t_list) {
 			usize j = s0.data[0];
 			s0.data++;
 			s0.size--;
-			struct TermNode tmp = *t_list.data[0];
+			union type tmp = *t_list.data[0];
 			*t_list.data[0] = *t_list.data[j];
 			*t_list.data[j] = tmp;
-			struct VarNode *v = rep(t0_list.data[j]->varNode);
+			union type *v = rep(t0_list.data[j]);
 			foreach (k, s0) {
-				struct VarNode *v2 = rep(t0_list.data[*k]->varNode);
+				union type *v2 = rep(t0_list.data[*k]);
 				if (v != v2) {
 					merge(v, v2);
 				}
@@ -213,27 +263,27 @@ struct UnificationError commonFrontier(struct termnode_ptr_array t_list) {
 	return (struct UnificationError){};
 }
 
-struct UnificationError unify(struct termnode_ptr_array t_list) {
-	queue = (struct varnode_ptr_array){};
+struct UnificationError unify(struct type_ptr_array t_list) {
+	queue = (struct type_ptr_array){};
 	struct UnificationError err = commonFrontier(t_list);
 	if (err.left != err.right) {
 		free(queue.data);
 		return err;
 	}
 	while (queue.size > 0) {
-		struct VarNode *v = array_pop(&queue);
-		u64 k = v->termCount;
+		union type *v = array_pop(&queue);
+		u64 k = v->term_count &~ VAR_BIT;
 		if (k >= 2) {
-			struct termnode_ptr_array t;
+			struct type_ptr_array t;
 			t.cap = t.size = k;
-			t.data = alloca(t.cap * sizeof(struct TermNode *));
-			struct TermNode *t0 = v->term;
+			t.data = alloca(t.cap * sizeof(union type *));
+			union type *t0 = v->terms;
 			for (u64 i = 0; i < k; i++) {
 				t.data[i] = t0;
-				t0 = t0->term;
+				t0 = t0->next;
 			}
-			t.data[0]->term = t.data[0];
-			v->termCount = 1;
+			t.data[0]->next = t.data[0];
+			v->term_count = 1 | VAR_BIT;
 			err = commonFrontier(t);
 			if (err.left != err.right) {
 				free(queue.data);
@@ -245,31 +295,29 @@ struct UnificationError unify(struct termnode_ptr_array t_list) {
 	return (struct UnificationError){};
 }
 
+#define prod(n, c1, c2) union type n = { { { SYMBOL_PRODUCT }, NULL, &c1, &c2, 0 } }; n.next = &n
+
 int main() {
-	u64 f = SYMBOL_PRODUCT;
-	struct VarNode *x = &(struct VarNode){ "x", NULL, NULL, 1, 0, 0 };
-	x->rep = x;
-	struct VarNode *z = &(struct VarNode){ "z", NULL, NULL, 1, 0, 0 };
-	z->rep = z;
-	struct TermNode *x1 = &(struct TermNode){ 0, x, NULL, {}, 0 };
-	struct TermNode *x2 = &(struct TermNode){ 0, x, NULL, {}, 0 };
-	struct TermNode *z2 = &(struct TermNode){ 0, z, NULL, {}, 0 };
-	struct termnode_ptr_array x1x1 = {(struct TermNode *[]){ x1, x1 }, 2, 2};
-	struct termnode_ptr_array z2z2 = {(struct TermNode *[]){ z2, z2 }, 2, 2};
-	struct termnode_ptr_array z2x2 = {(struct TermNode *[]){ z2, x2 }, 2, 2};
-	struct TermNode *expr1 = &(struct TermNode){ f, NULL, NULL, x1x1, 0 };
-	struct TermNode *expr2 = &(struct TermNode){ f, NULL, expr1, {(struct TermNode *[]){ &(struct TermNode){ f, NULL, NULL, z2z2, 0 }, &(struct TermNode){ f, NULL, NULL, z2x2, 0 } }, 2, 2}, 0 };
-	expr1->term = expr2;
-	//fmt.Printf("Expr 1: %+v\n", expr1)
-	//fmt.Printf("Expr 2: %+v\n", expr2)
+	union type x = {};
+	x.rep = &x;
+	x.term_count = VAR_BIT;
+	union type z = {};
+	z.rep = &z;
+	z.term_count = VAR_BIT;
+	prod(expr1, x, x);
+	prod(c1, z, z);
+	prod(c2, z, x);
+	prod(expr2, c1, c2);
+	expr1.next = &expr2;
+	expr2.next = &expr1;
 	printf("digraph {\n");
-	PrintCyclicRoot(expr1, 1);
-	struct UnificationError err = unify((struct termnode_ptr_array){(struct TermNode *[]){ expr1, expr2 }, 2, 2});
+	print_type_root(&expr1, 1);
+	struct UnificationError err = unify((struct type_ptr_array){(union type *[]){ &expr1, &expr2 }, 2, 2});
 	if (err.left != err.right) {
 		printf("Error: %lu, %lu\n", err.left, err.right);
 		return 1;
 	}
-	PrintCyclicRoot(expr1, 2);
+	print_type_root(&expr1, 2);
 	printf("}\n");
 	return 0;
 }
