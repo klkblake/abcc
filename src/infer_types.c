@@ -51,7 +51,7 @@ struct map_get_result map_get(struct type_ptr_map *map, union type *key) {
 		map_grow(map);
 	}
 	usize mask = map->num_buckets - 1;
-	u32 hash = (u64)key / sizeof(union type);
+	u32 hash = (u32) ((u64)key / sizeof(union type));
 	usize bucket = hash & mask;
 	while (map->hashes[bucket] != 0) {
 		if (map->hashes[bucket] == hash && map->keys[bucket] == key) {
@@ -63,7 +63,7 @@ struct map_get_result map_get(struct type_ptr_map *map, union type *key) {
 }
 
 void map_put_bucket(struct type_ptr_map *map, union type *key, union type *value, usize bucket) {
-	u32 hash = (u64)key / sizeof(union type);
+	u32 hash = (u32) ((u64)key / sizeof(union type));
 	map->hashes[bucket] = hash;
 	map->keys[bucket] = key;
 	map->values[bucket] = value;
@@ -81,7 +81,7 @@ void map_free(struct type_ptr_map *map) {
 
 #define CHUNK_SIZE 4096
 struct types {
-	struct type_ptr_slice chunks;
+	struct type_ptr_array chunks;
 	usize used;
 	union type *unit;
 	union type *number;
@@ -90,7 +90,7 @@ struct types {
 
 union type *alloc_type(struct types *types) {
 	if (types->used == CHUNK_SIZE || types->chunks.size == 0) {
-		slice_snoc(&types->chunks, malloc(CHUNK_SIZE * sizeof(union type)));
+		array_snoc(&types->chunks, malloc(CHUNK_SIZE * sizeof(union type)));
 		types->used = 0;
 	}
 	return &types->chunks.data[types->chunks.size - 1][types->used++];
@@ -435,7 +435,7 @@ b32 infer_block(struct block *block, struct types *types) {
 	return true;
 }
 
-b32 infer_types(struct block_ptr_slice blocks) {
+b32 infer_types(struct block_ptr_array blocks) {
 	struct types types = {};
 	types.unit   = set_term(alloc_type(&types), SYMBOL_UNIT,   NULL, NULL);
 	types.number = set_term(alloc_type(&types), SYMBOL_NUMBER, NULL, NULL);
@@ -452,6 +452,6 @@ b32 infer_types(struct block_ptr_slice blocks) {
 	foreach (chunk, types.chunks) {
 		free(*chunk);
 	}
-	slice_free(&types.chunks);
+	array_free(&types.chunks);
 	return true;
 }

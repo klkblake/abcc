@@ -4,7 +4,7 @@
 #include "peephole.h"
 #include "infer_types.h"
 
-usize count_ops(struct block_ptr_slice blocks) {
+usize count_ops(struct block_ptr_array blocks) {
 	usize ops = 0;
 	foreach (block, blocks) {
 		ops += (*block)->size;
@@ -16,9 +16,9 @@ int main() {
 	struct parse_result result = parse(stdin);
 	foreach (error, result.errors) {
 		print_parse_error(*error);
-		slice_free(&error->line);
+		array_free(&error->line);
 	}
-	slice_free(&result.errors);
+	array_free(&result.errors);
 	if (!result.block) {
 		printf("Parse failed.\n");
 		return 1;
@@ -39,6 +39,6 @@ int main() {
 		block_free(*block);
 		free(*block);
 	}
-	slice_free(&result.blocks);
+	array_free(&result.blocks);
 	return 0;
 }

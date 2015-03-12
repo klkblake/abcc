@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <alloca.h>
-#include "slice.h"
+#include "array.h"
 
 #define SYMBOL_PRODUCT 0
 #define SYMBOL_NUMBER  1
@@ -18,14 +18,14 @@ internal u32 arities[] = {
 
 struct TermNode;
 struct VarNode;
-DEFINE_SLICE(struct TermNode *, termnode_ptr);
-DEFINE_SLICE(struct VarNode *, varnode_ptr);
+DEFINE_ARRAY(struct TermNode *, termnode_ptr);
+DEFINE_ARRAY(struct VarNode *, varnode_ptr);
 
 struct TermNode {
 	u64 symbol;
 	struct VarNode *varNode;
 	struct TermNode *term;
-	struct termnode_ptr_slice child;
+	struct termnode_ptr_array child;
 	u64 seen;
 };
 
@@ -86,11 +86,11 @@ struct UnificationError {
 	u64 left, right;
 };
 
-internal struct varnode_ptr_slice queue;
+internal struct varnode_ptr_array queue;
 
 void add(struct VarNode *v, struct TermNode *t) {
 	if (v->termCount == 1) {
-		slice_snoc(&queue, v);
+		array_snoc(&queue, v);
 	}
 	struct TermNode *t0 = v->term;
 	if (t0 == NULL) {
@@ -117,7 +117,7 @@ void merge(struct VarNode *v1, struct VarNode *v2) {
 	u64 k1 = bigV->termCount;
 	u64 k2 = v->termCount;
 	if (k1 <= 1 && k1 + k2 > 1) {
-		slice_snoc(&queue, bigV);
+		array_snoc(&queue, bigV);
 	}
 	struct TermNode *t0 = v->term;
 	struct TermNode *t1 = bigV->term;
@@ -149,9 +149,9 @@ struct VarNode *rep(struct VarNode *v) {
 	return v0;
 }
 
-DEFINE_SLICE(usize, usize);
+DEFINE_ARRAY(usize, usize);
 
-struct UnificationError commonFrontier(struct termnode_ptr_slice t_list) {
+struct UnificationError commonFrontier(struct termnode_ptr_array t_list) {
 	// TODO benchmark with and without checks for identical nodes
 	u64 sym = t_list.data[0]->symbol;
 	foreach (term, t_list) {
@@ -163,7 +163,7 @@ struct UnificationError commonFrontier(struct termnode_ptr_slice t_list) {
 		}
 	}
 	u64 a = arities[sym];
-	struct termnode_ptr_slice t0_list;
+	struct termnode_ptr_array t0_list;
 	t0_list.cap = t0_list.size = t_list.size;
 	t0_list.data = alloca(t0_list.cap * sizeof(struct TermNode *));
 	// TODO eliminate these stacks
@@ -173,17 +173,17 @@ struct UnificationError commonFrontier(struct termnode_ptr_slice t_list) {
 		for (usize j = 0; j < t_list.size; j++) {
 			t0_list.data[j] = t_list.data[j]->child.data[i];
 		}
-		struct usize_slice s0 = {};
-		struct usize_slice s1 = {};
+		struct usize_array s0 = {};
+		struct usize_array s1 = {};
 		s0.size = s1.size = 0;
 		s0.cap = s1.cap = t_list.size;
 		s0.data = s0_backing;
 		s1.data = s1_backing;
 		foreach (term, t0_list) {
 			if ((*term)->varNode != NULL) {
-				slice_snoc(&s0, term_index);
+				array_snoc(&s0, term_index);
 			} else {
-				slice_snoc(&s1, term_index);
+				array_snoc(&s1, term_index);
 			}
 		}
 		if (s0.size != 0) {
@@ -213,8 +213,8 @@ struct UnificationError commonFrontier(struct termnode_ptr_slice t_list) {
 	return (struct UnificationError){};
 }
 
-struct UnificationError unify(struct termnode_ptr_slice t_list) {
-	queue = (struct varnode_ptr_slice){};
+struct UnificationError unify(struct termnode_ptr_array t_list) {
+	queue = (struct varnode_ptr_array){};
 	struct UnificationError err = commonFrontier(t_list);
 	if (err.left != err.right) {
 		free(queue.data);
@@ -224,7 +224,7 @@ struct UnificationError unify(struct termnode_ptr_slice t_list) {
 		struct VarNode *v = queue.data[queue.size-- - 1];
 		u64 k = v->termCount;
 		if (k >= 2) {
-			struct termnode_ptr_slice t;
+			struct termnode_ptr_array t;
 			t.cap = t.size = k;
 			t.data = alloca(t.cap * sizeof(struct TermNode *));
 			struct TermNode *t0 = v->term;
@@ -254,9 +254,9 @@ int main() {
 	struct TermNode *x1 = &(struct TermNode){ 0, x, NULL, {}, 0 };
 	struct TermNode *x2 = &(struct TermNode){ 0, x, NULL, {}, 0 };
 	struct TermNode *z2 = &(struct TermNode){ 0, z, NULL, {}, 0 };
-	struct termnode_ptr_slice x1x1 = {(struct TermNode *[]){ x1, x1 }, 2, 2};
-	struct termnode_ptr_slice z2z2 = {(struct TermNode *[]){ z2, z2 }, 2, 2};
-	struct termnode_ptr_slice z2x2 = {(struct TermNode *[]){ z2, x2 }, 2, 2};
+	struct termnode_ptr_array x1x1 = {(struct TermNode *[]){ x1, x1 }, 2, 2};
+	struct termnode_ptr_array z2z2 = {(struct TermNode *[]){ z2, z2 }, 2, 2};
+	struct termnode_ptr_array z2x2 = {(struct TermNode *[]){ z2, x2 }, 2, 2};
 	struct TermNode *expr1 = &(struct TermNode){ f, NULL, NULL, x1x1, 0 };
 	struct TermNode *expr2 = &(struct TermNode){ f, NULL, expr1, {(struct TermNode *[]){ &(struct TermNode){ f, NULL, NULL, z2z2, 0 }, &(struct TermNode){ f, NULL, NULL, z2x2, 0 } }, 2, 2}, 0 };
 	expr1->term = expr2;
@@ -264,7 +264,7 @@ int main() {
 	//fmt.Printf("Expr 2: %+v\n", expr2)
 	printf("digraph {\n");
 	PrintCyclicRoot(expr1, 1);
-	struct UnificationError err = unify((struct termnode_ptr_slice){(struct TermNode *[]){ expr1, expr2 }, 2, 2});
+	struct UnificationError err = unify((struct termnode_ptr_array){(struct TermNode *[]){ expr1, expr2 }, 2, 2});
 	if (err.left != err.right) {
 		printf("Error: %lu, %lu\n", err.left, err.right);
 		return 1;

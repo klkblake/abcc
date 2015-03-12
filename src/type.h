@@ -1,6 +1,6 @@
 #ifndef TYPE_H
 
-#include "slice.h"
+#include "array.h"
 
 // Sealed values are pointers so they always have the high bit clear
 #define HIGH_PTR_BIT (1ull << (sizeof(void *) * 8 - 1))
@@ -43,7 +43,7 @@ union type {
 		usize var_count;
 	};
 };
-DEFINE_SLICE(union type *, type_ptr);
+DEFINE_ARRAY(union type *, type_ptr);
 
 #define VAR_BIT (1ull << (sizeof(usize) * 8 - 1))
 #define IS_VAR(type) (((type)->term_count & VAR_BIT) != 0)

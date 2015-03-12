@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 
-#include "slice.h"
+#include "array.h"
 #include "type.h"
 
 // TODO move?
@@ -41,25 +41,25 @@ struct block {
 	// Unlike for other structs, this is not used for memory management
 	u32 refcount;
 };
-DEFINE_SLICE(struct block *, block_ptr);
+DEFINE_ARRAY(struct block *, block_ptr);
 
 void block_free(struct block *block);
 
 struct parse_error {
-	struct u8_slice line;
+	struct u8_array line;
 	u32 code;
 	u32 lineno;
 	u32 col;
 };
-DEFINE_SLICE(struct parse_error, parse_error);
+DEFINE_ARRAY(struct parse_error, parse_error);
 
 struct parse_result {
 	// NULL if the parse failed
 	struct block *block;
 	// All the blocks transitively referenced by block, sorted
 	// topologically (leaves first)
-	struct block_ptr_slice blocks;
-	struct parse_error_slice errors;
+	struct block_ptr_array blocks;
+	struct parse_error_array errors;
 };
 
 struct parse_result parse(FILE *stream);

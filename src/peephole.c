@@ -151,7 +151,7 @@ void simplify(struct block *block) {
 	block->size = new_size;
 }
 
-void peephole_simplify(struct block_ptr_slice blocks) {
+void peephole_simplify(struct block_ptr_array blocks) {
 	foreach (block, blocks) {
 		simplify(*block);
 	}
