@@ -57,6 +57,9 @@
 		} \
 		usize mask = map->num_buckets - 1; \
 		u32 hash = hash_func(key); \
+		if (hash == 0) { \
+			hash = 0x80000000; \
+		} \
 		usize bucket = hash & mask; \
 		while (map->hashes[bucket] != 0) { \
 			if (map->hashes[bucket] == hash && map->keys[bucket] == key) { \
@@ -70,6 +73,9 @@
 #define DEFINE_MAP_PUT_BUCKET(key_type, value_type, name, hash_func) \
 	void name ## _map_put_bucket(struct name ## _map *map, key_type key, value_type value, usize bucket) { \
 		u32 hash = hash_func(key); \
+		if (hash == 0) { \
+			hash = 0x80000000; \
+		} \
 		map->hashes[bucket] = hash; \
 		map->keys[bucket] = key; \
 		map->values[bucket] = value; \
