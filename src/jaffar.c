@@ -152,6 +152,7 @@ struct VarNode *rep(struct VarNode *v) {
 DEFINE_SLICE(usize, usize);
 
 struct UnificationError commonFrontier(struct termnode_ptr_slice t_list) {
+	// TODO benchmark with and without checks for identical nodes
 	u64 sym = t_list.data[0]->symbol;
 	foreach (term, t_list) {
 		if ((*term)->symbol != sym) {
@@ -165,6 +166,7 @@ struct UnificationError commonFrontier(struct termnode_ptr_slice t_list) {
 	struct termnode_ptr_slice t0_list;
 	t0_list.cap = t0_list.size = t_list.size;
 	t0_list.data = alloca(t0_list.cap * sizeof(struct TermNode *));
+	// TODO eliminate these stacks
 	usize *s0_backing = alloca(t_list.size * sizeof(usize));
 	usize *s1_backing = alloca(t_list.size * sizeof(usize));
 	for (usize i = 0; i < a; i++) {
