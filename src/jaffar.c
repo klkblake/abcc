@@ -221,7 +221,7 @@ struct UnificationError unify(struct termnode_ptr_array t_list) {
 		return err;
 	}
 	while (queue.size > 0) {
-		struct VarNode *v = queue.data[queue.size-- - 1];
+		struct VarNode *v = array_pop(&queue);
 		u64 k = v->termCount;
 		if (k >= 2) {
 			struct termnode_ptr_array t;

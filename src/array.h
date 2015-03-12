@@ -30,6 +30,11 @@ void *array_bump_(struct u8_array *array, usize size);
 		*((typeof(_array->data))array_bump(_array)) = elem; \
 	})
 
+#define array_pop(array) ({ \
+		typeof(array) _array = (array); \
+		_array->data[_array->size-- - 1]; \
+	})
+
 void array_free(void *array);
 
 #define foreach(var, array) \
