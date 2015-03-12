@@ -1,83 +1,13 @@
 #include <stdlib.h>
 
 #include "infer_types.h"
+#include "map.h"
 
-struct type_ptr_map {
-	u32 *hashes;
-	union type **keys;
-	union type **values;
-	usize size;
-	usize num_buckets;
-};
-
-struct map_get_result {
-	union type *value;
-	usize bucket;
-};
-
-void map_grow(struct type_ptr_map *map) {
-	usize num_buckets = map->num_buckets * 2;
-	if (num_buckets == 0) {
-		num_buckets = 64;
-	}
-	u32 *hashes         = malloc(num_buckets * sizeof(u32));
-	union type **keys   = malloc(num_buckets * sizeof(union type *));
-	union type **values = malloc(num_buckets * sizeof(union type *));
-	usize mask = num_buckets - 1;
-	for (usize i = 0; i < map->num_buckets; i++) {
-		u32 hash = map->hashes[i];
-		if (hash == 0) {
-			continue;
-		}
-		usize bucket = hash & mask;
-		while (hashes[bucket] != 0) {
-			bucket = (bucket + 1) & mask;
-		}
-		hashes[bucket] = hash;
-		keys[bucket] = map->keys[i];
-		values[bucket] = map->values[i];
-	}
-	free(map->hashes);
-	free(map->keys);
-	free(map->values);
-	map->hashes = hashes;
-	map->keys = keys;
-	map->values = values;
-	map->num_buckets = num_buckets;
+u32 type_hash(union type *key) {
+	return (u32) ((u64)key / sizeof(union type));
 }
 
-struct map_get_result map_get(struct type_ptr_map *map, union type *key) {
-	if (map->num_buckets == 0) {
-		map_grow(map);
-	}
-	usize mask = map->num_buckets - 1;
-	u32 hash = (u32) ((u64)key / sizeof(union type));
-	usize bucket = hash & mask;
-	while (map->hashes[bucket] != 0) {
-		if (map->hashes[bucket] == hash && map->keys[bucket] == key) {
-			return (struct map_get_result){map->values[bucket], bucket};
-		}
-		bucket = (bucket + 1) & mask;
-	}
-	return (struct map_get_result){NULL, bucket};
-}
-
-void map_put_bucket(struct type_ptr_map *map, union type *key, union type *value, usize bucket) {
-	u32 hash = (u32) ((u64)key / sizeof(union type));
-	map->hashes[bucket] = hash;
-	map->keys[bucket] = key;
-	map->values[bucket] = value;
-	map->size++;
-	if (map->size > map->num_buckets / 2) {
-		map_grow(map);
-	}
-}
-
-void map_free(struct type_ptr_map *map) {
-	free(map->hashes);
-	free(map->keys);
-	free(map->values);
-}
+DEFINE_MAP(union type *, union type *, type_ptr, type_hash);
 
 #define CHUNK_SIZE 4096
 struct types {
@@ -118,7 +48,7 @@ union type *set_var(union type *type) {
 // TODO Use modified version of Tarjan's SCC algorithm as per
 // http://stackoverflow.com/questions/28924321/copying-part-of-a-graph
 union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *copied, struct types *types) {
-	struct map_get_result result = map_get(copied, type);
+	struct type_ptr_map_get_result result = type_ptr_map_get(copied, type);
 	if (result.value) {
 		return result.value;
 	}
@@ -129,11 +59,11 @@ union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *cop
 		if (IS_VAR(type)) {
 			type->rep = type;
 		}
-		map_put_bucket(copied, type, type, result.bucket);
+		type_ptr_map_put_bucket(copied, type, type, result.bucket);
 		return type;
 	}
 	union type *new = alloc_type(types);
-	map_put_bucket(copied, type, new, result.bucket);
+	type_ptr_map_put_bucket(copied, type, new, result.bucket);
 	if (IS_VAR(type)) {
 		new->rep = new;
 		new->terms = NULL;
