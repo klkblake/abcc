@@ -83,11 +83,9 @@ struct UnificationError {
 	u64 left, right;
 };
 
-internal struct type_ptr_array queue;
-
-void add(union type *v, union type *t) {
+void add(union type *v, union type *t, struct type_ptr_array *var_stack) {
 	if ((v->term_count &~ VAR_BIT) == 1) {
-		array_push(&queue, v);
+		array_push(var_stack, v);
 	}
 	union type *t0 = v->terms;
 	if (t0 == NULL) {
@@ -100,7 +98,7 @@ void add(union type *v, union type *t) {
 	v->term_count++;
 }
 
-void merge(union type *v1, union type *v2) {
+void merge(union type *v1, union type *v2, struct type_ptr_array *var_stack) {
 	u64 r1 = v1->var_count;
 	u64 r2 = v2->var_count;
 	union type *bigV, *v;
@@ -114,7 +112,7 @@ void merge(union type *v1, union type *v2) {
 	u64 k1 = bigV->term_count &~ VAR_BIT;
 	u64 k2 = v->term_count &~ VAR_BIT;
 	if (k1 <= 1 && k1 + k2 > 1) {
-		array_push(&queue, bigV);
+		array_push(var_stack, bigV);
 	}
 	union type *t0 = v->terms;
 	union type *t1 = bigV->terms;
@@ -148,7 +146,7 @@ union type *rep(union type *v) {
 
 DEFINE_ARRAY(usize, usize);
 
-struct UnificationError commonFrontier(struct type_ptr_array t_list) {
+struct UnificationError commonFrontier(struct type_ptr_array t_list, struct type_ptr_array *var_stack) {
 	// TODO benchmark with and without checks for identical nodes
 	u64 sym = t_list.data[0]->symbol;
 	foreach (term, t_list) {
@@ -199,14 +197,14 @@ struct UnificationError commonFrontier(struct type_ptr_array t_list) {
 			foreach (k, s0) {
 				union type *v2 = rep(t0_list.data[*k]);
 				if (v != v2) {
-					merge(v, v2);
+					merge(v, v2, var_stack);
 				}
 			}
 			foreach (k, s1) {
-				add(v, t0_list.data[*k]);
+				add(v, t0_list.data[*k], var_stack);
 			}
 		} else {
-			struct UnificationError err = commonFrontier(t0_list);
+			struct UnificationError err = commonFrontier(t0_list, var_stack);
 			if (err.left != err.right) {
 				return err;
 			}
@@ -216,14 +214,14 @@ struct UnificationError commonFrontier(struct type_ptr_array t_list) {
 }
 
 struct UnificationError unify(struct type_ptr_array t_list) {
-	queue = (struct type_ptr_array){};
-	struct UnificationError err = commonFrontier(t_list);
+	struct type_ptr_array var_stack = {};
+	struct UnificationError err = commonFrontier(t_list, &var_stack);
 	if (err.left != err.right) {
-		free(queue.data);
+		free(var_stack.data);
 		return err;
 	}
-	while (queue.size > 0) {
-		union type *v = array_pop(&queue);
+	while (var_stack.size > 0) {
+		union type *v = array_pop(&var_stack);
 		u64 k = v->term_count &~ VAR_BIT;
 		if (k >= 2) {
 			struct type_ptr_array t;
@@ -236,14 +234,14 @@ struct UnificationError unify(struct type_ptr_array t_list) {
 			}
 			t.data[0]->next = t.data[0];
 			v->term_count = 1 | VAR_BIT;
-			err = commonFrontier(t);
+			err = commonFrontier(t, &var_stack);
 			if (err.left != err.right) {
-				free(queue.data);
+				free(var_stack.data);
 				return err;
 			}
 		}
 	}
-	free(queue.data);
+	free(var_stack.data);
 	return (struct UnificationError){};
 }
 
