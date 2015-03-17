@@ -3,16 +3,8 @@
 #include <stdio.h>
 
 #include "array.h"
+#include "string.h"
 #include "type.h"
-
-// TODO move?
-struct string_rc {
-	usize size;
-	u32 refcount;
-	// Intel optimisation guide recommends at least 16 byte alignment for arrays
-	u8 pad[16 - sizeof(usize) - sizeof(u32)];
-	u8 data[];
-};
 
 #define OP_FRAME_PUSH       1
 #define OP_FRAME_POP        2

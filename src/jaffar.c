@@ -4,8 +4,8 @@
 
 #include "array.h"
 #include "map.h"
+#include "string.h"
 #include "type.h"
-#include "parser.h"
 
 internal char *names[] = {
 	"0",
