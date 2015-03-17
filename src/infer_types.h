@@ -1,6 +1,6 @@
 #ifndef ANNTYPES_H
 
-#include "parser.h"
+#include "block.h"
 
 b32 infer_types(struct block_ptr_array blocks);
 

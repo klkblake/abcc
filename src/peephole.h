@@ -1,6 +1,6 @@
 #ifndef PEEPHOLE_H
 
-#include "parser.h"
+#include "block.h"
 
 void peephole_simplify(struct block_ptr_array blocks);
 

@@ -1,7 +1,10 @@
-#include <stdlib.h>
-
 #include "infer_types.h"
+
+#include <stdlib.h>
+#include <stdio.h>
+
 #include "map.h"
+#include "type.h"
 
 u32 type_hash(union type *key) {
 	return (u32) ((u64)key / sizeof(union type));

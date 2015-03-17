@@ -10,5 +10,7 @@ struct string_rc {
 	u8 data[];
 };
 
+void string_rc_decref(struct string_rc *str);
+
 #define STRING_H
 #endif

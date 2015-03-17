@@ -1,6 +1,6 @@
-#include <stdlib.h>
-
 #include "array.h"
+
+#include <stdlib.h>
 
 void array_grow_(struct u8_array *array, usize size) {
 	if (array->cap == 0) {

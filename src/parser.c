@@ -155,14 +155,6 @@ void name ## _memo_table_free(struct name ## _memo_table *table) { \
 
 DEFINE_ARRAY(struct string_rc *, string_rc_ptr);
 
-// TODO move?
-internal
-void string_rc_decref(struct string_rc *str) {
-	if (--str->refcount == 0) {
-		free(str);
-	}
-}
-
 DEFINE_MEMO_TABLE(string_rc, struct string_rc,
                   ESCAPE_COMMAS(u8 *data, usize size),
                   jenkins_hash(data, size),
@@ -172,24 +164,6 @@ DEFINE_MEMO_TABLE(string_rc, struct string_rc,
                   { entry->size = size; memcpy(entry->data, data, size); });
 
 DEFINE_ARRAY(struct ao_stack_frame *, ao_stack_frame_ptr);
-
-internal
-void ao_stack_frame_free(struct ao_stack_frame frame) {
-	string_rc_decref(frame.word);
-	string_rc_decref(frame.file);
-}
-
-internal
-void ao_stack_frame_decref(struct ao_stack_frame *frame) {
-	if (--frame->refcount == 0) {
-		struct ao_stack_frame *next = frame->next;
-		ao_stack_frame_free(*frame);
-		free(frame);
-		if (next) {
-			ao_stack_frame_decref(next);
-		}
-	}
-}
 
 internal
 u32 hash_ao_stack_frame(struct ao_stack_frame *next, struct string_rc *word, struct string_rc *file, u32 line) {
@@ -258,27 +232,6 @@ b32 blocks_equal(struct block *a, struct block *b) {
 internal
 void block_decref(struct block *block) {
 	block->refcount--;
-}
-
-void block_free(struct block *block) {
-	for (usize i = 0, frame_index = 0, text_index = 0, sealer_index = 0; i < block->size; i++) {
-		u8 opcode = block->opcodes[i];
-		if (opcode == OP_FRAME_PUSH) {
-			ao_stack_frame_decref(block->frames[frame_index++]);
-		}
-		if (opcode == '"') {
-			string_rc_decref(block->texts[text_index++]);
-		}
-		if (opcode == OP_SEAL || opcode == OP_UNSEAL) {
-			string_rc_decref(block->sealers[sealer_index++]);
-		}
-	}
-	array_free(&block->opcodes);
-	array_free(&block->types);
-	array_free(&block->frames);
-	array_free(&block->blocks);
-	array_free(&block->texts);
-	array_free(&block->sealers);
 }
 
 DEFINE_MEMO_TABLE(block, struct block,

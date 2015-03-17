@@ -1,6 +1,6 @@
-#include <stdlib.h>
-
 #include "peephole.h"
+
+#include <stdlib.h>
 
 /*
  * This pass implements the following rewrite rules, matching in order:
