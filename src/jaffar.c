@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <alloca.h>
 #include "array.h"
+#include "map.h"
 
 // ---- START type.h ----
 
@@ -46,7 +47,6 @@ union type {
 		union type *next;
 		union type *child1;
 		union type *child2;
-		u64 seen;
 	};
 	struct {
 		union type *rep;
@@ -59,6 +59,10 @@ DEFINE_ARRAY(union type *, type_ptr);
 
 #define VAR_BIT (1ull << (sizeof(usize) * 8 - 1))
 #define IS_VAR(type) (((type)->term_count & VAR_BIT) != 0)
+
+u32 type_hash(union type *key) {
+	return (u32) ((u64)key / sizeof(union type));
+}
 
 // ---- END type.h ----
 
@@ -80,23 +84,26 @@ internal u32 arities[] = {
 	2,
 };
 
-void print_type(union type *t, u64 id) {
-	if (t->seen != id) {
-		t->seen = id;
+DEFINE_MAP(union type *, b1, type_ptr_b1, type_hash);
+
+void print_type(union type *t, u64 id, struct type_ptr_b1_map *seen) {
+	struct type_ptr_b1_map_get_result result = type_ptr_b1_map_get(seen, t);
+	if (!result.found) {
+		type_ptr_b1_map_put_bucket(seen, t, true, result.bucket);
 		if (IS_VAR(t)) {
 			printf("node_%lu_%p [label=\"%lu, %llu\"]\n", id, t, t->var_count, t->term_count &~ VAR_BIT);
 			if (t->rep != NULL) {
 				printf("node_%lu_%p -> node_%lu_%p [label=\"rep\"]\n", id, t, id, t->rep);
-				print_type(t->rep, id);
+				print_type(t->rep, id, seen);
 			}
 			if (t->terms != NULL) {
 				printf("node_%lu_%p -> node_%lu_%p [label=\"terms\"]\n", id, t, id, t->terms);
-				print_type(t->terms, id);
+				print_type(t->terms, id, seen);
 			}
 		} else {
 			if (t->next != NULL) {
 				printf("node_%lu_%p -> node_%lu_%p [label=\"next\"]\n", id, t, id, t->next);
-				print_type(t->next, id);
+				print_type(t->next, id, seen);
 			}
 			u32 arity;
 			if (IS_SEALED(t->symbol)) {
@@ -111,10 +118,10 @@ void print_type(union type *t, u64 id) {
 			}
 			if (arity > 0){
 				printf("node_%lu_%p -> node_%lu_%p [label=\"#0\"]\n", id, t, id, t->child1);
-				print_type(t->child1, id);
+				print_type(t->child1, id, seen);
 				if (arity > 1) {
 					printf("node_%lu_%p -> node_%lu_%p [label=\"#1\"]\n", id, t, id, t->child2);
-					print_type(t->child2, id);
+					print_type(t->child2, id, seen);
 				}
 			}
 		}
@@ -122,9 +129,11 @@ void print_type(union type *t, u64 id) {
 }
 
 void print_type_root(union type *t, u64 id) {
+	struct type_ptr_b1_map seen = {};
 	printf("subgraph cluster_%lu {\n", id);
-	print_type(t, id);
+	print_type(t, id, &seen);
 	printf("}\n");
+	map_free(&seen);
 }
 
 struct UnificationError {
@@ -295,7 +304,7 @@ struct UnificationError unify(struct type_ptr_array t_list) {
 	return (struct UnificationError){};
 }
 
-#define prod(n, c1, c2) union type n = { { { SYMBOL_PRODUCT }, NULL, &c1, &c2, 0 } }; n.next = &n
+#define prod(n, c1, c2) union type n = { { { SYMBOL_PRODUCT }, NULL, &c1, &c2 } }; n.next = &n
 
 int main() {
 	union type x = {};
