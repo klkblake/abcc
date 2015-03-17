@@ -213,11 +213,36 @@ struct unification_error commonFrontier(struct type_ptr_array t_list, struct typ
 	return (struct unification_error){};
 }
 
-struct unification_error unify(struct type_ptr_array t_list) {
+struct unification_error unify(union type *left, union type *right) {
 	struct type_ptr_array var_stack = {};
-	struct unification_error err = commonFrontier(t_list, &var_stack);
+	b32 left_term = !IS_VAR(left);
+	b32 right_term = !IS_VAR(right);
+	struct unification_error err = {};
+	if (left_term && right_term) {
+		// TODO benchmark with and without
+		if (left == right) {
+			return (struct unification_error){};
+		}
+		union type *terms[] = {left, right};
+		struct type_ptr_array t_list = {terms, 2, 2};
+		err = commonFrontier(t_list, &var_stack);
+	} else if (left_term) {
+		union type* right_rep = rep(right);
+		add(right_rep, left, &var_stack);
+	} else if (right_term) {
+		union type* left_rep = rep(left);
+		add(left_rep, right, &var_stack);
+	} else {
+		union type* left_rep = rep(left);
+		union type* right_rep = rep(right);
+		if (left_rep != right_rep) {
+			merge(left_rep, right_rep, &var_stack);
+		} else {
+			return (struct unification_error){};
+		}
+	}
 	if (err.left != err.right) {
-		free(var_stack.data);
+		array_free(&var_stack);
 		return err;
 	}
 	while (var_stack.size > 0) {
@@ -236,12 +261,12 @@ struct unification_error unify(struct type_ptr_array t_list) {
 			v->term_count = 1 | VAR_BIT;
 			err = commonFrontier(t, &var_stack);
 			if (err.left != err.right) {
-				free(var_stack.data);
+				array_free(&var_stack);
 				return err;
 			}
 		}
 	}
-	free(var_stack.data);
+	array_free(&var_stack);
 	return (struct unification_error){};
 }
 
@@ -262,7 +287,7 @@ int main() {
 	expr2.next = &expr1;
 	printf("digraph {\n");
 	print_type_root(&expr1, 1);
-	struct unification_error err = unify((struct type_ptr_array){(union type *[]){ &expr1, &expr2 }, 2, 2});
+	struct unification_error err = unify(&expr1, &expr2);
 	if (err.left != err.right) {
 		printf("Error: %lu, %lu\n", err.left, err.right);
 		return 1;
