@@ -79,7 +79,7 @@ void print_type_root(union type *t, u64 id) {
 	map_free(&seen);
 }
 
-struct UnificationError {
+struct unification_error {
 	u64 left, right;
 };
 
@@ -146,12 +146,12 @@ union type *rep(union type *v) {
 
 DEFINE_ARRAY(usize, usize);
 
-struct UnificationError commonFrontier(struct type_ptr_array t_list, struct type_ptr_array *var_stack) {
+struct unification_error commonFrontier(struct type_ptr_array t_list, struct type_ptr_array *var_stack) {
 	// TODO benchmark with and without checks for identical nodes
 	u64 sym = t_list.data[0]->symbol;
 	foreach (term, t_list) {
 		if ((*term)->symbol != sym) {
-			return (struct UnificationError){
+			return (struct unification_error){
 				.left =  sym,
 				.right = (*term)->symbol,
 			};
@@ -204,18 +204,18 @@ struct UnificationError commonFrontier(struct type_ptr_array t_list, struct type
 				add(v, t0_list.data[*k], var_stack);
 			}
 		} else {
-			struct UnificationError err = commonFrontier(t0_list, var_stack);
+			struct unification_error err = commonFrontier(t0_list, var_stack);
 			if (err.left != err.right) {
 				return err;
 			}
 		}
 	}
-	return (struct UnificationError){};
+	return (struct unification_error){};
 }
 
-struct UnificationError unify(struct type_ptr_array t_list) {
+struct unification_error unify(struct type_ptr_array t_list) {
 	struct type_ptr_array var_stack = {};
-	struct UnificationError err = commonFrontier(t_list, &var_stack);
+	struct unification_error err = commonFrontier(t_list, &var_stack);
 	if (err.left != err.right) {
 		free(var_stack.data);
 		return err;
@@ -242,7 +242,7 @@ struct UnificationError unify(struct type_ptr_array t_list) {
 		}
 	}
 	free(var_stack.data);
-	return (struct UnificationError){};
+	return (struct unification_error){};
 }
 
 #define prod(n, c1, c2) union type n = { { { SYMBOL_PRODUCT }, NULL, &c1, &c2 } }; n.next = &n
@@ -262,7 +262,7 @@ int main() {
 	expr2.next = &expr1;
 	printf("digraph {\n");
 	print_type_root(&expr1, 1);
-	struct UnificationError err = unify((struct type_ptr_array){(union type *[]){ &expr1, &expr2 }, 2, 2});
+	struct unification_error err = unify((struct type_ptr_array){(union type *[]){ &expr1, &expr2 }, 2, 2});
 	if (err.left != err.right) {
 		printf("Error: %lu, %lu\n", err.left, err.right);
 		return 1;
