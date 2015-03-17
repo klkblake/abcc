@@ -24,7 +24,7 @@
 		if (num_buckets == 0) { \
 			num_buckets = 64; \
 		} \
-		u32 *hashes        = malloc(num_buckets * sizeof(u32)); \
+		u32 *hashes        = calloc(sizeof(u32), num_buckets); \
 		key_type *keys     = malloc(num_buckets * sizeof(key_type)); \
 		value_type *values = malloc(num_buckets * sizeof(value_type)); \
 		usize mask = num_buckets - 1; \
