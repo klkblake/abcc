@@ -16,19 +16,11 @@ internal char *names[] = {
 	"[->]",
 };
 
-internal u32 arities[] = {
-	0,
-	0,
-	0,
-	2,
-	2,
-	2,
-};
-
 extern u32 type_hash(union type *key);
 
 DEFINE_MAP(union type *, b1, type_ptr_b1, type_hash);
 
+internal
 void print_type(union type *t, u64 id, struct type_ptr_b1_map *seen) {
 	struct type_ptr_b1_map_get_result result = type_ptr_b1_map_get(seen, t);
 	if (!result.found) {
@@ -48,21 +40,18 @@ void print_type(union type *t, u64 id, struct type_ptr_b1_map *seen) {
 				printf("node_%lu_%p -> node_%lu_%p [label=\"next\"]\n", id, t, id, t->next);
 				print_type(t->next, id, seen);
 			}
-			u32 arity;
 			if (IS_SEALED(t->symbol)) {
 				printf("node_%lu_%p [label=\"Sealed: \\\"", id, t);
 				fwrite(t->seal->data, 1, t->seal->size, stdout);
 				printf("\\\"\"]\n");
-				arity = 1;
 			} else {
 				printf("node_%lu_%p [label=\"%s\"]\n", id, t,
 				       names[t->symbol &~ (HIGH_PTR_BIT | POLYMORPHIC_BIT)]);
-				arity = arities[t->symbol &~ (HIGH_PTR_BIT | POLYMORPHIC_BIT)];
 			}
-			if (arity > 0){
+			if (t->symbol != SYMBOL_UNIT && t->symbol != SYMBOL_NUMBER){
 				printf("node_%lu_%p -> node_%lu_%p [label=\"#0\"]\n", id, t, id, t->child1);
 				print_type(t->child1, id, seen);
-				if (arity > 1) {
+				if (!IS_SEALED(t->symbol)) {
 					printf("node_%lu_%p -> node_%lu_%p [label=\"#1\"]\n", id, t, id, t->child2);
 					print_type(t->child2, id, seen);
 				}
@@ -71,6 +60,7 @@ void print_type(union type *t, u64 id, struct type_ptr_b1_map *seen) {
 	}
 }
 
+internal
 void print_type_root(union type *t, u64 id) {
 	struct type_ptr_b1_map seen = {};
 	printf("subgraph cluster_%lu {\n", id);
@@ -83,6 +73,7 @@ struct unification_error {
 	u64 left, right;
 };
 
+internal
 void add(union type *v, union type *t, struct type_ptr_array *var_stack) {
 	if ((v->term_count &~ VAR_BIT) == 1) {
 		array_push(var_stack, v);
@@ -98,6 +89,7 @@ void add(union type *v, union type *t, struct type_ptr_array *var_stack) {
 	v->term_count++;
 }
 
+internal
 void merge(union type *v1, union type *v2, struct type_ptr_array *var_stack) {
 	u64 r1 = v1->var_count;
 	u64 r2 = v2->var_count;
@@ -131,6 +123,7 @@ void merge(union type *v1, union type *v2, struct type_ptr_array *var_stack) {
 	bigV->term_count = (k1 + k2) | VAR_BIT;
 }
 
+internal
 union type *rep(union type *v) {
 	union type *v0 = v->rep;
 	while (v0 != v0->rep) {
@@ -146,6 +139,7 @@ union type *rep(union type *v) {
 
 DEFINE_ARRAY(usize, usize);
 
+internal
 struct unification_error commonFrontier(struct type_ptr_array t_list, struct type_ptr_array *var_stack) {
 	// TODO benchmark with and without checks for identical nodes
 	u64 sym = t_list.data[0]->symbol;
@@ -160,8 +154,10 @@ struct unification_error commonFrontier(struct type_ptr_array t_list, struct typ
 	u64 a;
 	if (IS_SEALED(sym)) {
 		a = 1;
+	} else if (sym == SYMBOL_UNIT || sym == SYMBOL_NUMBER) {
+		a = 0;
 	} else {
-		a = arities[sym &~ (HIGH_PTR_BIT | POLYMORPHIC_BIT)];
+		a = 2;
 	}
 	struct type_ptr_array t0_list;
 	t0_list.cap = t0_list.size = t_list.size;
@@ -213,6 +209,7 @@ struct unification_error commonFrontier(struct type_ptr_array t_list, struct typ
 	return (struct unification_error){};
 }
 
+internal
 struct unification_error unify(union type *left, union type *right) {
 	struct type_ptr_array var_stack = {};
 	b32 left_term = !IS_VAR(left);

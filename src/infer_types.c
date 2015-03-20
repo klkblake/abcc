@@ -21,6 +21,7 @@ struct types {
 	union type *text;
 };
 
+internal
 union type *alloc_type(struct types *types) {
 	if (types->used == CHUNK_SIZE || types->chunks.size == 0) {
 		array_push(&types->chunks, malloc(CHUNK_SIZE * sizeof(union type)));
@@ -29,6 +30,7 @@ union type *alloc_type(struct types *types) {
 	return &types->chunks.data[types->chunks.size - 1][types->used++];
 }
 
+internal
 union type *set_term(union type *type, u64 symbol, union type *c1, union type *c2) {
 	type->symbol = symbol;
 	type->child1 = c1;
@@ -36,6 +38,7 @@ union type *set_term(union type *type, u64 symbol, union type *c1, union type *c
 	return type;
 }
 
+internal
 union type *set_sealed(union type *type, struct string_rc *seal, union type *ty) {
 	type->seal = seal;
 	type->child1 = ty;
@@ -43,6 +46,7 @@ union type *set_sealed(union type *type, struct string_rc *seal, union type *ty)
 }
 
 #define var() set_var(alloc_type(types))
+internal
 union type *set_var(union type *type) {
 	type->term_count = VAR_BIT;
 	return type;
@@ -50,6 +54,7 @@ union type *set_var(union type *type) {
 
 // TODO Use modified version of Tarjan's SCC algorithm as per
 // http://stackoverflow.com/questions/28924321/copying-part-of-a-graph
+internal
 union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *copied, struct types *types) {
 	struct type_ptr_map_get_result result = type_ptr_map_get(copied, type);
 	if (result.value) {
@@ -87,6 +92,7 @@ union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *cop
 	return new;
 }
 
+internal
 union type *inst(union type *type, struct types *types) {
 	struct type_ptr_map seen = {};
 	union type *result = inst_copy(type, true, &seen, types);
@@ -94,6 +100,7 @@ union type *inst(union type *type, struct types *types) {
 	return result;
 }
 
+internal
 union type *rep(union type *v) {
 	union type *v0 = v->rep;
 	while (v0 != v0->rep) {
@@ -107,6 +114,7 @@ union type *rep(union type *v) {
 	return v0;
 }
 
+internal
 void remove_vars_from_term(union type *term, struct type_ptr_map *seen) {
 	if (term == NULL || term->symbol == SYMBOL_UNIT || term->symbol == SYMBOL_NUMBER) {
 		return;
@@ -133,6 +141,7 @@ void remove_vars_from_term(union type *term, struct type_ptr_map *seen) {
 }
 
 // TODO change to a type_ptr_bool_map
+internal
 void remove_vars(union type **type, struct type_ptr_map *seen) {
 	if (IS_VAR(*type)) {
 		*type = rep(*type)->terms;
@@ -217,6 +226,7 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 }
 #endif
 
+internal
 b32 infer_block(struct block *block, struct types *types) {
 
 #define prod( c1, c2) set_term(alloc_type(types), SYMBOL_PRODUCT, c1, c2)
@@ -313,7 +323,11 @@ b32 infer_block(struct block *block, struct types *types) {
 
 					//expect: *[vv*vv
 					//union type *b = inst(input->child1);
-					//err = unify(b->child1, inst(vars[2]));
+					//struct unification_error err = unify(b->child1, inst(vars[2]));
+					//if (err.left != err.right) {
+					//	print_unification_error(err, i, op);
+					//	return false;
+					//}
 					//struct type_ptr_map seen;
 					//remove_vars(b->child2, &seen);
 					//remove_vars(vars[3], &seen);
@@ -327,7 +341,11 @@ b32 infer_block(struct block *block, struct types *types) {
 					//expect: *[vv*[vvv
 					//union type *b1 = inst(input->child1);
 					//union type *b2 = inst(input->child2->child1);
-					//err = unify(b1->child2, b2->child1);
+					//struct unification_error err = unify(b1->child2, b2->child1);
+					//if (err.left != err.right) {
+					//	print_unification_error(err, i, op);
+					//	return false;
+					//}
 					//struct type_ptr_map seen;
 					//remove_vars(b1->child1, &seen);
 					//remove_vars(b2->child2, &seen);
@@ -371,7 +389,11 @@ b32 infer_block(struct block *block, struct types *types) {
 				{
 					//expect: *[vv*+vvv
 					//union type *b = inst(input->child1);
-					//err = unify(b->child1, inst(vars[2]));
+					//struct unification_error err = unify(b->child1, inst(vars[2]));
+					//if (err.left != err.right) {
+					//	print_unification_error(err, i, op);
+					//	return false;
+					//}
 					//struct type_ptr_map seen;
 					//remove_vars(b->child2, &seen);
 					//remove_vars(vars[3], &seen);
@@ -387,7 +409,11 @@ b32 infer_block(struct block *block, struct types *types) {
 				{
 					//expect: *+vvv
 					//union type *a = inst(vars[0]);
-					//err = unify(a, inst(vars[1]));
+					//struct unification_error err = unify(a, inst(vars[1]));
+					//if (err.left != err.right) {
+					//	print_unification_error(err, i, op);
+					//	return false;
+					//}
 					//struct type_ptr_map seen;
 					//remove_vars(a, &seen);
 					//remove_vars(vars[2], &seen);
