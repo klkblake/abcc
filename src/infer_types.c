@@ -94,6 +94,52 @@ union type *inst(union type *type, struct types *types) {
 	return result;
 }
 
+union type *rep(union type *v) {
+	union type *v0 = v->rep;
+	while (v0 != v0->rep) {
+		v0 = v0->rep;
+	}
+	while (v->rep != v0) {
+		union type *tmp = v->rep;
+		v->rep = v0;
+		v = tmp;
+	}
+	return v0;
+}
+
+void remove_vars_from_term(union type *term, struct type_ptr_map *seen) {
+	if (term == NULL || term->symbol == SYMBOL_UNIT || term->symbol == SYMBOL_NUMBER) {
+		return;
+	}
+	struct type_ptr_map_get_result result = type_ptr_map_get(seen, term);
+	if (result.found) {
+		return;
+	}
+	type_ptr_map_put_bucket(seen, term, term, result.bucket);
+	if (IS_VAR(term->child1)) {
+		union type *var = rep(term->child1);
+		if (var->terms) {
+			term->child1 = var->terms;
+			remove_vars_from_term(term->child1, seen);
+		}
+	}
+	if (!IS_SEALED(term->symbol) && IS_VAR(term->child2)) {
+		union type *var = rep(term->child2);
+		if (var->terms) {
+			term->child2 = var->terms;
+			remove_vars_from_term(term->child2, seen);
+		}
+	}
+}
+
+// TODO change to a type_ptr_bool_map
+void remove_vars(union type **type, struct type_ptr_map *seen) {
+	if (IS_VAR(*type)) {
+		*type = rep(*type)->terms;
+	}
+	remove_vars_from_term(*type, seen);
+}
+
 #if 0
 b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types) {
 	union type **locs[8];
@@ -267,7 +313,7 @@ b32 infer_block(struct block *block, struct types *types) {
 
 					//expect: *[vv*vv
 					//union type *b = inst(input->child1);
-					//unify(b->child1, inst(vars[2]));
+					//err = unify(b->child1, inst(vars[2]));
 					//struct type_ptr_map seen;
 					//remove_vars(b->child2, &seen);
 					//remove_vars(vars[3], &seen);
@@ -281,7 +327,7 @@ b32 infer_block(struct block *block, struct types *types) {
 					//expect: *[vv*[vvv
 					//union type *b1 = inst(input->child1);
 					//union type *b2 = inst(input->child2->child1);
-					//unify(b1->child2, b2->child1);
+					//err = unify(b1->child2, b2->child1);
 					//struct type_ptr_map seen;
 					//remove_vars(b1->child1, &seen);
 					//remove_vars(b2->child2, &seen);
@@ -325,7 +371,7 @@ b32 infer_block(struct block *block, struct types *types) {
 				{
 					//expect: *[vv*+vvv
 					//union type *b = inst(input->child1);
-					//unify(b->child1, inst(vars[2]));
+					//err = unify(b->child1, inst(vars[2]));
 					//struct type_ptr_map seen;
 					//remove_vars(b->child2, &seen);
 					//remove_vars(vars[3], &seen);
@@ -341,7 +387,7 @@ b32 infer_block(struct block *block, struct types *types) {
 				{
 					//expect: *+vvv
 					//union type *a = inst(vars[0]);
-					//unify(a, inst(vars[1]));
+					//err = unify(a, inst(vars[1]));
 					//struct type_ptr_map seen;
 					//remove_vars(a, &seen);
 					//remove_vars(vars[2], &seen);
