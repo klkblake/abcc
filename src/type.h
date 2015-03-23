@@ -5,7 +5,7 @@
 // Sealed values are pointers so they always have the high bit clear
 #define HIGH_PTR_BIT (1ull << (sizeof(void *) * 8 - 1))
 // Only blocks can be marked polymorphic
-#define POLYMORPHIC_BIT  0x8
+#define POLYMORPHIC_BIT  0x8ull
 #define POLYMORPHIC_MASK (~POLYMORPHIC_BIT)
 
 #define SYMBOL_VOID       (HIGH_PTR_BIT | 0)

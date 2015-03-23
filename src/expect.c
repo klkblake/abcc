@@ -79,8 +79,9 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			iprintf("} else if (IS_VAR(%s)) {", loc);
 			iprintf("	*%s = *types->%s;", loc, type);
 			iprintf("	%s = types->%s;", loc, type);
-			iprintf("} else if (%s->symbol != SYMBOL_%s){", loc, sym);
+			iprintf("} else if (%s->symbol != SYMBOL_%s) {", loc, sym);
 			iprintf("	printf(\"Error on opcode %%lu (%%c)\\n\", i, op);");
+			iprintf("	print_type_root(input, 1);");
 			iprintf("	return false;");
 			iprintf("}");
 			break;
@@ -118,7 +119,11 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			printf("	%s->child2 = ", loc);
 			construct(construct_directive, &var2);
 			printf(";\n");
-			iprintf("} else if (%s->symbol == SYMBOL_%s){", loc, sym);
+			if (c == '[') {
+				iprintf("} else if ((%s->symbol & POLYMORPHIC_MASK) == SYMBOL_%s) {", loc, sym);
+			} else {
+				iprintf("} else if (%s->symbol == SYMBOL_%s) {", loc, sym);
+			}
 			iprintf("	union type *loc%d = %s;", varid, loc);
 			usize len = 3 /* loc */ + 10 /* varid */ + 8 /* ->childN */ + 1 /* NUL */;
 			char *loc1 = alloca(len);
@@ -129,6 +134,7 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			directive = consume(directive, var, indent + 1, loc2, varid + 2);
 			iprintf("} else {");
 			iprintf("	printf(\"Error on opcode %%lu (%%c)\\n\", i, op);");
+			iprintf("	print_type_root(input, 1);");
 			iprintf("	return false;");
 			iprintf("}");
 			break;

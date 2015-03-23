@@ -12,8 +12,24 @@ usize count_ops(struct block_ptr_array blocks) {
 	return ops;
 }
 
-int main() {
-	struct parse_result result = parse(stdin);
+int main(int argc, char **argv) {
+	FILE *input;
+	switch (argc) {
+		case 1:
+			input = stdin;
+			break;
+		case 2:
+			input = fopen(argv[1], "r");
+			if (!input) {
+				perror("abcc: ");
+				return 1;
+			}
+			break;
+		default:
+			printf("Too many arguments!\n");
+			return 1;
+	}
+	struct parse_result result = parse(input);
 	foreach (error, result.errors) {
 		print_parse_error(*error);
 		array_free(&error->line);
