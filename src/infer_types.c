@@ -243,12 +243,33 @@ internal
 struct unification_error commonFrontier(struct type_ptr_array t_list, struct type_ptr_array *var_stack) {
 	// TODO benchmark with and without checks for identical nodes
 	u64 sym = t_list.data[0]->symbol;
-	foreach (term, t_list) {
-		if ((*term)->symbol != sym) {
-			return (struct unification_error){
-				.left =  sym,
-				.right = (*term)->symbol,
-			};
+	if (IS_SEALED(sym)) {
+		foreach (term, t_list) {
+			if ((*term)->symbol != sym) {
+				return (struct unification_error){
+					.left =  sym,
+					.right = (*term)->symbol,
+				};
+			}
+		}
+	} else {
+		u64 all = sym;
+		sym &= POLYMORPHIC_MASK;
+		foreach (term, t_list) {
+			if (((*term)->symbol & POLYMORPHIC_MASK) != sym) {
+				return (struct unification_error){
+					.left =  sym,
+					.right = (*term)->symbol,
+				};
+			}
+			all &= (*term)->symbol;
+		}
+		// TODO check whether we need to do this for all, or just for
+		// the first.
+		if (!(all & POLYMORPHIC_BIT)) {
+			foreach (term, t_list) {
+				(*term)->symbol &= POLYMORPHIC_MASK;
+			}
 		}
 	}
 	u64 a;
