@@ -123,19 +123,26 @@ void print_type_root(union type *t, u64 id) {
 // http://stackoverflow.com/questions/28924321/copying-part-of-a-graph
 internal
 union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *copied, struct types *types) {
-	struct type_ptr_map_get_result result = type_ptr_map_get(copied, type);
-	if (result.found) {
-		return result.value;
+	struct type_ptr_map_get_result map_result = type_ptr_map_get(copied, type);
+	if (map_result.found) {
+		if (IS_VAR(map_result.value)) {
+			return map_result.value;
+		} else {
+			// Break potential loops
+			union type *result = var();
+			result->terms = map_result.value;
+			result->term_count = VAR_BIT | 1;
+			return result;
+		}
 	}
 	if ((IS_VAR(type) && share_vars)  ||
 	    type->symbol == SYMBOL_UNIT   ||
-	    type->symbol == SYMBOL_NUMBER ||
-	    type == types->text) {
-		type_ptr_map_put_bucket(copied, type, type, result.bucket);
+	    type->symbol == SYMBOL_NUMBER) {
+		type_ptr_map_put_bucket(copied, type, type, map_result.bucket);
 		return type;
 	}
 	union type *new = alloc_type(types);
-	type_ptr_map_put_bucket(copied, type, new, result.bucket);
+	type_ptr_map_put_bucket(copied, type, new, map_result.bucket);
 	if (IS_VAR(type)) {
 		new->rep = new;
 		new->terms = NULL;
@@ -170,7 +177,7 @@ struct unification_error {
 
 internal
 void print_unification_error(struct unification_error err, usize i, u8 op) {
-	printf("Error on opcode %lu (%c), matching %lu against %lu\n", i, op, err.left, err.right);
+	printf("Error on opcode %lu (%c), matching %lx against %lx\n", i, op, err.left, err.right);
 }
 
 internal
@@ -506,6 +513,8 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 }
 #endif
 
+// TODO be consistent with stdout/stderr
+// TODO clean up error reporting
 internal
 b32 infer_block(struct block *block, struct types *types) {
 
@@ -553,8 +562,20 @@ b32 infer_block(struct block *block, struct types *types) {
 					struct string_rc *seal = block->sealers[sealer_index++];
 					//expect: *vv
 					if (!IS_VAR(vars[0])) {
-						if (vars[0]->seal != seal) {
-							return false; // TODO error
+						if (IS_SEALED(vars[0]->symbol)) {
+							if (vars[0]->seal != seal) {
+								printf("Error on opcode %lu (%c), attempted to unseal value sealed with \"", i, op);
+								fwrite(vars[0]->seal->data, 1, vars[0]->seal->size, stdout);
+								printf("\" using unsealer \"");
+								fwrite(seal->data, 1, seal->size, stdout);
+								printf("\"\n");
+								return false;
+							}
+						} else {
+							printf("Error on opcode %lu, unsealing non-sealed value %lx with sealer \"", i, vars[0]->symbol);
+							fwrite(seal->data, 1, seal->size, stdout);
+							printf("\"\n");
+							return false;
 						}
 					} else {
 						set_sealed(vars[0], seal, var());
