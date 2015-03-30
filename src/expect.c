@@ -84,7 +84,7 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			iprintf("	print_symbol(%s->symbol);", loc);
 			iprintf("	putchar('\\n');");
 			iprintf("	print_type_root(input, 1);");
-			iprintf("	return false;");
+			iprintf("	fail();");
 			iprintf("}");
 			break;
 		case '*':
@@ -142,7 +142,7 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			iprintf("	print_symbol(%s->symbol);", loc);
 			iprintf("	putchar('\\n');");
 			iprintf("	print_type_root(input, 1);");
-			iprintf("	return false;");
+			iprintf("	fail();");
 			iprintf("}");
 			break;
 		default:

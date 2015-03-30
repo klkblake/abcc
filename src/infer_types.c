@@ -541,7 +541,8 @@ b32 infer_block(struct block *block, struct types *types) {
 
 	block->types = malloc((block->size + 1) * sizeof(union type *));
 	block->types[0] = var();
-	for (usize i = 0, block_index = 0, sealer_index = 0; i < block->size; i++) {
+	struct ao_stack_frame *frame = NULL;
+	for (usize i = 0, frame_index = 0, block_index = 0, sealer_index = 0; i < block->size; i++) {
 		u8 op = block->opcodes[i];
 		union type *input = block->types[i];
 		union type *output;
@@ -554,10 +555,15 @@ b32 infer_block(struct block *block, struct types *types) {
 #endif
 #define output(type) output = (type); break
 //#define optype(pat, type) expect(pat); output(type)
+#define fail() print_backtrace(frame); return false
 		switch (op) {
 			// Identity opcodes
 			case OP_FRAME_PUSH:
+				frame = block->frames[frame_index++];
+				output(input);
 			case OP_FRAME_POP:
+				frame = frame->next;
+				output(input);
 			case OP_DEBUG_PRINT_RAW:
 				output(input);
 
@@ -585,7 +591,7 @@ b32 infer_block(struct block *block, struct types *types) {
 								printf("\" using unsealer \"");
 								print_string(seal);
 								printf("\"\n");
-								return false;
+								fail();
 							}
 						} else {
 							printf("Error on opcode %lu, unsealing non-sealed value ", i);
@@ -593,7 +599,7 @@ b32 infer_block(struct block *block, struct types *types) {
 							printf(" with sealer \"");
 							print_string(seal);
 							printf("\"\n");
-							return false;
+							fail();
 						}
 					} else {
 						set_sealed(vars[0], seal, var());
@@ -645,7 +651,7 @@ b32 infer_block(struct block *block, struct types *types) {
 					struct unification_error err = unify(b->child1, inst(vars[2], types));
 					if (err.left != err.right) {
 						print_unification_error(err, i, op);
-						return false;
+						fail();
 					}
 					struct type_ptr_map seen = {};
 					remove_vars(&b->child2, &seen);
@@ -661,7 +667,7 @@ b32 infer_block(struct block *block, struct types *types) {
 					struct unification_error err = unify(b1->child2, b2->child1);
 					if (err.left != err.right) {
 						print_unification_error(err, i, op);
-						return false;
+						fail();
 					}
 					struct type_ptr_map seen = {};
 					remove_vars(&b1->child1, &seen);
@@ -707,7 +713,7 @@ b32 infer_block(struct block *block, struct types *types) {
 					struct unification_error err = unify(b->child1, inst(vars[2], types));
 					if (err.left != err.right) {
 						print_unification_error(err, i, op);
-						return false;
+						fail();
 					}
 					struct type_ptr_map seen = {};
 					remove_vars(&b->child2, &seen);
@@ -725,7 +731,7 @@ b32 infer_block(struct block *block, struct types *types) {
 					struct unification_error err = unify(a, inst(vars[1], types));
 					if (err.left != err.right) {
 						print_unification_error(err, i, op);
-						return false;
+						fail();
 					}
 					struct type_ptr_map seen = {};
 					remove_vars(&a, &seen);

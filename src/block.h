@@ -32,6 +32,8 @@ struct block {
 };
 DEFINE_ARRAY(struct block *, block_ptr);
 
+void print_backtrace(struct ao_stack_frame *frame);
+
 void ao_stack_frame_decref(struct ao_stack_frame *frame);
 
 void block_free(struct block *block);

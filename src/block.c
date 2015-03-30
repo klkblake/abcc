@@ -1,8 +1,24 @@
 #include "block.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "string.h"
+
+void print_backtrace(struct ao_stack_frame *frame) {
+	printf("Backtrace:\n");
+	if (frame == NULL) {
+		printf("No backtrace data available");
+		return;
+	}
+	while (frame != NULL) {
+		print_string(frame->file);
+		printf(":%u: ", frame->line);
+		print_string(frame->word);
+		putchar('\n');
+		frame = frame->next;
+	}
+}
 
 internal
 void ao_stack_frame_free(struct ao_stack_frame frame) {
