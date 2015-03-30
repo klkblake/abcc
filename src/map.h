@@ -18,8 +18,9 @@
 		b32 found; \
 	};
 
+#define DEFINE_MAP_GROW_SIG(name) void name ## _map_grow(struct name ## _map *map)
 #define DEFINE_MAP_GROW(key_type, value_type, name) \
-	void name ## _map_grow(struct name ## _map *map) { \
+	DEFINE_MAP_GROW_SIG(name) { \
 		usize num_buckets = map->num_buckets * 2; \
 		if (num_buckets == 0) { \
 			num_buckets = 64; \
@@ -50,8 +51,9 @@
 		map->num_buckets = num_buckets; \
 	}
 
+#define DEFINE_MAP_GET_SIG(key_type, name) struct name ## _map_get_result name ## _map_get(struct name ## _map *map, key_type key)
 #define DEFINE_MAP_GET(key_type, value_type, name, hash_func) \
-	struct name ## _map_get_result name ## _map_get(struct name ## _map *map, key_type key) { \
+	DEFINE_MAP_GET_SIG(key_type, name) { \
 		if (map->num_buckets == 0) { \
 			name ## _map_grow(map); \
 		} \
@@ -70,8 +72,9 @@
 		return (struct name ## _map_get_result){.bucket = bucket, .found = false}; \
 	}
 
+#define DEFINE_MAP_PUT_BUCKET_SIG(key_type, value_type, name) void name ## _map_put_bucket(struct name ## _map *map, key_type key, value_type value, usize bucket)
 #define DEFINE_MAP_PUT_BUCKET(key_type, value_type, name, hash_func) \
-	void name ## _map_put_bucket(struct name ## _map *map, key_type key, value_type value, usize bucket) { \
+	DEFINE_MAP_PUT_BUCKET_SIG(key_type, value_type, name) { \
 		u32 hash = hash_func(key); \
 		if (hash == 0) { \
 			hash = 0x80000000; \
@@ -84,6 +87,18 @@
 			name ## _map_grow(map); \
 		} \
 	}
+
+#define DEFINE_MAP_HEADER(key_type, value_type, name) \
+	DEFINE_MAP_STRUCT(key_type, value_type, name); \
+	DEFINE_MAP_RESULT_STRUCT(value_type, name); \
+	DEFINE_MAP_GROW_SIG(name); \
+	DEFINE_MAP_GET_SIG(key_type, name); \
+	DEFINE_MAP_PUT_BUCKET_SIG(key_type, value_type, name);
+
+#define DEFINE_MAP_IMPL(key_type, value_type, name, hash_func) \
+	DEFINE_MAP_GROW(key_type, value_type, name); \
+	DEFINE_MAP_GET(key_type, value_type, name, hash_func); \
+	DEFINE_MAP_PUT_BUCKET(key_type, value_type, name, hash_func);
 
 #define DEFINE_MAP(key_type, value_type, name, hash_func) \
 	DEFINE_MAP_STRUCT(key_type, value_type, name); \

@@ -7,12 +7,6 @@
 #include "map.h"
 #include "type.h"
 
-u32 type_hash(union type *key) {
-	return (u32) ((u64)key / sizeof(union type));
-}
-
-DEFINE_MAP(union type *, union type *, type_ptr, type_hash);
-
 #define CHUNK_SIZE 4096
 struct types {
 	struct type_ptr_array chunks;
@@ -57,8 +51,6 @@ union type *set_var(union type *type) {
 	type->var_count = 0;
 	return type;
 }
-
-DEFINE_MAP(union type *, b1, type_ptr_b1, type_hash);
 
 internal
 void print_symbol(u64 symbol) {
