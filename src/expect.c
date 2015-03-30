@@ -80,7 +80,9 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			iprintf("	*%s = *types->%s;", loc, type);
 			iprintf("	%s = types->%s;", loc, type);
 			iprintf("} else if (%s->symbol != SYMBOL_%s) {", loc, sym);
-			iprintf("	printf(\"Error on opcode %%lu (%%c)\\n\", i, op);");
+			iprintf("	printf(\"Error on opcode %%lu (%%c), expected %s, got \", i, op);", type);
+			iprintf("	print_symbol(%s->symbol);", loc);
+			iprintf("	putchar('\\n');");
 			iprintf("	print_type_root(input, 1);");
 			iprintf("	return false;");
 			iprintf("}");
@@ -91,12 +93,15 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			switch (c) {
 				case '*':
 					sym = "PRODUCT";
+					type = "product";
 					break;
 				case '+':
 					sym = "SUM";
+					type = "sum";
 					break;
 				case '[':
 					sym = "BLOCK";
+					type = "block";
 					break;
 			}
 			if (loc > 0) {
@@ -133,7 +138,9 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			directive = consume(directive, var, indent + 1, loc1, varid + 1);
 			directive = consume(directive, var, indent + 1, loc2, varid + 2);
 			iprintf("} else {");
-			iprintf("	printf(\"Error on opcode %%lu (%%c)\\n\", i, op);");
+			iprintf("	printf(\"Error on opcode %%lu (%%c), expected %s, got \", i, op);", type);
+			iprintf("	print_symbol(%s->symbol);", loc);
+			iprintf("	putchar('\\n');");
 			iprintf("	print_type_root(input, 1);");
 			iprintf("	return false;");
 			iprintf("}");

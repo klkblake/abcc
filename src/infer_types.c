@@ -61,14 +61,25 @@ union type *set_var(union type *type) {
 DEFINE_MAP(union type *, b1, type_ptr_b1, type_hash);
 
 internal
-char *names[] = {
-	"0",
-	"1",
-	"N",
-	"*",
-	"+",
-	"[->]",
-};
+void print_symbol(u64 symbol) {
+	if (IS_SEALED(symbol)) {
+		struct string_rc *seal = (struct string_rc *) symbol;
+		printf("seal \"");
+		print_string(seal);
+		putchar('"');
+	} else {
+		switch (symbol) {
+			case SYMBOL_VOID:    printf("void");    break;
+			case SYMBOL_UNIT:    printf("unit");    break;
+			case SYMBOL_NUMBER:  printf("number");  break;
+			case SYMBOL_PRODUCT: printf("product"); break;
+			case SYMBOL_SUM:     printf("sum");     break;
+			case SYMBOL_BLOCK:   printf("block");   break;
+			case SYMBOL_BLOCK | POLYMORPHIC_BIT: printf("polymorphic block"); break;
+			default: printf("unknown symbol %llx", symbol &~ HIGH_PTR_BIT); break;
+		}
+	}
+}
 
 internal
 void print_type(union type *t, u64 id, struct type_ptr_b1_map *seen) {
@@ -92,11 +103,12 @@ void print_type(union type *t, u64 id, struct type_ptr_b1_map *seen) {
 			}
 			if (IS_SEALED(t->symbol)) {
 				printf("node_%lu_%p [label=\"Sealed: \\\"", id, t);
-				fwrite(t->seal->data, 1, t->seal->size, stdout);
+				print_string(t->seal);
 				printf("\\\"\"]\n");
 			} else {
-				printf("node_%lu_%p [label=\"%s\"]\n", id, t,
-				       names[t->symbol &~ (HIGH_PTR_BIT | POLYMORPHIC_BIT)]);
+				printf("node_%lu_%p [label=\"", id, t);
+				print_symbol(t->symbol);
+				printf("\"]\n");
 			}
 			if (t->symbol != SYMBOL_UNIT && t->symbol != SYMBOL_NUMBER){
 				printf("node_%lu_%p -> node_%lu_%p [label=\"#0\"]\n", id, t, id, t->child1);
@@ -177,7 +189,11 @@ struct unification_error {
 
 internal
 void print_unification_error(struct unification_error err, usize i, u8 op) {
-	printf("Error on opcode %lu (%c), matching %lx against %lx\n", i, op, err.left, err.right);
+	printf("Error on opcode %lu (%c), matching ", i, op);
+	print_symbol(err.left);
+	printf(" against ");
+	print_symbol(err.right);
+	putchar('\n');
 }
 
 internal
@@ -565,15 +581,17 @@ b32 infer_block(struct block *block, struct types *types) {
 						if (IS_SEALED(vars[0]->symbol)) {
 							if (vars[0]->seal != seal) {
 								printf("Error on opcode %lu (%c), attempted to unseal value sealed with \"", i, op);
-								fwrite(vars[0]->seal->data, 1, vars[0]->seal->size, stdout);
+								print_string(vars[0]->seal);
 								printf("\" using unsealer \"");
-								fwrite(seal->data, 1, seal->size, stdout);
+								print_string(seal);
 								printf("\"\n");
 								return false;
 							}
 						} else {
-							printf("Error on opcode %lu, unsealing non-sealed value %lx with sealer \"", i, vars[0]->symbol);
-							fwrite(seal->data, 1, seal->size, stdout);
+							printf("Error on opcode %lu, unsealing non-sealed value ", i);
+							print_symbol(vars[0]->symbol);
+							printf(" with sealer \"");
+							print_string(seal);
 							printf("\"\n");
 							return false;
 						}
