@@ -410,15 +410,15 @@ struct unification_error unify(union type *left, union type *right) {
 }
 
 internal
-void remove_vars_from_term(union type *term, struct type_ptr_map *seen) {
+void remove_vars_from_term(union type *term, struct type_ptr_b1_map *seen) {
 	if (term == NULL || term->symbol == SYMBOL_UNIT || term->symbol == SYMBOL_NUMBER) {
 		return;
 	}
-	struct type_ptr_map_get_result result = type_ptr_map_get(seen, term);
+	struct type_ptr_b1_map_get_result result = type_ptr_b1_map_get(seen, term);
 	if (result.found) {
 		return;
 	}
-	type_ptr_map_put_bucket(seen, term, term, result.bucket);
+	type_ptr_b1_map_put_bucket(seen, term, true, result.bucket);
 	if (IS_VAR(term->child1)) {
 		union type *var = rep(term->child1);
 		if (var->terms) {
@@ -435,9 +435,8 @@ void remove_vars_from_term(union type *term, struct type_ptr_map *seen) {
 	}
 }
 
-// TODO change to a type_ptr_bool_map
 internal
-void remove_vars(union type **type, struct type_ptr_map *seen) {
+void remove_vars(union type **type, struct type_ptr_b1_map *seen) {
 	if (IS_VAR(*type)) {
 		*type = rep(*type);
 		if (!(*type)->terms) {
@@ -652,10 +651,6 @@ b32 infer_block(struct block *block, struct types *types) {
 
 			case '$': // TODO incorporate fixpoint stuff for semi-polymorphic recursion
 				{
-					// XXX Fully typed types are self contained (but not necessarily vice versa)
-					// Perhaps call them known types, since they may have variables?
-					// inst must *only* copy polymorphic parts of the type
-
 					//expect: *[vv*vv
 					union type *b = inst(input->child1, types);
 					struct unification_error err = unify(b->child1, inst(vars[2], types));
@@ -663,7 +658,7 @@ b32 infer_block(struct block *block, struct types *types) {
 						print_unification_error(i, op, err, input->child1->child1, vars[2]);
 						fail();
 					}
-					struct type_ptr_map seen = {};
+					struct type_ptr_b1_map seen = {};
 					remove_vars(&b->child2, &seen);
 					remove_vars(&vars[3], &seen);
 					map_free(&seen);
@@ -679,7 +674,7 @@ b32 infer_block(struct block *block, struct types *types) {
 						print_unification_error(i, op, err, input->child1->child2, input->child2->child1->child1);
 						fail();
 					}
-					struct type_ptr_map seen = {};
+					struct type_ptr_b1_map seen = {};
 					remove_vars(&b1->child1, &seen);
 					remove_vars(&b2->child2, &seen);
 					remove_vars(&vars[4], &seen);
@@ -725,7 +720,7 @@ b32 infer_block(struct block *block, struct types *types) {
 						print_unification_error(i, op, err, input->child1->child1, vars[2]);
 						fail();
 					}
-					struct type_ptr_map seen = {};
+					struct type_ptr_b1_map seen = {};
 					remove_vars(&b->child2, &seen);
 					remove_vars(&vars[3], &seen);
 					remove_vars(&vars[4], &seen);
@@ -743,7 +738,7 @@ b32 infer_block(struct block *block, struct types *types) {
 						print_unification_error(i, op, err, vars[0], vars[1]);
 						fail();
 					}
-					struct type_ptr_map seen = {};
+					struct type_ptr_b1_map seen = {};
 					remove_vars(&a, &seen);
 					remove_vars(&vars[2], &seen);
 					map_free(&seen);
