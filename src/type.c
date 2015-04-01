@@ -68,6 +68,7 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 			array_push(buf, '{');
 			union type *term = type->terms;
 			for (usize i = 0; i < term_count; i++) {
+				// TODO consider printing out the full type
 				if (i != 0) {
 					array_push(buf, ',');
 				}

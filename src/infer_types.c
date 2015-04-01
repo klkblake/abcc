@@ -159,6 +159,7 @@ union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *cop
 	}
 	new->symbol = type->symbol;
 	new->next = new;
+	new->term_count = 0; // Set as term
 	new->child1 = inst_copy(type->child1, share_vars, copied, types);
 	if (IS_SEALED(type->symbol)) {
 		return new;
@@ -759,8 +760,9 @@ b32 infer_block(struct block *block, struct types *types) {
 		}
 		block->types[i+1] = output;
 	}
-	printf(" === INFERRED TYPES ===\n");
-	print_all_types(block->types, block->size + 1);
+	// TODO make this conditional on a command line flag
+	//printf(" === INFERRED TYPES ===\n");
+	//print_all_types(block->types, block->size + 1);
 	return true;
 }
 
