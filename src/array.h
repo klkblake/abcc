@@ -19,15 +19,15 @@ DEFINE_ARRAY(u8, u8);
 
 void array_grow_(struct u8_array *array, usize size);
 void array_trim_(struct u8_array *array, usize size);
-void *array_bump_(struct u8_array *array, usize size);
+void *array_bump_(struct u8_array *array, usize num, usize size);
 
 #define array_grow(array) array_grow_((struct u8_array *) (array), sizeof((array)->data[0]))
 #define array_trim(array) array_trim_((struct u8_array *) (array), sizeof((array)->data[0]))
-#define array_bump(array) array_bump_((struct u8_array *) (array), sizeof((array)->data[0]))
+#define array_bump(array, num) array_bump_((struct u8_array *) (array), (num), sizeof((array)->data[0]))
 
 #define array_push(array, elem) ({ \
 		typeof(array) _array = (array); \
-		*((typeof(_array->data))array_bump(_array)) = elem; \
+		*((typeof(_array->data))array_bump(_array, 1)) = elem; \
 	})
 
 #define array_pop(array) ({ \

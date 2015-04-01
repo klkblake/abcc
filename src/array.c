@@ -22,11 +22,11 @@ void array_trim_(struct u8_array *array, usize size) {
 	}
 }
 
-void *array_bump_(struct u8_array *array, usize size) {
-	if (array->size == array->cap) {
+void *array_bump_(struct u8_array *array, usize num, usize size) {
+	while (array->size + num - 1 >= array->cap) {
 		array_grow_(array, size);
 	}
-	array->size++;
+	array->size += num;
 	return &array->data[(array->size - 1) * size];
 }
 
