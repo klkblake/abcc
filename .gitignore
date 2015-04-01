@@ -3,12 +3,4 @@ expect
 src/infer_types.gen.c
 all
 words/
-dist
-cabal-dev
 *.o
-*.hi
-*.chi
-*.chs.h
-*.ibc
-.virthualenv
-*~
