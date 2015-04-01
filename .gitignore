@@ -1,6 +1,8 @@
 abcc
 expect
 src/infer_types.gen.c
+all
+words/
 dist
 cabal-dev
 *.o

@@ -1,0 +1,9 @@
+#!/bin/bash
+set -e
+mkdir -p words
+rm -f words/*
+time ao list '*' | while read w
+do
+	echo "$w"
+	ao abc.ann "$w" > words/w-"$(echo "$w" | tr '/' '@')"
+done
