@@ -54,6 +54,7 @@ static_assert(offsetof(union type, child1) == offsetof(union type, term_count), 
 #define VAR_BIT (1ull << (sizeof(usize) * 8 - 1))
 #define IS_VAR(type) (((type)->term_count & VAR_BIT) != 0)
 
+void print_type(union type *type);
 
 #define TYPE_H
 #endif

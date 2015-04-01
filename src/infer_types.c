@@ -180,11 +180,15 @@ struct unification_error {
 };
 
 internal
-void print_unification_error(struct unification_error err, usize i, u8 op) {
+void print_unification_error(usize i, u8 op, struct unification_error err, union type *left, union type *right) {
 	printf("Error on opcode %lu (%c), matching ", i, op);
 	print_symbol(err.left);
 	printf(" against ");
 	print_symbol(err.right);
+	printf(", while unifying\n\t");
+	print_type(left);
+	printf("\nagainst\n\t");
+	print_type(right);
 	putchar('\n');
 }
 
@@ -521,6 +525,20 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 }
 #endif
 
+internal
+void print_all_types(union type **types, usize n) {
+	union type *last = NULL;
+	for (usize j = 0; j < n; j++) {
+		if (types[j] == last) {
+			continue;
+		}
+		last = types[j];
+		printf("%lu: ", j);
+		print_type(types[j]);
+		printf("\n");
+	}
+}
+
 // TODO be consistent with stdout/stderr
 // TODO clean up error reporting
 internal
@@ -642,7 +660,7 @@ b32 infer_block(struct block *block, struct types *types) {
 					union type *b = inst(input->child1, types);
 					struct unification_error err = unify(b->child1, inst(vars[2], types));
 					if (err.left != err.right) {
-						print_unification_error(err, i, op);
+						print_unification_error(i, op, err, input->child1->child1, vars[2]);
 						fail();
 					}
 					struct type_ptr_map seen = {};
@@ -658,7 +676,7 @@ b32 infer_block(struct block *block, struct types *types) {
 					union type *b2 = inst(input->child2->child1, types);
 					struct unification_error err = unify(b1->child2, b2->child1);
 					if (err.left != err.right) {
-						print_unification_error(err, i, op);
+						print_unification_error(i, op, err, input->child1->child2, input->child2->child1->child1);
 						fail();
 					}
 					struct type_ptr_map seen = {};
@@ -704,7 +722,7 @@ b32 infer_block(struct block *block, struct types *types) {
 					union type *b = inst(input->child1, types);
 					struct unification_error err = unify(b->child1, inst(vars[2], types));
 					if (err.left != err.right) {
-						print_unification_error(err, i, op);
+						print_unification_error(i, op, err, input->child1->child1, vars[2]);
 						fail();
 					}
 					struct type_ptr_map seen = {};
@@ -722,7 +740,7 @@ b32 infer_block(struct block *block, struct types *types) {
 					union type *a = inst(vars[0], types);
 					struct unification_error err = unify(a, inst(vars[1], types));
 					if (err.left != err.right) {
-						print_unification_error(err, i, op);
+						print_unification_error(i, op, err, vars[0], vars[1]);
 						fail();
 					}
 					struct type_ptr_map seen = {};
@@ -746,6 +764,8 @@ b32 infer_block(struct block *block, struct types *types) {
 		}
 		block->types[i+1] = output;
 	}
+	printf(" === INFERRED TYPES ===\n");
+	print_all_types(block->types, block->size + 1);
 	return true;
 }
 
