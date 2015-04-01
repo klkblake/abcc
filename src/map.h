@@ -109,6 +109,9 @@
 
 DEFINE_MAP_STRUCT(void *, void *, void_ptr);
 
+void map_delete_bucket_(struct void_ptr_map * map, usize bucket);
+#define map_delete_bucket(map, bucket) map_delete_bucket_((struct void_ptr_map *) map, bucket)
+
 void map_free_(struct void_ptr_map * map);
 #define map_free(map) map_free_((struct void_ptr_map *) map)
 
