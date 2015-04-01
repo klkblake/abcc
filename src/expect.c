@@ -83,7 +83,7 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			iprintf("	printf(\"Error on opcode %%lu (%%c), expected %s, got \", i, op);", type);
 			iprintf("	print_symbol(%s->symbol);", loc);
 			iprintf("	putchar('\\n');");
-			iprintf("	print_type_root(input, 1);");
+			iprintf("	print_type_graph_root(input, 1);");
 			iprintf("	fail();");
 			iprintf("}");
 			break;
@@ -141,7 +141,7 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			iprintf("	printf(\"Error on opcode %%lu (%%c), expected %s, got \", i, op);", type);
 			iprintf("	print_symbol(%s->symbol);", loc);
 			iprintf("	putchar('\\n');");
-			iprintf("	print_type_root(input, 1);");
+			iprintf("	print_type_graph_root(input, 1);");
 			iprintf("	fail();");
 			iprintf("}");
 			break;

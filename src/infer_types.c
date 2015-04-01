@@ -74,7 +74,7 @@ void print_symbol(u64 symbol) {
 }
 
 internal
-void print_type(union type *t, u64 id, struct type_ptr_b1_map *seen) {
+void print_type_graph(union type *t, u64 id, struct type_ptr_b1_map *seen) {
 	struct type_ptr_b1_map_get_result result = type_ptr_b1_map_get(seen, t);
 	if (!result.found) {
 		type_ptr_b1_map_put_bucket(seen, t, true, result.bucket);
@@ -82,16 +82,16 @@ void print_type(union type *t, u64 id, struct type_ptr_b1_map *seen) {
 			printf("node_%lu_%p [label=\"%lu, %llu\"]\n", id, t, t->var_count, t->term_count &~ VAR_BIT);
 			printf("node_%lu_%p -> node_%lu_%p [label=\"rep\"]\n", id, t, id, t->rep);
 			if (t->rep != t) {
-				print_type(t->rep, id, seen);
+				print_type_graph(t->rep, id, seen);
 			}
 			if (t->terms != NULL) {
 				printf("node_%lu_%p -> node_%lu_%p [label=\"terms\"]\n", id, t, id, t->terms);
-				print_type(t->terms, id, seen);
+				print_type_graph(t->terms, id, seen);
 			}
 		} else {
 			printf("node_%lu_%p -> node_%lu_%p [label=\"next\"]\n", id, t, id, t->next);
 			if (t->next != t) {
-				print_type(t->next, id, seen);
+				print_type_graph(t->next, id, seen);
 			}
 			if (IS_SEALED(t->symbol)) {
 				printf("node_%lu_%p [label=\"Sealed: \\\"", id, t);
@@ -104,10 +104,10 @@ void print_type(union type *t, u64 id, struct type_ptr_b1_map *seen) {
 			}
 			if (t->symbol != SYMBOL_UNIT && t->symbol != SYMBOL_NUMBER){
 				printf("node_%lu_%p -> node_%lu_%p [label=\"#0\"]\n", id, t, id, t->child1);
-				print_type(t->child1, id, seen);
+				print_type_graph(t->child1, id, seen);
 				if (!IS_SEALED(t->symbol)) {
 					printf("node_%lu_%p -> node_%lu_%p [label=\"#1\"]\n", id, t, id, t->child2);
-					print_type(t->child2, id, seen);
+					print_type_graph(t->child2, id, seen);
 				}
 			}
 		}
@@ -115,10 +115,10 @@ void print_type(union type *t, u64 id, struct type_ptr_b1_map *seen) {
 }
 
 internal
-void print_type_root(union type *t, u64 id) {
+void print_type_graph_root(union type *t, u64 id) {
 	struct type_ptr_b1_map seen = {};
 	printf("subgraph cluster_%lu {\n", id);
-	print_type(t, id, &seen);
+	print_type_graph(t, id, &seen);
 	printf("}\n");
 	map_free(&seen);
 }
