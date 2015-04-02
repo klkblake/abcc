@@ -154,10 +154,9 @@ union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *cop
 	new->next = new;
 	new->term_count = 0; // Set as term
 	new->child1 = inst_copy(type->child1, share_vars, copied, pool);
-	if (IS_SEALED(type->symbol)) {
-		return new;
+	if (!IS_SEALED(type->symbol)) {
+		new->child2 = inst_copy(type->child2, share_vars, copied, pool);
 	}
-	new->child2 = inst_copy(type->child2, share_vars, copied, pool);
 	return new;
 }
 
@@ -420,12 +419,22 @@ void remove_vars_from_term(union type *term, struct type_ptr_b1_map *seen) {
 		if (var->terms) {
 			term->child1 = var->terms;
 			remove_vars_from_term(term->child1, seen);
+		} else {
+			term->child1 = var;
 		}
+	} else {
+		remove_vars_from_term(term->child1, seen);
 	}
-	if (!IS_SEALED(term->symbol) && IS_VAR(term->child2)) {
-		union type *var = rep(term->child2);
-		if (var->terms) {
-			term->child2 = var->terms;
+	if (!IS_SEALED(term->symbol)) {
+		if (IS_VAR(term->child2)) {
+			union type *var = rep(term->child2);
+			if (var->terms) {
+				term->child2 = var->terms;
+				remove_vars_from_term(term->child2, seen);
+			} else {
+				term->child2 = var;
+			}
+		} else {
 			remove_vars_from_term(term->child2, seen);
 		}
 	}
@@ -757,6 +766,11 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 		}
 		block->types[i+1] = output;
 	}
+	struct type_ptr_b1_map seen = {};
+	for (usize i = 0; i <= block->size; i++) {
+		remove_vars(&block->types[i], &seen);
+	}
+	map_free(&seen);
 	// TODO make this conditional on a command line flag
 	//printf(" === INFERRED TYPES ===\n");
 	//print_all_types(block->types, block->size + 1);
