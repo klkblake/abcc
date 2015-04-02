@@ -22,10 +22,10 @@ char *construct(char *directive, u32 *var) {
 			printf("vars[%d] = var()", (*var)++);
 			break;
 		case '1':
-			printf("types->unit");
+			printf("pool->unit");
 			break;
 		case 'N':
-			printf("types->number");
+			printf("pool->number");
 			break;
 		case '*':
 		case '+':
@@ -75,10 +75,10 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 					break;
 			}
 			iprintf("if (%s == NULL) {", loc);
-			iprintf("	%s = types->%s;", loc, type);
+			iprintf("	%s = pool->%s;", loc, type);
 			iprintf("} else if (IS_VAR(%s)) {", loc);
-			iprintf("	*%s = *types->%s;", loc, type);
-			iprintf("	%s = types->%s;", loc, type);
+			iprintf("	*%s = *pool->%s;", loc, type);
+			iprintf("	%s = pool->%s;", loc, type);
 			iprintf("} else if (%s->symbol != SYMBOL_%s) {", loc, sym);
 			iprintf("	printf(\"Error on opcode %%lu (%%c), expected %s, got \", i, op);", type);
 			iprintf("	print_symbol(%s->symbol);", loc);
@@ -107,7 +107,7 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			if (loc > 0) {
 				iprintf("b32 construct%d = false;", varid);
 				iprintf("if (%s == NULL) {", loc);
-				iprintf("	%s = alloc_type(types);", loc);
+				iprintf("	%s = alloc_type(pool);", loc);
 				iprintf("	construct%d = true;", varid);
 				iprintf("}");
 				iprintf("if (construct%d || IS_VAR(%s)) {", varid, loc);

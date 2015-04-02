@@ -1,8 +1,17 @@
-#ifndef ANNTYPES_H
+#ifndef INFER_TYPES_H
 
+#include "type.h"
 #include "block.h"
 
-b32 infer_types(struct block_ptr_array blocks);
+struct type_pool {
+	struct type_ptr_array chunks;
+	usize used;
+	union type *unit;
+	union type *number;
+	union type *text;
+};
 
-#define ANNTYPES_H
+b32 infer_types(struct block_ptr_array blocks, struct type_pool *pool);
+
+#define INFER_TYPES_H
 #endif

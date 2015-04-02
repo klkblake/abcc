@@ -14,7 +14,7 @@ u32 type_hash(union type *key) {
 
 DEFINE_MAP_IMPL(union type *, b1, type_ptr_b1, type_hash);
 DEFINE_MAP_IMPL(union type *, union type *, type_ptr, type_hash);
-DEFINE_MAP(union type *, u64, type_ptr_u64, type_hash);
+DEFINE_MAP_IMPL(union type *, u64, type_ptr_u64, type_hash);
 
 #define push_cstring(buf, str) push_many(buf, (u8 *)str, sizeof(str) - 1)
 internal
@@ -192,14 +192,17 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 	}
 }
 
-void print_type(union type *type) {
-	u32 prec = 0;
+void print_type(union type *type, struct type_ptr_u64_map *vars) {
 	struct type_ptr_b1_map seen = {};
-	struct type_ptr_u64_map vars = {};
 	struct u8_array buf = {};
-	print_type_(type, prec, &seen, &vars, &buf);
+	print_type_(type, 0, &seen, vars, &buf);
 	fwrite(buf.data, 1, buf.size, stdout);
 	map_free(&seen);
-	map_free(&vars);
 	array_free(&buf);
+}
+
+void print_type_single(union type *type) {
+	struct type_ptr_u64_map vars = {};
+	print_type(type, &vars);
+	map_free(&vars);
 }

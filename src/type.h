@@ -47,6 +47,7 @@ union type {
 DEFINE_ARRAY(union type *, type_ptr);
 
 DEFINE_MAP_HEADER(union type *, b1, type_ptr_b1);
+DEFINE_MAP_HEADER(union type *, u64, type_ptr_u64);
 DEFINE_MAP_HEADER(union type *, union type *, type_ptr);
 
 static_assert(offsetof(union type, child1) == offsetof(union type, term_count), "child1 must be unioned with term_count");
@@ -54,7 +55,8 @@ static_assert(offsetof(union type, child1) == offsetof(union type, term_count), 
 #define VAR_BIT (1ull << (sizeof(usize) * 8 - 1))
 #define IS_VAR(type) (((type)->term_count & VAR_BIT) != 0)
 
-void print_type(union type *type);
+void print_type(union type *type, struct type_ptr_u64_map *vars);
+void print_type_single(union type *type);
 
 #define TYPE_H
 #endif

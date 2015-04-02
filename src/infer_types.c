@@ -8,21 +8,14 @@
 #include "type.h"
 
 #define CHUNK_SIZE 4096
-struct types {
-	struct type_ptr_array chunks;
-	usize used;
-	union type *unit;
-	union type *number;
-	union type *text;
-};
 
 internal
-union type *alloc_type(struct types *types) {
-	if (types->used == CHUNK_SIZE || types->chunks.size == 0) {
-		array_push(&types->chunks, malloc(CHUNK_SIZE * sizeof(union type)));
-		types->used = 0;
+union type *alloc_type(struct type_pool *pool) {
+	if (pool->used == CHUNK_SIZE || pool->chunks.size == 0) {
+		array_push(&pool->chunks, malloc(CHUNK_SIZE * sizeof(union type)));
+		pool->used = 0;
 	}
-	return &types->chunks.data[types->chunks.size - 1][types->used++];
+	return &pool->chunks.data[pool->chunks.size - 1][pool->used++];
 }
 
 internal
@@ -42,7 +35,7 @@ union type *set_sealed(union type *type, struct string_rc *seal, union type *ty)
 	return type;
 }
 
-#define var() set_var(alloc_type(types))
+#define var() set_var(alloc_type(pool))
 internal
 union type *set_var(union type *type) {
 	type->rep = type;
@@ -126,7 +119,7 @@ void print_type_graph_root(union type *t, u64 id) {
 // TODO Use modified version of Tarjan's SCC algorithm as per
 // http://stackoverflow.com/questions/28924321/copying-part-of-a-graph
 internal
-union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *copied, struct types *types) {
+union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *copied, struct type_pool *pool) {
 	struct type_ptr_map_get_result map_result = type_ptr_map_get(copied, type);
 	if (map_result.found) {
 		if (IS_VAR(map_result.value)) {
@@ -145,7 +138,7 @@ union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *cop
 		type_ptr_map_put_bucket(copied, type, type, map_result.bucket);
 		return type;
 	}
-	union type *new = alloc_type(types);
+	union type *new = alloc_type(pool);
 	type_ptr_map_put_bucket(copied, type, new, map_result.bucket);
 	if (IS_VAR(type)) {
 		new->rep = new;
@@ -160,18 +153,18 @@ union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *cop
 	new->symbol = type->symbol;
 	new->next = new;
 	new->term_count = 0; // Set as term
-	new->child1 = inst_copy(type->child1, share_vars, copied, types);
+	new->child1 = inst_copy(type->child1, share_vars, copied, pool);
 	if (IS_SEALED(type->symbol)) {
 		return new;
 	}
-	new->child2 = inst_copy(type->child2, share_vars, copied, types);
+	new->child2 = inst_copy(type->child2, share_vars, copied, pool);
 	return new;
 }
 
 internal
-union type *inst(union type *type, struct types *types) {
+union type *inst(union type *type, struct type_pool *pool) {
 	struct type_ptr_map seen = {};
-	union type *result = inst_copy(type, true, &seen, types);
+	union type *result = inst_copy(type, true, &seen, pool);
 	map_free(&seen);
 	return result;
 }
@@ -187,9 +180,11 @@ void print_unification_error(usize i, u8 op, struct unification_error err, union
 	printf(" against ");
 	print_symbol(err.right);
 	printf(", while unifying\n\t");
-	print_type(left);
+	struct type_ptr_u64_map vars = {};
+	print_type(left, &vars);
 	printf("\nagainst\n\t");
-	print_type(right);
+	print_type(right, &vars);
+	map_free(&vars);
 	putchar('\n');
 }
 
@@ -449,7 +444,7 @@ void remove_vars(union type **type, struct type_ptr_b1_map *seen) {
 }
 
 #if 0
-b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types) {
+b32 expect_(u8 *pat, union type **input, union type **vars, struct type_pool *pool) {
 	union type **locs[8];
 	locs[0] = input;
 	u32 i = 0;
@@ -469,8 +464,8 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 						return false;
 					}
 				} else {
-					**locs[i] = *types->unit;
-					*locs[i] = types->unit;
+					**locs[i] = *pool->unit;
+					*locs[i] = pool->unit;
 				}
 				i--;
 				break;
@@ -481,8 +476,8 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 						return false;
 					}
 				} else {
-					**locs[i] = *types->number;
-					*locs[i] = types->number;
+					**locs[i] = *pool->number;
+					*locs[i] = pool->number;
 				}
 				i--;
 				break;
@@ -528,26 +523,28 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct types *types)
 internal
 void print_all_types(union type **types, usize n) {
 	union type *last = NULL;
+	struct type_ptr_u64_map vars = {};
 	for (usize j = 0; j < n; j++) {
 		if (types[j] == last) {
 			continue;
 		}
 		last = types[j];
 		printf("%lu: ", j);
-		print_type(types[j]);
+		print_type(types[j], &vars);
 		printf("\n");
 	}
+	map_free(&vars);
 }
 
 // TODO be consistent with stdout/stderr
 // TODO clean up error reporting
 internal
-b32 infer_block(struct block *block, struct types *types) {
+b32 infer_block(struct block *block, struct type_pool *pool) {
 
-#define prod( c1, c2) set_term(alloc_type(types), SYMBOL_PRODUCT, c1, c2)
-#define sum(  c1, c2) set_term(alloc_type(types), SYMBOL_SUM,     c1, c2)
-#define block(c1, c2) set_term(alloc_type(types), SYMBOL_BLOCK,   c1, c2)
-#define sealed(seal, ty) set_sealed(alloc_type(types), seal, ty)
+#define prod( c1, c2) set_term(alloc_type(pool), SYMBOL_PRODUCT, c1, c2)
+#define sum(  c1, c2) set_term(alloc_type(pool), SYMBOL_SUM,     c1, c2)
+#define block(c1, c2) set_term(alloc_type(pool), SYMBOL_BLOCK,   c1, c2)
+#define sealed(seal, ty) set_sealed(alloc_type(pool), seal, ty)
 
 	block->types = malloc((block->size + 1) * sizeof(union type *));
 	block->types[0] = var();
@@ -558,7 +555,7 @@ b32 infer_block(struct block *block, struct types *types) {
 		union type *output;
 		union type *vars[5];
 #if 0
-#define expect(pat) if (!expect_((u8 *) (pat), &input, vars, types)) { \
+#define expect(pat) if (!expect_((u8 *) (pat), &input, vars, pool)) { \
 	printf("Error on opcode %lu (%c)\n", i, op); \
 	return false; \
 }
@@ -587,7 +584,7 @@ b32 infer_block(struct block *block, struct types *types) {
 					bty->symbol |= POLYMORPHIC_BIT;
 					output(prod(bty, input));
 				}
-			case '"':     output(prod(types->text, input));
+			case '"':     output(prod(pool->text, input));
 			case OP_SEAL: //optype: *vv prod(sealed(block->sealers[sealer_index++], vars[0]), vars[1])
 			case OP_UNSEAL:
 				{
@@ -621,31 +618,31 @@ b32 infer_block(struct block *block, struct types *types) {
 			case OP_ASSERT_EQUAL: //optype: *vv input
 			case OP_DEBUG_PRINT_TEXT:
 			        {
-				        if (input == types->text) {
+				        if (input == pool->text) {
 					        output(input);
 					}
 				        union type *initial = input;
 					// We use Floyd's "tortoise and hare"
 					// algorithm for cycle detection
 					for (union type *tortoise = input;
-					     vars[0] != types->text && vars[0] != tortoise;
+					     vars[0] != pool->text && vars[0] != tortoise;
 					     tortoise = tortoise->child1->child2, input = vars[0]) {
 						//expect: +*N+*Nv11 // Two iterations of the loop
 						if (IS_VAR(vars[0])) {
-							input->child1->child2->child1->child2 = types->text;
-							vars[0] = types->text;
+							input->child1->child2->child1->child2 = pool->text;
+							vars[0] = pool->text;
 						}
 					}
-					*initial = *types->text;
-					block->types[i] = types->text;
-					output(types->text);
+					*initial = *pool->text;
+					block->types[i] = pool->text;
+					output(pool->text);
 				}
 
 			case 'l': //optype: *v*vv prod(prod(vars[0], vars[1]), vars[2])
 			case 'r': //optype: **vvv prod(vars[0], prod(vars[1], vars[2]))
 			case 'w': //optype: *v*vv prod(vars[1], prod(vars[0], vars[2]))
 			case 'z': //optype: *v*v*vv prod(vars[0], prod(vars[2], prod(vars[1], vars[3])))
-			case 'v': output(prod(input, types->unit));
+			case 'v': output(prod(input, pool->unit));
 			case 'c': //optype: *v1 vars[0]
 			case '%': //optype: *vv vars[1]
 			case '^': //optype: *vv prod(vars[0], prod(vars[0], vars[1]))
@@ -653,8 +650,8 @@ b32 infer_block(struct block *block, struct types *types) {
 			case '$': // TODO incorporate fixpoint stuff for semi-polymorphic recursion
 				{
 					//expect: *[vv*vv
-					union type *b = inst(input->child1, types);
-					struct unification_error err = unify(b->child1, inst(vars[2], types));
+					union type *b = inst(input->child1, pool);
+					struct unification_error err = unify(b->child1, inst(vars[2], pool));
 					if (err.left != err.right) {
 						print_unification_error(i, op, err, input->child1->child1, vars[2]);
 						fail();
@@ -668,8 +665,8 @@ b32 infer_block(struct block *block, struct types *types) {
 			case 'o':
 				{
 					//expect: *[vv*[vvv
-					union type *b1 = inst(input->child1, types);
-					union type *b2 = inst(input->child2->child1, types);
+					union type *b1 = inst(input->child1, pool);
+					union type *b2 = inst(input->child2->child1, pool);
 					struct unification_error err = unify(b1->child2, b2->child1);
 					if (err.left != err.right) {
 						print_unification_error(i, op, err, input->child1->child2, input->child2->child1->child1);
@@ -694,7 +691,7 @@ b32 infer_block(struct block *block, struct types *types) {
 			case 'f':
 				//optype: *[vvv input
 
-			case '#': output(prod(types->number, input));
+			case '#': output(prod(pool->number, input));
 			case '0'...'9': //optype: *Nv input
 
 			case '+':
@@ -715,8 +712,8 @@ b32 infer_block(struct block *block, struct types *types) {
 			case '?':
 				{
 					//expect: *[vv*+vvv
-					union type *b = inst(input->child1, types);
-					struct unification_error err = unify(b->child1, inst(vars[2], types));
+					union type *b = inst(input->child1, pool);
+					struct unification_error err = unify(b->child1, inst(vars[2], pool));
 					if (err.left != err.right) {
 						print_unification_error(i, op, err, input->child1->child1, vars[2]);
 						fail();
@@ -733,8 +730,8 @@ b32 infer_block(struct block *block, struct types *types) {
 			case 'M':
 				{
 					//expect: *+vvv
-					union type *a = inst(vars[0], types);
-					struct unification_error err = unify(a, inst(vars[1], types));
+					union type *a = inst(vars[0], pool);
+					struct unification_error err = unify(a, inst(vars[1], pool));
 					if (err.left != err.right) {
 						print_unification_error(i, op, err, vars[0], vars[1]);
 						fail();
@@ -750,12 +747,12 @@ b32 infer_block(struct block *block, struct types *types) {
 			case '>':
 				{
 					//expect: *N*Nv
-					union type *num_pair = prod(types->number, types->number);
+					union type *num_pair = prod(pool->number, pool->number);
 					output(prod(sum(num_pair, num_pair), vars[0]));
 				}
 
 			default:
-			          assert(false);
+			          assert(!"Received invalid opcode");
 			          return false;
 		}
 		block->types[i+1] = output;
@@ -766,23 +763,18 @@ b32 infer_block(struct block *block, struct types *types) {
 	return true;
 }
 
-b32 infer_types(struct block_ptr_array blocks) {
-	struct types types = {};
-	types.unit   = set_term(alloc_type(&types), SYMBOL_UNIT,   NULL, NULL);
-	types.number = set_term(alloc_type(&types), SYMBOL_NUMBER, NULL, NULL);
-	types.text   = set_term(alloc_type(&types), SYMBOL_SUM,
-	                        set_term(alloc_type(&types), SYMBOL_PRODUCT, types.number, NULL),
-	                        types.unit);
-	types.text->child1->child2 = types.text;
+b32 infer_types(struct block_ptr_array blocks, struct type_pool *pool) {
+	pool->unit   = set_term(alloc_type(pool), SYMBOL_UNIT,   NULL, NULL);
+	pool->number = set_term(alloc_type(pool), SYMBOL_NUMBER, NULL, NULL);
+	pool->text   = set_term(alloc_type(pool), SYMBOL_SUM,
+	                        set_term(alloc_type(pool), SYMBOL_PRODUCT, pool->number, NULL),
+	                        pool->unit);
+	pool->text->child1->child2 = pool->text;
 	foreach (block, blocks) {
-		if (!infer_block(*block, &types)) {
+		if (!infer_block(*block, pool)) {
 			printf("Failed in block %lu\n", block_index);
 			return false;
 		}
 	}
-	foreach (chunk, types.chunks) {
-		free(*chunk);
-	}
-	array_free(&types.chunks);
 	return true;
 }
