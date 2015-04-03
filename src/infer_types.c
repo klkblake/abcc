@@ -416,6 +416,7 @@ void remove_vars_from_term(union type *term, struct type_ptr_b1_map *seen) {
 	type_ptr_b1_map_put_bucket(seen, term, true, result.bucket);
 	if (IS_VAR(term->child1)) {
 		union type *var = rep(term->child1);
+		var->var_count = 1;
 		if (var->terms) {
 			term->child1 = var->terms;
 			remove_vars_from_term(term->child1, seen);
