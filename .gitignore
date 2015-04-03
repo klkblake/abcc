@@ -3,4 +3,5 @@ expect
 src/infer_types.gen.c
 all
 words/
-*.o
+show-graph/show-graph.jar
+show-graph/lib/

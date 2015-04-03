@@ -1,0 +1,14 @@
+#!/bin/bash
+set -e
+dir="$(mktemp -d)"
+javac -cp lib/gs-core-1.2.jar:lib/gs-ui-1.2.jar -d "$dir" src/Main.java src/Layout.java
+unzip -o lib/gs-core-1.2.jar -d "$dir"
+unzip -o lib/gs-ui-1.2.jar -d "$dir"
+mkdir -p "$dir"/META-INF
+rm -rf "$dir"/META-INF/*
+cp src/MANIFEST.MF "$dir"/META-INF/
+rm -f show-graph.jar
+pushd "$dir"
+zip -r "$OLDPWD/show-graph.jar" *
+popd
+rm -r "$dir"
