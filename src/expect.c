@@ -81,9 +81,9 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			iprintf("	%s = pool->%s;", loc, type);
 			iprintf("} else if (%s->symbol != SYMBOL_%s) {", loc, sym);
 			iprintf("	printf(\"Error on opcode %%lu (%%c), expected %s, got \", i, op);", type);
-			iprintf("	print_symbol(%s->symbol);", loc);
+			iprintf("	print_symbol(stdout, %s->symbol);", loc);
 			iprintf("	putchar('\\n');");
-			iprintf("	print_type_graph_root(input, 1);");
+			iprintf("	print_type_graph_root(stdout, input, 1);");
 			iprintf("	fail();");
 			iprintf("}");
 			break;
@@ -139,9 +139,9 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 			directive = consume(directive, var, indent + 1, loc2, varid + 2);
 			iprintf("} else {");
 			iprintf("	printf(\"Error on opcode %%lu (%%c), expected %s, got \", i, op);", type);
-			iprintf("	print_symbol(%s->symbol);", loc);
+			iprintf("	print_symbol(stdout, %s->symbol);", loc);
 			iprintf("	putchar('\\n');");
-			iprintf("	print_type_graph_root(input, 1);");
+			iprintf("	print_type_graph_root(stdout, input, 1);");
 			iprintf("	fail();");
 			iprintf("}");
 			break;

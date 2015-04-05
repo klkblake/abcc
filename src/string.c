@@ -1,10 +1,9 @@
 #include "string.h"
 
 #include <stdlib.h>
-#include <stdio.h>
 
-void print_string(struct string_rc *str) {
-	fwrite(str->data, 1, str->size, stdout);
+void print_string(FILE *out, struct string_rc *str) {
+	fwrite(str->data, 1, str->size, out);
 }
 
 void string_rc_decref(struct string_rc *str) {

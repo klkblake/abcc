@@ -2,6 +2,8 @@
 
 #include "abcc.h"
 
+#include <stdio.h>
+
 struct string_rc {
 	usize size;
 	u32 refcount;
@@ -10,7 +12,7 @@ struct string_rc {
 	u8 data[];
 };
 
-void print_string(struct string_rc *str);
+void print_string(FILE *out, struct string_rc *str);
 
 void string_rc_decref(struct string_rc *str);
 

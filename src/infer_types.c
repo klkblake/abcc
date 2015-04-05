@@ -2,6 +2,9 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 
 #include "string.h"
 #include "map.h"
@@ -46,61 +49,63 @@ union type *set_var(union type *type) {
 }
 
 internal
-void print_symbol(u64 symbol) {
+void print_symbol(FILE *out, u64 symbol) {
 	if (IS_SEALED(symbol)) {
 		struct string_rc *seal = (struct string_rc *) symbol;
-		printf("seal \"");
-		print_string(seal);
-		putchar('"');
+		fprintf(out, "seal \"");
+		print_string(out, seal);
+		putc('"', out);
 	} else {
 		switch (symbol) {
-			case SYMBOL_VOID:    printf("void");    break;
-			case SYMBOL_UNIT:    printf("unit");    break;
-			case SYMBOL_NUMBER:  printf("number");  break;
-			case SYMBOL_PRODUCT: printf("product"); break;
-			case SYMBOL_SUM:     printf("sum");     break;
-			case SYMBOL_BLOCK:   printf("block");   break;
-			case SYMBOL_BLOCK | POLYMORPHIC_BIT: printf("polymorphic block"); break;
-			default: printf("unknown symbol %llx", symbol &~ HIGH_PTR_BIT); break;
+			case SYMBOL_VOID:    fprintf(out, "void");    break;
+			case SYMBOL_UNIT:    fprintf(out, "unit");    break;
+			case SYMBOL_NUMBER:  fprintf(out, "number");  break;
+			case SYMBOL_PRODUCT: fprintf(out, "product"); break;
+			case SYMBOL_SUM:     fprintf(out, "sum");     break;
+			case SYMBOL_BLOCK:   fprintf(out, "block");   break;
+			case SYMBOL_BLOCK | POLYMORPHIC_BIT: fprintf(out, "polymorphic block"); break;
+			default: fprintf(out, "unknown symbol %llx", symbol &~ HIGH_PTR_BIT); break;
 		}
 	}
 }
 
 internal
-void print_type_graph(union type *t, u64 id, struct type_ptr_b1_map *seen) {
+void print_type_graph(FILE *out, union type *t, u64 id, struct type_ptr_b1_map *seen) {
 	struct type_ptr_b1_map_get_result result = type_ptr_b1_map_get(seen, t);
 	if (!result.found) {
 		type_ptr_b1_map_put_bucket(seen, t, true, result.bucket);
 		if (IS_VAR(t)) {
-			printf("node_%lu_%p [label=\"%lu, %llu\"]\n", id, t, t->var_count, t->term_count &~ VAR_BIT);
-			printf("node_%lu_%p -> node_%lu_%p [label=\"rep\"]\n", id, t, id, t->rep);
+			fprintf(out, "node_%lu_%p [label=\"%lu, %llu\"]\n",
+			        id, t, t->var_count, t->term_count &~ VAR_BIT);
+			fprintf(out, "node_%lu_%p -> node_%lu_%p [label=\"rep\"]\n", id, t, id, t->rep);
 			if (t->rep != t) {
-				print_type_graph(t->rep, id, seen);
+				print_type_graph(out, t->rep, id, seen);
 			}
 			if (t->terms != NULL) {
-				printf("node_%lu_%p -> node_%lu_%p [label=\"terms\"]\n", id, t, id, t->terms);
-				print_type_graph(t->terms, id, seen);
+				fprintf(out, "node_%lu_%p -> node_%lu_%p [label=\"terms\"]\n", id, t, id, t->terms);
+				print_type_graph(out, t->terms, id, seen);
 			}
 		} else {
-			printf("node_%lu_%p -> node_%lu_%p [label=\"next\"]\n", id, t, id, t->next);
+			fprintf(out, "node_%lu_%p -> node_%lu_%p [label=\"next\"]\n", id, t, id, t->next);
 			if (t->next != t) {
-				print_type_graph(t->next, id, seen);
+				print_type_graph(out, t->next, id, seen);
 			}
 			if (IS_SEALED(t->symbol)) {
-				printf("node_%lu_%p [label=\"Sealed: \\\"", id, t);
-				print_string(t->seal);
-				printf("\\\"\"]\n");
+				fprintf(out, "node_%lu_%p [label=\"Sealed: \\\"", id, t);
+				print_string(out, t->seal);
+				fprintf(out, "\\\"\"]\n");
 			} else {
-				printf("node_%lu_%p [label=\"", id, t);
-				print_symbol(t->symbol);
-				printf("\"]\n");
+				fprintf(out, "node_%lu_%p [label=\"", id, t);
+				print_symbol(out, t->symbol);
+				fprintf(out, "\"]\n");
 			}
 			if (t->symbol != SYMBOL_UNIT && t->symbol != SYMBOL_NUMBER){
-				printf("node_%lu_%p -> node_%lu_%p [label=\"#0\"]\n", id, t, id, t->child1);
-				print_type_graph(t->child1, id, seen);
+				fprintf(out, "node_%lu_%p -> node_%lu_%p [label=\"#0\"]\n", id, t, id, t->child1);
+				print_type_graph(out, t->child1, id, seen);
 				if (!IS_SEALED(t->symbol)) {
-					printf("node_%lu_%p -> node_%lu_%p [label=\"#1\"]\n", id, t, id, t->child2);
-					print_type_graph(t->child2, id, seen);
+					fprintf(out, "node_%lu_%p -> node_%lu_%p [label=\"#1\"]\n",
+					        id, t, id, t->child2);
+					print_type_graph(out, t->child2, id, seen);
 				}
 			}
 		}
@@ -108,12 +113,53 @@ void print_type_graph(union type *t, u64 id, struct type_ptr_b1_map *seen) {
 }
 
 internal
-void print_type_graph_root(union type *t, u64 id) {
+void print_type_graph_root(FILE *out, union type *t, u64 id) {
 	struct type_ptr_b1_map seen = {};
-	printf("subgraph cluster_%lu {\n", id);
-	print_type_graph(t, id, &seen);
-	printf("}\n");
+	fprintf(out, "subgraph cluster_%lu {\n", id);
+	print_type_graph(out, t, id, &seen);
+	fprintf(out, "}\n");
 	map_free(&seen);
+}
+
+static FILE *global_graph_server_out;
+
+internal __attribute__((used))
+void init_graph_server(void) {
+	pid_t pid = fork();
+	if (pid == -1) {
+		perror("abcc");
+		return;
+	}
+	if (pid == 0) {
+		execlp("java", "java", "-jar", "show-graph/show-graph.jar", "12345", NULL);
+		perror("abcc");
+		exit(2);
+	}
+	sleep(1);
+	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (sockfd == -1) {
+		perror("abcc");
+		return;
+	}
+	struct sockaddr_in addr = {};
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	addr.sin_port = htons(12345);
+	if (connect(sockfd, (struct sockaddr *) &addr, sizeof(struct sockaddr))) {
+		perror("abcc");
+		return;
+	}
+	global_graph_server_out = fdopen(sockfd, "w");
+	if (!global_graph_server_out) {
+		perror("abcc");
+		return;
+	}
+}
+
+internal __attribute__((used))
+void graph_server_send(union type *t) {
+	print_type_graph_root(global_graph_server_out, t, 1);
+	fflush(global_graph_server_out);
 }
 
 // TODO Use modified version of Tarjan's SCC algorithm as per
@@ -175,9 +221,9 @@ struct unification_error {
 internal
 void print_unification_error(usize i, u8 op, struct unification_error err, union type *left, union type *right) {
 	printf("Error on opcode %lu (%c), matching ", i, op);
-	print_symbol(err.left);
+	print_symbol(stdout, err.left);
 	printf(" against ");
-	print_symbol(err.right);
+	print_symbol(stdout, err.right);
 	printf(", while unifying\n\t");
 	struct type_ptr_u64_map vars = {};
 	print_type(left, &vars);
@@ -604,17 +650,17 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 						if (IS_SEALED(vars[0]->symbol)) {
 							if (vars[0]->seal != seal) {
 								printf("Error on opcode %lu (%c), attempted to unseal value sealed with \"", i, op);
-								print_string(vars[0]->seal);
+								print_string(stdout, vars[0]->seal);
 								printf("\" using unsealer \"");
-								print_string(seal);
+								print_string(stdout, seal);
 								printf("\"\n");
 								fail();
 							}
 						} else {
 							printf("Error on opcode %lu, unsealing non-sealed value ", i);
-							print_symbol(vars[0]->symbol);
+							print_symbol(stdout, vars[0]->symbol);
 							printf(" with sealer \"");
-							print_string(seal);
+							print_string(stdout, seal);
 							printf("\"\n");
 							fail();
 						}

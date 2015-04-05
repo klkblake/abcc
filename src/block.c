@@ -12,9 +12,9 @@ void print_backtrace(struct ao_stack_frame *frame) {
 		return;
 	}
 	while (frame != NULL) {
-		print_string(frame->file);
+		print_string(stdout, frame->file);
 		printf(":%u: ", frame->line);
-		print_string(frame->word);
+		print_string(stdout, frame->word);
 		putchar('\n');
 		frame = frame->next;
 	}
