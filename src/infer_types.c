@@ -592,6 +592,14 @@ void print_all_types(union type **types, usize n) {
 	map_free(&vars);
 }
 
+internal
+void print_expect_error(usize i, u8 op, union type* loc, union type *input) {
+		printf("Error on opcode %lu (%c), expected product, got ", i, op);
+		print_symbol(stdout, loc->symbol);
+		putchar('\n');
+		print_type_graph_root(stdout, input, 1);
+}
+
 // TODO be consistent with stdout/stderr
 // TODO clean up error reporting
 internal
@@ -619,6 +627,7 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 #define output(type) output = (type); break
 //#define optype(pat, type) expect(pat); output(type)
 #define fail() print_backtrace(frame); return false
+#define fail_expect(loc) print_expect_error(i, op, loc, input); fail()
 		switch (op) {
 			// Identity opcodes
 			case OP_FRAME_PUSH:

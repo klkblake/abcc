@@ -56,13 +56,13 @@ char *construct(char *directive, u32 *var) {
 	return directive;
 }
 
-char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
+char *consume(char *directive, u32 *var, u32 indent, u32 loc) {
 	char c = *directive++;
 	char *sym;
 	char *type;
 	switch (c) {
 		case 'v':
-			iprintf("vars[%d] = %s;", (*var)++, loc);
+			iprintf("vars[%d] = loc%u;", (*var)++, loc);
 			break;
 		case '1':
 		case 'N':
@@ -78,17 +78,10 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 				default:
 					assert(!"Impossible control flow");
 			}
-			iprintf("if (%s == NULL) {", loc);
-			iprintf("	%s = pool->%s;", loc, type);
-			iprintf("} else if (IS_VAR(%s)) {", loc);
-			iprintf("	*%s = *pool->%s;", loc, type);
-			iprintf("	%s = pool->%s;", loc, type);
-			iprintf("} else if (%s->symbol != SYMBOL_%s) {", loc, sym);
-			iprintf("	printf(\"Error on opcode %%lu (%%c), expected %s, got \", i, op);", type);
-			iprintf("	print_symbol(stdout, %s->symbol);", loc);
-			iprintf("	putchar('\\n');");
-			iprintf("	print_type_graph_root(stdout, input, 1);");
-			iprintf("	fail();");
+			iprintf("if (IS_VAR(loc%u)) {", loc);
+			iprintf("	*loc%u = *pool->%s;", loc, type);
+			iprintf("} else if (loc%u->symbol != SYMBOL_%s) {", loc, sym);
+			iprintf("	fail_expect(loc%u);", loc);
 			iprintf("}");
 			break;
 		case '*':
@@ -110,41 +103,25 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 				default:
 					assert(!"Impossible control flow");
 			}
-			iprintf("b32 construct%d = false;", varid);
-			iprintf("if (%s == NULL) {", loc);
-			iprintf("	%s = alloc_type(pool);", loc);
-			iprintf("	construct%d = true;", varid);
-			iprintf("}");
-			iprintf("if (construct%d || IS_VAR(%s)) {", varid, loc);
-			iprintf("	%s->symbol = SYMBOL_%s;", loc, sym);
+			iprintf("if (IS_VAR(loc%u)) {", loc);
 			do_indent(indent);
-			printf("	%s->child1 = ", loc);
+			printf("	set_term(loc%u, SYMBOL_%s, ", loc, sym);
 			u32 var2 = *var;
 			char *construct_directive = construct(directive, &var2);
-			printf(";\n");
-			do_indent(indent);
-			printf("	%s->child2 = ", loc);
+			printf(", ");
 			construct(construct_directive, &var2);
-			printf(";\n");
+			printf(");\n");
 			if (c == '[') {
-				iprintf("} else if ((%s->symbol & POLYMORPHIC_MASK) == SYMBOL_%s) {", loc, sym);
+				iprintf("} else if ((loc%u->symbol & POLYMORPHIC_MASK) == SYMBOL_%s) {", loc, sym);
 			} else {
-				iprintf("} else if (%s->symbol == SYMBOL_%s) {", loc, sym);
+				iprintf("} else if (loc%u->symbol == SYMBOL_%s) {", loc, sym);
 			}
-			iprintf("	union type *loc%d = %s;", varid, loc);
-			usize len = 3 /* loc */ + 10 /* varid */ + 8 /* ->childN */ + 1 /* NUL */;
-			char *loc1 = alloca(len);
-			char *loc2 = alloca(len);
-			sprintf(loc1, "loc%d->child1", varid);
-			sprintf(loc2, "loc%d->child2", varid);
-			directive = consume(directive, var, indent + 1, loc1, varid + 1);
-			directive = consume(directive, var, indent + 1, loc2, varid + 2);
+			iprintf("	union type *loc%u = loc%u->child1;", loc + 1, loc);
+			directive = consume(directive, var, indent + 1, loc + 1);
+			iprintf("	union type *loc%u = loc%u->child2;", loc + 2, loc);
+			directive = consume(directive, var, indent + 1, loc + 2);
 			iprintf("} else {");
-			iprintf("	printf(\"Error on opcode %%lu (%%c), expected %s, got \", i, op);", type);
-			iprintf("	print_symbol(stdout, %s->symbol);", loc);
-			iprintf("	putchar('\\n');");
-			iprintf("	print_type_graph_root(stdout, input, 1);");
-			iprintf("	fail();");
+			iprintf("	fail_expect(loc%u);", loc);
 			iprintf("}");
 			break;
 		default:
@@ -156,8 +133,9 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 
 void expect(char *directive) {
 	printf("{\n");
+	printf("	union type *loc0 = input;\n");
 	u32 var = 0;
-	directive = consume(directive, &var, 1, "input", 0);
+	directive = consume(directive, &var, 1, 0);
 	char c = *directive;
 	if (c != ' ' && c != '\n' && c != '\0') {
 		fprintf(stderr, "expect: Extra character after directive: '%c'\n", c);
