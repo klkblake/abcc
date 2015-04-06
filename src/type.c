@@ -176,7 +176,7 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 			shift++;
 		}
 		array_bump(buf, shift);
-		memmove(buf->data + begin + shift, buf->data + begin, buf->size - begin);
+		memmove(buf->data + begin + shift, buf->data + begin, buf->size - begin - shift);
 		u8 *hole = buf->data + begin;
 		if (prec > 0) {
 			*hole++ = '(';
