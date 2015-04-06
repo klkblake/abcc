@@ -691,8 +691,17 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 			case 'v': output(prod(input, pool->unit));
 			case 'c': //optype: *v1 vars[0]
 			case '%': //optype: *vv vars[1]
-			          // TODO do we need to insert a var here?
-			case '^': //optype: *vv prod(vars[0], prod(vars[0], vars[1]))
+			case '^':
+				{
+					//expect: *vv
+					union type *t = vars[0];
+					if (!IS_VAR(t)) {
+						t = var();
+						t->terms = vars[0];
+						t->term_count = 1 | VAR_BIT;
+					}
+					output(prod(t, prod(t, vars[1])));
+				}
 
 			case '$': // TODO incorporate fixpoint stuff for semi-polymorphic recursion
 				{
@@ -774,8 +783,17 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 					}
 					output(prod(sum(b->child2, vars[3]), vars[4]));
 				}
-				// TODO possibly insert var
-			case 'D': //optype: *v*+vvv prod(sum(prod(vars[0], vars[1]), prod(vars[0], vars[2])), vars[3])
+			case 'D':
+				{
+					//expect: *v*+vvv
+					union type *t = vars[0];
+					if (!IS_VAR(t)) {
+						t = var();
+						t->terms = vars[0];
+						t->term_count = 1 | VAR_BIT;
+					}
+					output(prod(sum(prod(t, vars[1]), prod(t, vars[2])), vars[3]));
+				}
 			case 'F': //optype: *+*vv*vvv prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4]))
 			case 'M':
 				{
