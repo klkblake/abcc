@@ -44,7 +44,7 @@ union type *set_var(union type *type) {
 	type->rep = type;
 	type->terms = NULL;
 	type->term_count = VAR_BIT;
-	type->var_count = 0;
+	type->var_count = 1;
 	return type;
 }
 
@@ -162,23 +162,33 @@ void graph_server_send(union type *t) {
 	fflush(global_graph_server_out);
 }
 
+internal
+union type *rep(union type *v) {
+	union type *v0 = v->rep;
+	while (v0 != v0->rep) {
+		v0 = v0->rep;
+	}
+	while (v->rep != v0) {
+		union type *tmp = v->rep;
+		v->rep = v0;
+		v = tmp;
+	}
+	return v0;
+}
+
 // TODO Use modified version of Tarjan's SCC algorithm as per
 // http://stackoverflow.com/questions/28924321/copying-part-of-a-graph
+// TODO Will that work with the requirement for sharing via variables?
 internal
 union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *copied, struct type_pool *pool) {
+	if (IS_VAR(type)) {
+		type = rep(type);
+	}
 	struct type_ptr_map_get_result map_result = type_ptr_map_get(copied, type);
 	if (map_result.found) {
-		if (IS_VAR(map_result.value)) {
-			return map_result.value;
-		} else {
-			// Break potential loops
-			union type *result = var();
-			result->terms = map_result.value;
-			result->term_count = VAR_BIT | 1;
-			return result;
-		}
+		return map_result.value;
 	}
-	if ((IS_VAR(type) && share_vars)  ||
+	if ((IS_VAR(type) && !type->terms && share_vars)  ||
 	    type->symbol == SYMBOL_UNIT   ||
 	    type->symbol == SYMBOL_NUMBER) {
 		type_ptr_map_put_bucket(copied, type, type, map_result.bucket);
@@ -188,20 +198,25 @@ union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *cop
 	type_ptr_map_put_bucket(copied, type, new, map_result.bucket);
 	if (IS_VAR(type)) {
 		new->rep = new;
-		new->terms = NULL;
-		new->term_count = VAR_BIT;
 		new->var_count = 1;
-		return new;
-	}
-	if (type->symbol == (SYMBOL_BLOCK | POLYMORPHIC_BIT)) {
-		share_vars = false;
-	}
-	new->symbol = type->symbol;
-	new->next = new;
-	new->term_count = 0; // Set as term
-	new->child1 = inst_copy(type->child1, share_vars, copied, pool);
-	if (!IS_SEALED(type->symbol)) {
-		new->child2 = inst_copy(type->child2, share_vars, copied, pool);
+		if (type->terms) {
+			new->terms = inst_copy(type->terms, share_vars, copied, pool);
+			new->term_count = 1 | VAR_BIT;
+		} else {
+			new->terms = NULL;
+			new->term_count = VAR_BIT;
+		}
+	} else {
+		if (type->symbol == (SYMBOL_BLOCK | POLYMORPHIC_BIT)) {
+			share_vars = false;
+		}
+		new->symbol = type->symbol;
+		new->next = new;
+		new->term_count = 0; // Set as term
+		new->child1 = inst_copy(type->child1, share_vars, copied, pool);
+		if (!IS_SEALED(type->symbol)) {
+			new->child2 = inst_copy(type->child2, share_vars, copied, pool);
+		}
 	}
 	return new;
 }
@@ -281,20 +296,6 @@ void merge(union type *v1, union type *v2, struct type_ptr_array *var_stack) {
 	v->term_count = VAR_BIT;
 	bigV->var_count = r1 + r2;
 	bigV->term_count = (k1 + k2) | VAR_BIT;
-}
-
-internal
-union type *rep(union type *v) {
-	union type *v0 = v->rep;
-	while (v0 != v0->rep) {
-		v0 = v0->rep;
-	}
-	while (v->rep != v0) {
-		union type *tmp = v->rep;
-		v->rep = v0;
-		v = tmp;
-	}
-	return v0;
 }
 
 DEFINE_ARRAY(usize, usize);
@@ -451,52 +452,47 @@ struct unification_error unify(union type *left, union type *right) {
 }
 
 internal
-void remove_vars_from_term(union type *term, struct type_ptr_b1_map *seen) {
-	if (term == NULL || term->symbol == SYMBOL_UNIT || term->symbol == SYMBOL_NUMBER) {
-		return;
-	}
-	struct type_ptr_b1_map_get_result result = type_ptr_b1_map_get(seen, term);
-	if (result.found) {
-		return;
-	}
-	type_ptr_b1_map_put_bucket(seen, term, true, result.bucket);
-	if (IS_VAR(term->child1)) {
-		union type *var = rep(term->child1);
-		var->var_count = 1;
-		if (var->terms) {
-			term->child1 = var->terms;
-			remove_vars_from_term(term->child1, seen);
-		} else {
-			term->child1 = var;
+union type *deref(union type *type) {
+	if (IS_VAR(type)) {
+		type = rep(type);
+		if (type->terms) {
+			return type->terms;
 		}
+	}
+	return type;
+}
+
+internal
+void assign(union type *var, union type *value) {
+	assert(var->terms == NULL);
+		var->terms = value;
+		var->term_count = 1 | VAR_BIT;
+}
+
+internal
+void assign_alloc(union type *var, u64 symbol, union type *c1, union type *c2, struct type_pool *pool) {
+	assert(var->terms == NULL);
+	if (var->var_count > 1) {
+		union type *value = alloc_type(pool);
+		set_term(value, symbol, c1, c2);
+		var->terms = value;
+		var->term_count = 1 | VAR_BIT;
 	} else {
-		remove_vars_from_term(term->child1, seen);
-	}
-	if (!IS_SEALED(term->symbol)) {
-		if (IS_VAR(term->child2)) {
-			union type *var = rep(term->child2);
-			if (var->terms) {
-				term->child2 = var->terms;
-				remove_vars_from_term(term->child2, seen);
-			} else {
-				term->child2 = var;
-			}
-		} else {
-			remove_vars_from_term(term->child2, seen);
-		}
+		set_term(var, symbol, c1, c2);
 	}
 }
 
 internal
-void remove_vars(union type **type, struct type_ptr_b1_map *seen) {
-	if (IS_VAR(*type)) {
-		*type = rep(*type);
-		if (!(*type)->terms) {
-			return;
-		}
-		*type = (*type)->terms;
+void assign_sealed(union type *var, struct string_rc *seal, union type *c1, struct type_pool *pool) {
+	assert(var->terms == NULL);
+	if (var->var_count > 1) {
+		union type *value = alloc_type(pool);
+		set_sealed(value, seal, c1);
+		var->terms = value;
+		var->term_count = 1 | VAR_BIT;
+	} else {
+		set_sealed(var, seal, c1);
 	}
-	remove_vars_from_term(*type, seen);
 }
 
 #if 0
@@ -576,23 +572,6 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct type_pool *po
 }
 #endif
 
-internal
-void print_all_types(union type **types, usize n) {
-	union type *last = NULL;
-	struct type_ptr_u64_map vars = {};
-	for (usize j = 0; j < n; j++) {
-		if (types[j] == last) {
-			continue;
-		}
-		last = types[j];
-		printf("%lu: ", j);
-		print_type(types[j], &vars);
-		printf("\n");
-	}
-	map_free(&vars);
-}
-
-internal
 void print_expect_error(usize i, u8 op, union type* loc, union type *input) {
 		printf("Error on opcode %lu (%c), expected product, got ", i, op);
 		print_symbol(stdout, loc->symbol);
@@ -655,11 +634,12 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 				{
 					struct string_rc *seal = block->sealers[sealer_index++];
 					//expect: *vv
-					if (!IS_VAR(vars[0])) {
-						if (IS_SEALED(vars[0]->symbol)) {
-							if (vars[0]->seal != seal) {
+					union type *type = deref(vars[0]);
+					if (!IS_VAR(type)) {
+						if (IS_SEALED(type->symbol)) {
+							if (type->seal != seal) {
 								printf("Error on opcode %lu (%c), attempted to unseal value sealed with \"", i, op);
-								print_string(stdout, vars[0]->seal);
+								print_string(stdout, type->seal);
 								printf("\" using unsealer \"");
 								print_string(stdout, seal);
 								printf("\"\n");
@@ -667,16 +647,16 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 							}
 						} else {
 							printf("Error on opcode %lu, unsealing non-sealed value ", i);
-							print_symbol(stdout, vars[0]->symbol);
+							print_symbol(stdout, type->symbol);
 							printf(" with sealer \"");
 							print_string(stdout, seal);
 							printf("\"\n");
 							fail();
 						}
 					} else {
-						set_sealed(vars[0], seal, var());
+						assign_sealed(type, seal, var(), pool);
 					}
-					output(prod(vars[0]->child1, vars[1]));
+					output(prod(type->child1, vars[1]));
 				}
 
 			// Normal opcodes
@@ -689,6 +669,7 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 				        union type *initial = input;
 					// We use Floyd's "tortoise and hare"
 					// algorithm for cycle detection
+					// TODO this is clearly broken -- where is vars[0] coming from?
 					for (union type *tortoise = input;
 					     vars[0] != pool->text && vars[0] != tortoise;
 					     tortoise = tortoise->child1->child2, input = vars[0]) {
@@ -710,47 +691,54 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 			case 'v': output(prod(input, pool->unit));
 			case 'c': //optype: *v1 vars[0]
 			case '%': //optype: *vv vars[1]
+			          // TODO do we need to insert a var here?
 			case '^': //optype: *vv prod(vars[0], prod(vars[0], vars[1]))
 
 			case '$': // TODO incorporate fixpoint stuff for semi-polymorphic recursion
 				{
 					//expect: *[vv*vv
-					union type *b = inst(input->child1, pool);
+					union type *input_term = deref(input);
+					union type *b = inst(deref(input_term->child1), pool);
 					struct unification_error err = unify(b->child1, inst(vars[2], pool));
 					if (err.left != err.right) {
-						print_unification_error(i, op, err, input->child1->child1, vars[2]);
+						print_unification_error(i, op, err,
+						                        deref(input_term->child1)->child1, vars[2]);
 						fail();
 					}
-					struct type_ptr_b1_map seen = {};
-					remove_vars(&b->child2, &seen);
-					remove_vars(&vars[3], &seen);
-					map_free(&seen);
 					output(prod(b->child2, vars[3]));
 				}
 			case 'o':
 				{
 					//expect: *[vv*[vvv
-					union type *b1 = inst(input->child1, pool);
-					union type *b2 = inst(input->child2->child1, pool);
+					union type *input_term = deref(input);
+					union type *child1_term = deref(input_term->child1);
+					union type *child21_term = deref(deref(input_term->child2)->child1);
+					union type *b1 = inst(child1_term, pool);
+					union type *b2 = inst(child21_term, pool);
 					struct unification_error err = unify(b1->child2, b2->child1);
 					if (err.left != err.right) {
-						print_unification_error(i, op, err, input->child1->child2, input->child2->child1->child1);
+						union type *left = child1_term->child2;
+						union type *right = child21_term->child1;
+						print_unification_error(i, op, err, left, right);
 						fail();
 					}
-					struct type_ptr_b1_map seen = {};
-					remove_vars(&b1->child1, &seen);
-					remove_vars(&b2->child2, &seen);
-					remove_vars(&vars[4], &seen);
-					map_free(&seen);
 					union type *result = block(b1->child1, b2->child2);
 					output(prod(result, vars[4]));
 				}
 			case '\'':
 				{
 					// TODO make this polymorphic iff the value is constant
+					//expect: *vv
 					union type *s = var();
 					(void) s;
-					//optype: *vv prod(block(s, prod(vars[0], s)), vars[1])
+					union type *c = deref(vars[0]);
+					union type *b = block(s, prod(c, s));
+					if (!IS_VAR(c) && (c->symbol == SYMBOL_UNIT ||
+					                   c->symbol == SYMBOL_NUMBER ||
+					                   c == pool->text)) {
+						b ->symbol |= POLYMORPHIC_BIT;
+					}
+					output(prod(b, vars[1]));
 				}
 			case 'k':
 			case 'f':
@@ -761,7 +749,7 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 
 			case '+':
 			case '*':
-				//optype: *N*Nv input->child2
+				//optype: *N*Nv deref(input)->child2
 			case '/':
 			case '-':
 				//optype: *Nv input
@@ -777,19 +765,16 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 			case '?':
 				{
 					//expect: *[vv*+vvv
-					union type *b = inst(input->child1, pool);
+					union type *child1_term = deref(deref(input)->child1);
+					union type *b = inst(child1_term, pool);
 					struct unification_error err = unify(b->child1, inst(vars[2], pool));
 					if (err.left != err.right) {
-						print_unification_error(i, op, err, input->child1->child1, vars[2]);
+						print_unification_error(i, op, err, child1_term->child1, vars[2]);
 						fail();
 					}
-					struct type_ptr_b1_map seen = {};
-					remove_vars(&b->child2, &seen);
-					remove_vars(&vars[3], &seen);
-					remove_vars(&vars[4], &seen);
-					map_free(&seen);
 					output(prod(sum(b->child2, vars[3]), vars[4]));
 				}
+				// TODO possibly insert var
 			case 'D': //optype: *v*+vvv prod(sum(prod(vars[0], vars[1]), prod(vars[0], vars[2])), vars[3])
 			case 'F': //optype: *+*vv*vvv prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4]))
 			case 'M':
@@ -801,10 +786,6 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 						print_unification_error(i, op, err, vars[0], vars[1]);
 						fail();
 					}
-					struct type_ptr_b1_map seen = {};
-					remove_vars(&a, &seen);
-					remove_vars(&vars[2], &seen);
-					map_free(&seen);
 					output(prod(a, vars[2]));
 				}
 			case 'K': //optype: *+vvv prod(vars[1], vars[2])
@@ -823,13 +804,7 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 		block->types[i+1] = output;
 	}
 	struct type_ptr_b1_map seen = {};
-	for (usize i = 0; i <= block->size; i++) {
-		remove_vars(&block->types[i], &seen);
-	}
 	map_free(&seen);
-	// TODO make this conditional on a command line flag
-	//printf(" === INFERRED TYPES ===\n");
-	//print_all_types(block->types, block->size + 1);
 	return true;
 }
 

@@ -79,7 +79,7 @@ char *consume(char *directive, u32 *var, u32 indent, u32 loc) {
 					assert(!"Impossible control flow");
 			}
 			iprintf("if (IS_VAR(loc%u)) {", loc);
-			iprintf("	*loc%u = *pool->%s;", loc, type);
+			iprintf("	assign(loc%u, pool->%s);", loc, type);
 			iprintf("} else if (loc%u->symbol != SYMBOL_%s) {", loc, sym);
 			iprintf("	fail_expect(loc%u);", loc);
 			iprintf("}");
@@ -105,20 +105,20 @@ char *consume(char *directive, u32 *var, u32 indent, u32 loc) {
 			}
 			iprintf("if (IS_VAR(loc%u)) {", loc);
 			do_indent(indent);
-			printf("	set_term(loc%u, SYMBOL_%s, ", loc, sym);
+			printf("	assign_alloc(loc%u, SYMBOL_%s, ", loc, sym);
 			u32 var2 = *var;
 			char *construct_directive = construct(directive, &var2);
 			printf(", ");
 			construct(construct_directive, &var2);
-			printf(");\n");
+			printf(", pool);\n");
 			if (c == '[') {
 				iprintf("} else if ((loc%u->symbol & POLYMORPHIC_MASK) == SYMBOL_%s) {", loc, sym);
 			} else {
 				iprintf("} else if (loc%u->symbol == SYMBOL_%s) {", loc, sym);
 			}
-			iprintf("	union type *loc%u = loc%u->child1;", loc + 1, loc);
+			iprintf("	union type *loc%u = deref(loc%u->child1);", loc + 1, loc);
 			directive = consume(directive, var, indent + 1, loc + 1);
-			iprintf("	union type *loc%u = loc%u->child2;", loc + 2, loc);
+			iprintf("	union type *loc%u = deref(loc%u->child2);", loc + 2, loc);
 			directive = consume(directive, var, indent + 1, loc + 2);
 			iprintf("} else {");
 			iprintf("	fail_expect(loc%u);", loc);
@@ -133,7 +133,7 @@ char *consume(char *directive, u32 *var, u32 indent, u32 loc) {
 
 void expect(char *directive) {
 	printf("{\n");
-	printf("	union type *loc0 = input;\n");
+	printf("	union type *loc0 = deref(input);\n");
 	u32 var = 0;
 	directive = consume(directive, &var, 1, 0);
 	char c = *directive;
@@ -196,6 +196,7 @@ int main() {
 no_match:
 		fwrite(line, 1, (usize) size, stdout);
 	}
+	free(line);
 	if (errno != 0) {
 		perror("expect");
 		return 1;
