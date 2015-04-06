@@ -4,6 +4,7 @@ import org.graphstream.graph.Node;
 import org.graphstream.graph.implementations.SingleGraph;
 import org.graphstream.ui.swingViewer.Viewer;
 
+import java.lang.reflect.InvocationTargetException;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -14,6 +15,7 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.swing.SwingUtilities;
 
 /**
  * Created by kyle on 3/04/15.
@@ -40,7 +42,7 @@ public class Main {
             "    text-background-mode: plain;" +
             '}';
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, InterruptedException, InvocationTargetException {
         ServerSocket ssock = new ServerSocket();
         ssock.setReuseAddress(true);
         ssock.bind(new InetSocketAddress(Integer.parseInt(args[0])));
@@ -57,7 +59,7 @@ public class Main {
         g.addAttribute("layout.stabilization-limit", 0.999f);
         g.setAutoCreate(true);
         g.setStrict(false);
-        Viewer viewer = g.display(false);
+        final Viewer viewer = g.display(false);
         Set<String> nodesToRemove = new HashSet<>();
         Set<String> edgesToRemove = new HashSet<>();
         boolean seenRoot = false;
@@ -73,7 +75,11 @@ public class Main {
                 if (stage == 0) {
                     stage = 1;
                 }
-                viewer.disableAutoLayout();
+                SwingUtilities.invokeAndWait(new Runnable() {
+	                public void run() {
+		                viewer.disableAutoLayout();
+	                }
+		});
             } else {
                 if (line.equals("}")) {
                     for (String id : nodesToRemove) {
@@ -87,7 +93,11 @@ public class Main {
                         g.addAttribute("layout.force", 1);
                     }
                     initToRemove(nodesToRemove, edgesToRemove, g);
-                    viewer.enableAutoLayout();
+                    SwingUtilities.invokeAndWait(new Runnable() {
+	                    public void run() {
+		                    viewer.enableAutoLayout();
+	                    }
+                    });
                 } else {
                     Matcher edgeMatcher = edgePattern.matcher(line);
                     Matcher nodeMatcher = nodePattern.matcher(line);
