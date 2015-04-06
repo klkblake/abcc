@@ -40,6 +40,8 @@ char *construct(char *directive, u32 *var) {
 				case '[':
 					constructor = "block";
 					break;
+				default:
+					assert(!"Impossible control flow");
 			}
 			printf("%s(", constructor);
 			directive = construct(directive, var);
@@ -73,6 +75,8 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 					sym = "NUMBER";
 					type = "number";
 					break;
+				default:
+					assert(!"Impossible control flow");
 			}
 			iprintf("if (%s == NULL) {", loc);
 			iprintf("	%s = pool->%s;", loc, type);
@@ -103,17 +107,15 @@ char *consume(char *directive, u32 *var, u32 indent, char *loc, u32 varid) {
 					sym = "BLOCK";
 					type = "block";
 					break;
+				default:
+					assert(!"Impossible control flow");
 			}
-			if (loc > 0) {
-				iprintf("b32 construct%d = false;", varid);
-				iprintf("if (%s == NULL) {", loc);
-				iprintf("	%s = alloc_type(pool);", loc);
-				iprintf("	construct%d = true;", varid);
-				iprintf("}");
-				iprintf("if (construct%d || IS_VAR(%s)) {", varid, loc);
-			} else {
-				iprintf("if (IS_VAR(%s)) {", loc);
-			}
+			iprintf("b32 construct%d = false;", varid);
+			iprintf("if (%s == NULL) {", loc);
+			iprintf("	%s = alloc_type(pool);", loc);
+			iprintf("	construct%d = true;", varid);
+			iprintf("}");
+			iprintf("if (construct%d || IS_VAR(%s)) {", varid, loc);
 			iprintf("	%s->symbol = SYMBOL_%s;", loc, sym);
 			do_indent(indent);
 			printf("	%s->child1 = ", loc);
@@ -172,7 +174,7 @@ void optype(char *directive, usize size) {
 	}
 	end++;
 	printf("output(");
-	fwrite(end, 1, size - (end - directive) - 1, stdout);
+	fwrite(end, 1, size - (usize) (end - directive) - 1, stdout);
 	printf(");\n");
 }
 
@@ -182,12 +184,12 @@ int main() {
 	ssize_t size = 0;
 	errno = 0;
 	while ((size = getline(&line, &cap, stdin)) != -1) {
-		char *comment = memmem(line, size, "//", 2);
+		char *comment = memmem(line, (usize) size, "//", 2);
 		if (comment == NULL) {
 			goto no_match;
 		}
 		char *directive = comment;
-		usize directive_size = size - (directive - line);
+		usize directive_size = (usize) (size - (directive - line));
 		directive += 2;
 		directive_size -= 2;
 		if (directive_size < 8) {
@@ -204,7 +206,7 @@ int main() {
 		if (do_expect) {
 			directive += 8;
 			directive_size -= 8;
-			fwrite(line, 1, comment - line, stdout);
+			fwrite(line, 1, (usize) (comment - line), stdout);
 			putchar('\n');
 			expect(directive);
 			if (do_output) {
@@ -214,7 +216,7 @@ int main() {
 			continue;
 		}
 no_match:
-		fwrite(line, 1, size, stdout);
+		fwrite(line, 1, (usize) size, stdout);
 	}
 	if (errno != 0) {
 		perror("expect");

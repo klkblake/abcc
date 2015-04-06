@@ -1,7 +1,7 @@
 #!/bin/bash
 DEBUG=no
 
-CFLAGS="-Wall -Weverything -Wno-extra-semi -Wno-missing-prototypes -Wno-gnu-empty-initializer -Wno-gnu-statement-expression -Wno-language-extension-token -Wno-gnu-case-range -Wno-padded $CFLAGS"
+CFLAGS="-Wall -Weverything -Wno-extra-semi -Wno-missing-prototypes -Wno-gnu-empty-initializer -Wno-gnu-statement-expression -Wno-language-extension-token -Wno-gnu-case-range -Wno-gnu-zero-variadic-macro-arguments -Wno-padded $CFLAGS"
 
 if [[ "$1" == debug ]]; then
 	DEBUG=yes
@@ -23,6 +23,6 @@ CFLAGS="-std=gnu11 -x c $CFLAGS"
 
 set -e
 
-clang -o expect src/expect.c
+clang $CFLAGS -o expect src/expect.c
 ./expect < src/infer_types.c > src/infer_types.gen.c
 clang $CFLAGS -o abcc src/main.c src/array.c src/map.c src/string.c src/type.c src/block.c src/parser.c src/peephole.c src/infer_types.gen.c
