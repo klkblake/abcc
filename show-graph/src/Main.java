@@ -30,14 +30,12 @@ public class Main {
             "    padding: 4;" +
             "    fill-color: white;" +
             "    stroke-mode: plain;" +
-            "    text-size: 16;" +
             '}' +
             "node.root {" +
             "    fill-color: red;" +
             '}' +
             "edge {" +
             "    shape: cubic-curve;" +
-            "    text-size: 16;" +
             "    text-alignment: along;" +
             "    text-background-mode: plain;" +
             '}';
@@ -68,6 +66,7 @@ public class Main {
         while ((line = in.readLine()) != null) {
             line = line.trim();
             if (line.startsWith("digraph ") || line.startsWith("subgraph ")) {
+	            seenRoot = false;
                 if (stage == 1) {
                     stage = 2;
                     g.addAttribute("layout.force", 0.01f);
@@ -114,7 +113,7 @@ public class Main {
                         String to = edgeMatcher.group(2);
                         // XXX self-loops are busted
                         assert from != null;
-                        if (!from.equals(to)) {
+                        if (!from.equals(to) || !(edgeMatcher.group(3).equals("rep") || edgeMatcher.group(3).equals("next"))) {
                             String id = from + " -> " + to;
                             g.addEdge(id, from, to, true).addAttribute("ui.label", deescape(edgeMatcher.group(3)));
                             edgesToRemove.remove(id);
