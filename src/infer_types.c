@@ -430,9 +430,10 @@ struct unification_error unify(union type *left, union type *right) {
 		union type *v = array_pop(&var_stack);
 		u64 k = v->term_count &~ VAR_BIT;
 		if (k >= 2) {
+			union type *t_data[k];
 			struct type_ptr_array t;
 			t.cap = t.size = k;
-			t.data = alloca(t.cap * sizeof(union type *));
+			t.data = t_data;
 			union type *t0 = v->terms;
 			for (u64 i = 0; i < k; i++) {
 				t.data[i] = t0;
