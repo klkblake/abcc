@@ -105,7 +105,7 @@ char *consume(char *directive, u32 *var, u32 indent, u32 loc) {
 			}
 			iprintf("if (IS_VAR(loc%u)) {", loc);
 			do_indent(indent);
-			printf("	assign_alloc(loc%u, SYMBOL_%s, ", loc, sym);
+			printf("	assign_term(loc%u, SYMBOL_%s, ", loc, sym);
 			u32 var2 = *var;
 			char *construct_directive = construct(directive, &var2);
 			printf(", ");

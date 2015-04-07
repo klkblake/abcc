@@ -463,36 +463,25 @@ union type *deref(union type *type) {
 }
 
 internal
-void assign(union type *var, union type *value) {
+void assign(union type *var, union type *term) {
 	assert(var->terms == NULL);
-		var->terms = value;
-		var->term_count = 1 | VAR_BIT;
+	assert(var->rep == var);
+	var->terms = term;
+	var->term_count = 1 | VAR_BIT;
 }
 
 internal
-void assign_alloc(union type *var, u64 symbol, union type *c1, union type *c2, struct type_pool *pool) {
-	assert(var->terms == NULL);
-	if (var->var_count > 1) {
-		union type *value = alloc_type(pool);
-		set_term(value, symbol, c1, c2);
-		var->terms = value;
-		var->term_count = 1 | VAR_BIT;
-	} else {
-		set_term(var, symbol, c1, c2);
-	}
+void assign_term(union type *var, u64 symbol, union type *c1, union type *c2, struct type_pool *pool) {
+	union type *term = alloc_type(pool);
+	set_term(term, symbol, c1, c2);
+	assign(var, term);
 }
 
 internal
 void assign_sealed(union type *var, struct string_rc *seal, union type *c1, struct type_pool *pool) {
-	assert(var->terms == NULL);
-	if (var->var_count > 1) {
-		union type *value = alloc_type(pool);
-		set_sealed(value, seal, c1);
-		var->terms = value;
-		var->term_count = 1 | VAR_BIT;
-	} else {
-		set_sealed(var, seal, c1);
-	}
+	union type *term = alloc_type(pool);
+	set_sealed(term, seal, c1);
+	assign(var, term);
 }
 
 #if 0
@@ -655,6 +644,7 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 						}
 					} else {
 						assign_sealed(type, seal, var(), pool);
+						type = deref(type);
 					}
 					output(prod(type->child1, vars[1]));
 				}
@@ -666,21 +656,19 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 				        if (input == pool->text) {
 					        output(input);
 					}
-				        union type *initial = input;
 					// We use Floyd's "tortoise and hare"
 					// algorithm for cycle detection
-					// TODO this is clearly broken -- where is vars[0] coming from?
-					for (union type *tortoise = input;
+				        vars[0] = NULL;
+					for (union type *tortoise = deref(input);
 					     vars[0] != pool->text && vars[0] != tortoise;
-					     tortoise = tortoise->child1->child2, input = vars[0]) {
+					     tortoise = deref(deref(tortoise->child1)->child2), input = vars[0]) {
 						//expect: +*N+*Nv11 // Two iterations of the loop
+						vars[0] = deref(vars[0]);
 						if (IS_VAR(vars[0])) {
-							input->child1->child2->child1->child2 = pool->text;
+							assign(vars[0], pool->text);
 							vars[0] = pool->text;
 						}
 					}
-					*initial = *pool->text;
-					block->types[i] = pool->text;
 					output(pool->text);
 				}
 
@@ -829,10 +817,10 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 b32 infer_types(struct block_ptr_array blocks, struct type_pool *pool) {
 	pool->unit   = set_term(alloc_type(pool), SYMBOL_UNIT,   NULL, NULL);
 	pool->number = set_term(alloc_type(pool), SYMBOL_NUMBER, NULL, NULL);
-	pool->text   = set_term(alloc_type(pool), SYMBOL_SUM,
-	                        set_term(alloc_type(pool), SYMBOL_PRODUCT, pool->number, NULL),
-	                        pool->unit);
-	pool->text->child1->child2 = pool->text;
+	pool->text   = var();
+	assign(pool->text, set_term(alloc_type(pool), SYMBOL_SUM,
+	                            set_term(alloc_type(pool), SYMBOL_PRODUCT, pool->number, pool->text),
+	                            pool->unit));
 	foreach (block, blocks) {
 		if (!infer_block(*block, pool)) {
 			printf("Failed in block %lu\n", block_index);
