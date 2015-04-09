@@ -563,10 +563,11 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct type_pool *po
 #endif
 
 void print_expect_error(usize i, u8 op, union type* loc, union type *input) {
-		printf("Error on opcode %lu (%c), expected product, got ", i, op);
-		print_symbol(stdout, loc->symbol);
-		putchar('\n');
-		print_type_graph_root(stdout, input, 1);
+	printf("Error on opcode %lu (%c), expected product, got ", i, op);
+	print_symbol(stdout, loc->symbol);
+	putchar('\n');
+	print_type_single(input);
+	putchar('\n');
 }
 
 // TODO be consistent with stdout/stderr
@@ -810,8 +811,6 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 		}
 		block->types[i+1] = output;
 	}
-	struct type_ptr_b1_map seen = {};
-	map_free(&seen);
 	return true;
 }
 

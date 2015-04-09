@@ -53,6 +53,11 @@ void push_var(struct u8_array *buf, u64 var) {
 internal
 void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struct type_ptr_u64_map *vars, struct u8_array *buf) {
 	if (IS_VAR(type)) {
+		union type *type_rep = type->rep;
+		while (type != type_rep) {
+			type = type_rep;
+			type_rep = type->rep;
+		}
 		usize term_count = type->term_count &~ VAR_BIT;
 		if (term_count == 0) {
 			struct type_ptr_u64_map_get_result result = type_ptr_u64_map_get(vars, type);

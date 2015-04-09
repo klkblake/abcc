@@ -8,7 +8,7 @@
 void print_backtrace(struct ao_stack_frame *frame) {
 	printf("Backtrace:\n");
 	if (frame == NULL) {
-		printf("No backtrace data available");
+		printf("No backtrace data available\n");
 		return;
 	}
 	while (frame != NULL) {
