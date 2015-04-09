@@ -315,6 +315,7 @@ struct unification_error commonFrontier(struct type_ptr_array t_list, struct typ
 		}
 	} else {
 		u64 all = sym;
+		u64 any = sym;
 		sym &= POLYMORPHIC_MASK;
 		foreach (term, t_list) {
 			if (((*term)->symbol & POLYMORPHIC_MASK) != sym) {
@@ -324,10 +325,9 @@ struct unification_error commonFrontier(struct type_ptr_array t_list, struct typ
 				};
 			}
 			all &= (*term)->symbol;
+			any |= (*term)->symbol;
 		}
-		// TODO check whether we need to do this for all, or just for
-		// the first.
-		if (!(all & POLYMORPHIC_BIT)) {
+		if ((any & POLYMORPHIC_BIT) && !(all & POLYMORPHIC_BIT)) {
 			foreach (term, t_list) {
 				(*term)->symbol &= POLYMORPHIC_MASK;
 			}
