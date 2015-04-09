@@ -616,7 +616,7 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 					struct block *b = block->blocks[block_index++];
 					union type *bty = block(b->types[0], b->types[b->size]);
 					bty->symbol |= POLYMORPHIC_BIT;
-					output(prod(bty, input));
+					output(prod(inst(bty, pool), input));
 				}
 			case '"':     output(prod(pool->text, input));
 			case OP_SEAL: //optype: *vv prod(sealed(block->sealers[sealer_index++], vars[0]), vars[1])
@@ -688,7 +688,7 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 						t = var();
 						t->terms = vars[0];
 					}
-					output(prod(t, prod(t, vars[1])));
+					output(prod(t, prod(inst(t, pool), vars[1])));
 				}
 
 			case '$': // TODO incorporate fixpoint stuff for semi-polymorphic recursion
@@ -779,7 +779,7 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 						t = var();
 						t->terms = vars[0];
 					}
-					output(prod(sum(prod(t, vars[1]), prod(t, vars[2])), vars[3]));
+					output(prod(sum(prod(t, vars[1]), prod(inst(t, pool), vars[2])), vars[3]));
 				}
 			case 'F': //optype: *+*vv*vvv prod(sum(vars[0], vars[2]), prod(sum(vars[1], vars[3]), vars[4]))
 			case 'M':
