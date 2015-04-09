@@ -368,9 +368,9 @@ struct unification_error commonFrontier(struct type_ptr_array t_list, struct typ
 			usize j = s0.data[0];
 			s0.data++;
 			s0.size--;
-			union type tmp = *t_list.data[0];
-			*t_list.data[0] = *t_list.data[j];
-			*t_list.data[j] = tmp;
+			for (usize k = 0; k < t_list.size; k++) {
+				(&t_list.data[k]->child1)[i] = (&t_list.data[j]->child1)[i];
+			}
 			union type *v = rep(t0_list.data[j]);
 			foreach (k, s0) {
 				union type *v2 = rep(t0_list.data[*k]);
