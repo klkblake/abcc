@@ -43,8 +43,7 @@ internal
 union type *set_var(union type *type) {
 	type->rep = type;
 	type->terms = NULL;
-	type->term_count = VAR_BIT;
-	type->var_count = 1;
+	type->var_count = 1 | VAR_BIT;
 	return type;
 }
 
@@ -75,8 +74,7 @@ void print_type_graph(FILE *out, union type *t, u64 id, struct type_ptr_b1_map *
 	if (!result.found) {
 		type_ptr_b1_map_put_bucket(seen, t, true, result.bucket);
 		if (IS_VAR(t)) {
-			fprintf(out, "node_%lu_%p [label=\"%lu, %llu\"]\n",
-			        id, t, t->var_count, t->term_count &~ VAR_BIT);
+			fprintf(out, "node_%lu_%p [label=\"%llu\"]\n", id, t, t->var_count &~ VAR_BIT);
 			fprintf(out, "node_%lu_%p -> node_%lu_%p [label=\"rep\"]\n", id, t, id, t->rep);
 			if (t->rep != t) {
 				print_type_graph(out, t->rep, id, seen);
@@ -198,13 +196,11 @@ union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *cop
 	type_ptr_map_put_bucket(copied, type, new, map_result.bucket);
 	if (IS_VAR(type)) {
 		new->rep = new;
-		new->var_count = 1;
+		new->var_count = 1 | VAR_BIT;
 		if (type->terms) {
 			new->terms = inst_copy(type->terms, share_vars, copied, pool);
-			new->term_count = 1 | VAR_BIT;
 		} else {
 			new->terms = NULL;
-			new->term_count = VAR_BIT;
 		}
 	} else {
 		if (type->symbol == (SYMBOL_BLOCK | POLYMORPHIC_BIT)) {
@@ -212,7 +208,7 @@ union type *inst_copy(union type *type, b32 share_vars, struct type_ptr_map *cop
 		}
 		new->symbol = type->symbol;
 		new->next = new;
-		new->term_count = 0; // Set as term
+		new->child1 = NULL; // Set as term
 		new->child1 = inst_copy(type->child1, share_vars, copied, pool);
 		if (!IS_SEALED(type->symbol)) {
 			new->child2 = inst_copy(type->child2, share_vars, copied, pool);
@@ -250,24 +246,23 @@ void print_unification_error(usize i, u8 op, struct unification_error err, union
 
 internal
 void add(union type *v, union type *t, struct type_ptr_array *var_stack) {
-	if ((v->term_count &~ VAR_BIT) == 1) {
-		array_push(var_stack, v);
-	}
 	union type *t0 = v->terms;
 	if (t0 == NULL) {
 		v->terms = t;
-		t->next = t;
 	} else {
-		t->next = t0->next;
-		t0->next = t;
+		if (t0->next == t0) {
+			array_push(var_stack, v);
+		}
+		union type *tmp = t0->next;
+		t0->next = t->next;
+		t->next = tmp;
 	}
-	v->term_count++;
 }
 
 internal
 void merge(union type *v1, union type *v2, struct type_ptr_array *var_stack) {
-	u64 r1 = v1->var_count;
-	u64 r2 = v2->var_count;
+	u64 r1 = v1->var_count &~ VAR_BIT;
+	u64 r2 = v2->var_count &~ VAR_BIT;
 	union type *bigV, *v;
 	if (r1 >= r2) {
 		bigV = v1;
@@ -276,13 +271,13 @@ void merge(union type *v1, union type *v2, struct type_ptr_array *var_stack) {
 		bigV = v2;
 		v = v1;
 	}
-	u64 k1 = bigV->term_count &~ VAR_BIT;
-	u64 k2 = v->term_count &~ VAR_BIT;
-	if (k1 <= 1 && k1 + k2 > 1) {
-		array_push(var_stack, bigV);
-	}
 	union type *t0 = v->terms;
 	union type *t1 = bigV->terms;
+	// This is checking if bigV has at most 1 terms and the sum of the
+	// number of terms is at least two
+	if ((t1 == NULL && t0 != NULL && t0->next != t0) || (t1 != NULL && t1->next == t1 && t0 != NULL)) {
+		array_push(var_stack, bigV);
+	}
 	if (t1 == NULL) {
 		bigV->terms = t0;
 	} else if (t0 != NULL) {
@@ -292,10 +287,8 @@ void merge(union type *v1, union type *v2, struct type_ptr_array *var_stack) {
 	}
 	v->rep = bigV;
 	v->terms = NULL;
-	v->var_count = 0;
-	v->term_count = VAR_BIT;
-	bigV->var_count = r1 + r2;
-	bigV->term_count = (k1 + k2) | VAR_BIT;
+	v->var_count = VAR_BIT;
+	bigV->var_count = r1 + r2 | VAR_BIT;
 }
 
 DEFINE_ARRAY(usize, usize);
@@ -428,7 +421,15 @@ struct unification_error unify(union type *left, union type *right) {
 	}
 	while (var_stack.size > 0) {
 		union type *v = array_pop(&var_stack);
-		u64 k = v->term_count &~ VAR_BIT;
+		u64 k = 0;
+		if (v->terms != NULL) {
+			k = 1;
+			union type *term = v->terms;
+			while (term->next != v->terms) {
+				k++;
+				term = term->next;
+			}
+		}
 		if (k >= 2) {
 			union type *t_data[k];
 			struct type_ptr_array t;
@@ -438,9 +439,8 @@ struct unification_error unify(union type *left, union type *right) {
 			for (u64 i = 0; i < k; i++) {
 				t.data[i] = t0;
 				t0 = t0->next;
+				t.data[i]->next = t.data[i];
 			}
-			t.data[0]->next = t.data[0];
-			v->term_count = 1 | VAR_BIT;
 			err = commonFrontier(t, &var_stack);
 			if (err.left != err.right) {
 				array_free(&var_stack);
@@ -468,7 +468,6 @@ void assign(union type *var, union type *term) {
 	assert(var->terms == NULL);
 	assert(var->rep == var);
 	var->terms = term;
-	var->term_count = 1 | VAR_BIT;
 }
 
 internal
@@ -688,7 +687,6 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 					if (!IS_VAR(t)) {
 						t = var();
 						t->terms = vars[0];
-						t->term_count = 1 | VAR_BIT;
 					}
 					output(prod(t, prod(t, vars[1])));
 				}
@@ -780,7 +778,6 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 					if (!IS_VAR(t)) {
 						t = var();
 						t->terms = vars[0];
-						t->term_count = 1 | VAR_BIT;
 					}
 					output(prod(sum(prod(t, vars[1]), prod(t, vars[2])), vars[3]));
 				}

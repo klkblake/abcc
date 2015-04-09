@@ -58,8 +58,7 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 			type = type_rep;
 			type_rep = type->rep;
 		}
-		usize term_count = type->term_count &~ VAR_BIT;
-		if (term_count == 0) {
+		if (type->terms == NULL) {
 			struct type_ptr_u64_map_get_result result = type_ptr_u64_map_get(vars, type);
 			if (!result.found) {
 				result.value = vars->size;
@@ -67,20 +66,20 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 			}
 			push_var(buf, result.value);
 			return;
-		} else if (term_count == 1) {
+		} else if (type->terms->next == type->terms) {
 			type = type->terms;
 		} else {
 			array_push(buf, '{');
 			union type *term = type->terms;
-			for (usize i = 0; i < term_count; i++) {
+			do {
 				// TODO consider printing out the full type
-				if (i != 0) {
+				if (term == type->terms) {
 					array_push(buf, ',');
 				}
 				if (IS_SEALED(term->symbol)) {
-					array_push(buf, '"');
-					push_many(buf, term->seal->data, term->seal->size);
 					push_cstring(buf, "sealed \" ");
+					push_many(buf, term->seal->data, term->seal->size);
+					array_push(buf, '"');
 				} else {
 					switch (term->symbol) {
 						case SYMBOL_VOID:    array_push(buf, '0'); break;
@@ -93,7 +92,8 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 						default: array_push(buf, '?'); break;
 					}
 				}
-			}
+				term = term->next;
+			} while (term != type->terms);
 			array_push(buf, '}');
 			return;
 		}
