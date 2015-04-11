@@ -243,13 +243,14 @@ DEFINE_MEMO_TABLE(block, struct block,
                   *entry = *block);
 
 #define PARSE_WARN (1u << 31)
-#define PARSE_ERR_EOF_IN_BLOCK        0
-#define PARSE_ERR_EOF_IN_INVOCATION   1
-#define PARSE_ERR_EOF_IN_TEXT         2
-#define PARSE_ERR_ILLEGAL_OPCODE      3
-#define PARSE_ERR_UNEXPECTED_BRACKET  4
-#define PARSE_ERR_UNKNOWN_INVOCATION  5
-#define PARSE_ERR_MALFORMED_TEXT      6
+#define PARSE_ERR_EOF_IN_BLOCK         0
+#define PARSE_ERR_EOF_IN_INVOCATION    1
+#define PARSE_ERR_EOF_IN_TEXT          2
+#define PARSE_ERR_ILLEGAL_OPCODE       3
+#define PARSE_ERR_UNEXPECTED_BRACKET   4
+#define PARSE_ERR_UNKNOWN_INVOCATION   5
+#define PARSE_ERR_MALFORMED_INVOCATION 6
+#define PARSE_ERR_MALFORMED_TEXT       7
 #define PARSE_WARN_UNKNOWN_ANNOTATION   (PARSE_WARN | 0)
 #define PARSE_WARN_UNEXPECTED_FRAME_POP (PARSE_WARN | 1)
 #define PARSE_WARN_MISMATCHED_FRAME_POP (PARSE_WARN | 2)
@@ -262,6 +263,7 @@ static char *parse_error_messages[] = {
 	"Illegal opcode",
 	"Unexpected closing bracket ']'",
 	"Unknown invocation",
+	"Illegal character in invocation",
 	"Malformed text literal",
 };
 
@@ -338,14 +340,24 @@ void report_error_here(struct parse_state *state, u32 code) {
 	report_error(state, code, state->lineno, state->col);
 }
 
+#define CHECK_INV_CHAR(c) \
+	do { \
+		if (c == '{' || c == '\n') { \
+			report_error_here(state, PARSE_ERR_MALFORMED_INVOCATION); \
+			return false; \
+		} \
+		if (c == EOF) { \
+			report_error_here(state, PARSE_ERR_EOF_IN_INVOCATION); \
+			return false; \
+		} \
+	} while (false)
+
 internal
 b32 eat_unknown_annotation(struct parse_state *state) {
 	report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
 	i32 c;
 	while ((c = next(state)) != '}') {
-		if (c == EOF) {
-			return false;
-		}
+		CHECK_INV_CHAR(c);
 	}
 	return true;
 }
@@ -356,41 +368,32 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 	u8 word_buf[4096];
 	struct u8_array word_array = {word_buf, 0, sizeof(word_buf)/sizeof(u8)};
 	while ((c = next(state)) != '@') {
+		CHECK_INV_CHAR(c);
 		if (c == '}') {
 			report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
 			return true;
-		}
-		if (c == EOF) {
-			return false;
 		}
 		array_stack_snoc(word_buf, &word_array, (u8)c);
 	}
 	u8 file_buf[4096];
-	struct u8_array file_array = (struct u8_array){file_buf, 0, sizeof(file_buf)/sizeof(u8)};
+	struct u8_array file_array = {file_buf, 0, sizeof(file_buf)/sizeof(u8)};
 	while ((c = next(state)) != ':') {
+		CHECK_INV_CHAR(c);
 		if (c == '}') {
 			report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
 			array_stack_free(word_buf, &word_array);
 			return true;
-		}
-		if (c == EOF) {
-			array_stack_free(word_buf, &word_array);
-			return false;
 		}
 		array_stack_snoc(file_buf, &file_array, (u8)c);
 	}
 	u32 line = 0;
 	while ((c = next(state)) != '}') {
+		CHECK_INV_CHAR(c);
 		if (c < '0' || c > '9') {
 			report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
 			array_stack_free(word_buf, &word_array);
 			array_stack_free(file_buf, &file_array);
 			return true;
-		}
-		if (c == EOF) {
-			array_stack_free(word_buf, &word_array);
-			array_stack_free(file_buf, &file_array);
-			return false;
 		}
 		line = line * 10 + (u8)c - '0';
 	}
@@ -430,12 +433,18 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 	return true;
 }
 
-// 0 on success, 1 on failure, EOF on EOF
+// 0 on success, 1 on failure, EOF on EOF or error
 internal
 i32 match_annotation_part(struct parse_state *state, u8 *target) {
 	while (*target != '\0') {
 		i32 c = next(state);
+		// TODO change the return values so we can use CHECK_INV_CHAR() here
+		if (c == '{' || c == '\n') {
+			report_error_here(state, PARSE_ERR_MALFORMED_INVOCATION);
+			return EOF;
+		}
 		if (c == EOF) {
+			report_error_here(state, PARSE_ERR_EOF_IN_INVOCATION);
 			return EOF;
 		}
 		if (c != *target) {
@@ -444,6 +453,7 @@ i32 match_annotation_part(struct parse_state *state, u8 *target) {
 			}
 			return 1;
 		}
+		target++;
 	}
 	return 0;
 }
@@ -452,12 +462,10 @@ internal
 b32 parse_annotation(struct parse_state *state) {
 	u8 cs[3];
 	i32 c = next(state);
+	CHECK_INV_CHAR(c);
 	if (c == '}') {
 		report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
 		return true;
-	}
-	if (c == EOF) {
-		return false;
 	}
 	if (c == '+') {
 		return parse_stack_annotation(state, true);
@@ -471,14 +479,13 @@ b32 parse_annotation(struct parse_state *state) {
 			report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
 			return true;
 		}
-		if (c == EOF) {
-			return false;
-		}
+		CHECK_INV_CHAR(c);
 		cs[i] = (u8)c;
 	}
 	// UTF-8 encoding of ≡
 	if (cs[0] == 0xe2 && cs[1] ==0x89 && cs[2] == 0xa1) {
 		c = next(state);
+		CHECK_INV_CHAR(c);
 		if (c != '}') {
 			return eat_unknown_annotation(state);
 		}
@@ -493,9 +500,7 @@ b32 parse_annotation(struct parse_state *state) {
 			report_error_here(state, PARSE_WARN_UNKNOWN_ANNOTATION);
 			return true;
 		}
-		if (c == EOF) {
-			return false;
-		}
+		CHECK_INV_CHAR(c);
 		u8 *target;
 		u8 op;
 		if (c == 'r') {
@@ -524,9 +529,7 @@ b32 parse_sealer(struct parse_state *state, u8 op) {
 	struct u8_array text = {buf, 0, sizeof(buf) / sizeof(u8)};
 	i32 c;
 	while ((c = next(state)) != '}') {
-		if (c == EOF) {
-			return false;
-		}
+		CHECK_INV_CHAR(c);
 		array_stack_snoc(buf, &text, (u8)c);
 	}
 	array_push(&state->block->opcodes, op);
@@ -538,10 +541,7 @@ b32 parse_sealer(struct parse_state *state, u8 op) {
 internal
 b32 parse_invokation(struct parse_state *state) {
 	i32 type = next(state);
-	if (type == EOF) {
-		report_error_here(state, PARSE_ERR_EOF_IN_INVOCATION);
-		return false;
-	}
+	CHECK_INV_CHAR(type);
 	b32 succeeded;
 	switch ((u8)type) {
 		case '&':
@@ -556,9 +556,6 @@ b32 parse_invokation(struct parse_state *state) {
 		default:
 			report_error_here(state, PARSE_ERR_UNKNOWN_INVOCATION);
 			return false;
-	}
-	if (!succeeded) {
-		report_error_here(state, PARSE_ERR_EOF_IN_INVOCATION);
 	}
 	return succeeded;
 }
