@@ -291,8 +291,10 @@ struct parse_state {
 internal
 i32 next(struct parse_state *state) {
 	if (state->byte_index == state->line.size) {
+		usize oldsize = state->line.size;
 		state->line.size = (usize)getline((char **)&state->line.data, &state->line.cap, state->stream);
 		if (state->line.size == (usize)-1) {
+			state->line.size = oldsize;
 			return EOF;
 		}
 		state->byte_index = 0;
