@@ -733,7 +733,6 @@ struct parse_result parse(FILE *stream) {
 	struct parse_block_result result = parse_block(&state, true);
 	if (state.frame != NULL) {
 		report_error_here(&state, PARSE_WARN_EOF_IN_FRAME);
-		ao_stack_frame_decref(state.frame);
 	}
 	string_rc_memo_table_free(&state.string_table);
 	ao_stack_frame_memo_table_free(&state.frame_table);
