@@ -662,11 +662,12 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 				        vars[0] = NULL;
 					for (union type *tortoise = deref(input);
 					     vars[0] != pool->text && vars[0] != tortoise;
-					     tortoise = deref(deref(tortoise->child1)->child2), input = vars[0]) {
+					     tortoise = deref(deref(deref(tortoise)->child1)->child2),
+					     input = vars[0]) {
 						//expect: +*N+*Nv11 // Two iterations of the loop
 						vars[0] = deref(vars[0]);
 						if (IS_VAR(vars[0])) {
-							assign(vars[0], pool->text);
+							assign(vars[0], pool->text->terms);
 							vars[0] = pool->text;
 						}
 					}
