@@ -4,6 +4,11 @@ mkdir -p words
 rm -f words/*
 time ao list '*' | while read -r w
 do
-	echo "$w"
-	ao abc.ann "$w" > words/w-"$(echo "$w" | tr '/' '@')"
+	if grep -F -x -q -- "$w" word-blacklist; then
+		#skip
+		echo "$w -- BLACKLISTED"
+	else
+		echo "$w"
+		ao abc.ann "$w" > words/w-"$(echo "$w" | tr '/' '@')"
+	fi
 done

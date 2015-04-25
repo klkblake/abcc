@@ -1,12 +1,7 @@
 #!/bin/bash
 rm -f all
 for w in words/w-*; do
-	if grep -F -q -- "$(echo -n "$w" | cut -c9-)" word-blacklist; then
-		# skip
-		true
-	else
-		echo -n '[' >> all
-		cat "$w" >> all
-		echo ']%' >> all
-	fi
+	echo -n '[' >> all
+	cat "$w" >> all
+	echo ']%' >> all
 done
