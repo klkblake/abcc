@@ -8,3 +8,13 @@ n3.removeK.t23
 removeK.rbt
 rmx.z.rbt
 prc.rmx.z.rbt
+fmap.t23
+t.fmap.t23
+nn.fmap.t23
+n2.fmap.t23
+n3.fmap.t23
+insertKV.AATree
+apEnv.insertKV.AATree
+node.insertKV.AATree
+writeABCFile.io
+blockToText.io
