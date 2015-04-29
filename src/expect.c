@@ -1,10 +1,9 @@
-#define _GNU_SOURCE
+#include "abcc.h"
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-
-#include "abcc.h"
 
 void do_indent(u32 indent) {
 	for (u32 i = 0; i < indent; i++) {

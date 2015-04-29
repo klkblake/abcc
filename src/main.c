@@ -5,6 +5,7 @@
 #include "parser.h"
 #include "peephole.h"
 #include "infer_types.h"
+#include "build_graphs.h"
 
 char *global_source = NULL;
 b32 global_verbose = false;
@@ -112,6 +113,7 @@ int main(int argc, char **argv) {
 		map_free(&vars);
 		goto cleanup_typecheck;
 	}
+	build_graphs(result.blocks);
 
 cleanup_typecheck:
 	foreach (chunk, pool.chunks) {

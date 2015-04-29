@@ -160,20 +160,6 @@ void graph_server_send(union type *t) {
 	fflush(global_graph_server_out);
 }
 
-internal
-union type *rep(union type *v) {
-	union type *v0 = v->rep;
-	while (v0 != v0->rep) {
-		v0 = v0->rep;
-	}
-	while (v->rep != v0) {
-		union type *tmp = v->rep;
-		v->rep = v0;
-		v = tmp;
-	}
-	return v0;
-}
-
 // TODO Use modified version of Tarjan's SCC algorithm as per
 // http://stackoverflow.com/questions/28924321/copying-part-of-a-graph
 // TODO Will that work with the requirement for sharing via variables?
@@ -450,17 +436,6 @@ struct unification_error unify(union type *left, union type *right) {
 	}
 	array_free(&var_stack);
 	return (struct unification_error){};
-}
-
-internal
-union type *deref(union type *type) {
-	if (IS_VAR(type)) {
-		type = rep(type);
-		if (type->terms) {
-			return type->terms;
-		}
-	}
-	return type;
 }
 
 internal

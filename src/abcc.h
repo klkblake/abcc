@@ -16,10 +16,14 @@ typedef __UINT16_TYPE__ u16;
 typedef __UINT32_TYPE__ u32;
 typedef __UINT64_TYPE__ u64;
 
+typedef double f64;
+
 typedef _Bool b1;
 typedef u32  b32;
 
 typedef __SIZE_TYPE__  usize;
+
+static_assert(sizeof(f64) == 8, "f64 is the wrong size");
 
 #ifndef NULL
 #define NULL ((void *) 0)

@@ -55,5 +55,8 @@ static_assert(offsetof(union type, child1) == offsetof(union type, var_count), "
 void print_type(union type *type, struct type_ptr_u64_map *vars);
 void print_type_single(union type *type);
 
+union type *rep(union type *v);
+union type *deref(union type *type);
+
 #define TYPE_H
 #endif

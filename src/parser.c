@@ -633,6 +633,7 @@ struct parse_block_result parse_block(struct parse_state *state, b32 expect_eof)
 				block.blocks.data,
 				block.texts.data,
 				block.sealers.data,
+				(struct graph){},
 				1,
 			};
 			struct block *memo_block = memoise_block(&state->block_table, &complete_block, jenkins_finalise(state->hash));

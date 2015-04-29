@@ -1,6 +1,5 @@
 #include "type.h"
 
-#define _GNU_SOURCE
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -210,4 +209,27 @@ void print_type_single(union type *type) {
 	struct type_ptr_u64_map vars = {};
 	print_type(type, &vars);
 	map_free(&vars);
+}
+
+union type *rep(union type *v) {
+	union type *v0 = v->rep;
+	while (v0 != v0->rep) {
+		v0 = v0->rep;
+	}
+	while (v->rep != v0) {
+		union type *tmp = v->rep;
+		v->rep = v0;
+		v = tmp;
+	}
+	return v0;
+}
+
+union type *deref(union type *type) {
+	if (IS_VAR(type)) {
+		type = rep(type);
+		if (type->terms) {
+			return type->terms;
+		}
+	}
+	return type;
 }

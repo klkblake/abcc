@@ -1,7 +1,7 @@
 #ifndef BLOCK_H
 
 #include "abcc.h"
-#include "array.h"
+#include "graph.h"
 
 #define OP_FRAME_PUSH       1
 #define OP_FRAME_POP        2
@@ -27,6 +27,7 @@ struct block {
 	struct block **blocks;
 	struct string_rc **texts;
 	struct string_rc **sealers;
+	struct graph graph;
 	// Unlike for other structs, this is not used for memory management
 	u32 refcount;
 };
