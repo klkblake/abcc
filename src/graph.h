@@ -54,6 +54,7 @@ struct node {
 		struct string_rc *text;
 		f64 number; // XXX should be a rational
 	};
+	u64 seen;
 };
 DEFINE_ARRAY(struct node *, node_ptr);
 

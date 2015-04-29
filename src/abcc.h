@@ -35,5 +35,7 @@ static_assert(sizeof(f64) == 8, "f64 is the wrong size");
 
 #define offsetof(type, member) __builtin_offsetof(type, member)
 
+#define array_count(array) (sizeof(array) / sizeof((array)[0]))
+
 #define ABCC_H
 #endif

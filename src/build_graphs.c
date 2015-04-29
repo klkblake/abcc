@@ -562,12 +562,10 @@ void build_graph(struct block *block) {
 				{
 					unpair2(last);
 					struct node *greater = append_node20(&pool, UOP_GREATER, links[0], links[1]);
-					union type *type1 = links[0].node->output_type[links[0].slot];
-					union type *type2 = links[1].node->output_type[links[1].slot];
-					struct link g0 = {greater, 0, type2};
-					struct link g1 = {greater, 1, type1};
-					struct link g2 = {greater, 2, type1};
-					struct link g3 = {greater, 3, type2};
+					struct link g0 = {greater, 0, links[1].type};
+					struct link g1 = {greater, 1, links[0].type};
+					struct link g2 = {greater, 2, links[0].type};
+					struct link g3 = {greater, 3, links[1].type};
 					greater->output_type[0] = g0.type;
 					greater->output_type[1] = g1.type;
 					greater->output_type[2] = g2.type;
@@ -596,9 +594,135 @@ void build_graph(struct block *block) {
 	}
 }
 
-b32 build_graphs(struct block_ptr_array blocks) {
+internal u64 global_traversal = 1;
+
+internal char *uop_names[] = {
+	"seal",
+	"unseal",
+	"create pair",
+	"destroy pair",
+	"create sum",
+	"destroy sum",
+	"unit constant",
+	"void constant",
+	"block constant",
+	"number constant",
+	"text constant",
+	"copy",
+	"drop",
+	"apply",
+	"compose",
+	"quote",
+	"mark relevant",
+	"mark affine",
+	"add",
+	"multiply",
+	"inverse",
+	"negate",
+	"divmod",
+	"distribute",
+	"merge",
+	"greater",
+	"assert copyable",
+	"assert droppable",
+	"assert nonzero",
+	"assert void",
+	"assert equal",
+	"debug print raw",
+	"debug print text",
+};
+
+#include <stdio.h>
+
+void print_node_link(struct node *from, struct node *to, char *from_port) {
+	char *to_port;
+	if (to->in[1] == NULL) {
+		to_port = "c";
+	} else if (from == to->in[0]) {
+		to_port = "nw";
+	} else {
+		to_port = "ne";
+	}
+
+	printf("node_%p:%s -> node_%p:%s\n", from, from_port, to, to_port);
+}
+
+void print_node(struct node *node, u64 traversal) {
+	if (node->seen == traversal) {
+		return;
+	}
+	node->seen = traversal;
+	switch (node->uop) {
+		case UOP_NUMBER_CONSTANT:
+			printf("node_%p [label=\"constant: %f\"]\n", node, node->number);
+			break;
+		case UOP_BLOCK_CONSTANT:
+			if (node->block->input) {
+				printf("node_%p [label=\"block constant\"]\n", node);
+				printf("node_%p -> node_%p [style=dotted,constraint=false]\n",
+				       node, node->block->input);
+			} else {
+				printf("node_%p [label=\"empty block constant\"]\n", node);
+			}
+			break;
+		default:
+			printf("node_%p [label=\"%s\"]\n", node, uop_names[node->uop]);
+	}
+	u32 out_count = 0;
+	for (u32 i = 0; node->out[i] && i < array_count(node->out); i++) {
+		print_node(node->out[i], traversal);
+		out_count++;
+	}
+	switch (out_count) {
+		case 0: break;
+		case 1:
+		        print_node_link(node, node->out[0], "c");
+		        break;
+		case 2:
+		        print_node_link(node, node->out[0], "sw");
+		        print_node_link(node, node->out[1], "se");
+		        break;
+		case 3:
+		        print_node_link(node, node->out[0], "sw");
+		        print_node_link(node, node->out[1], "s");
+		        print_node_link(node, node->out[2], "se");
+		        break;
+		case 4:
+		        print_node_link(node, node->out[0], "w");
+		        print_node_link(node, node->out[1], "sw");
+		        print_node_link(node, node->out[2], "se");
+		        print_node_link(node, node->out[3], "e");
+		        break;
+		default:
+		        assert(!"Impossible out count");
+	}
+}
+
+void print_graph(struct graph *graph, b32 is_main, u64 traversal) {
+	if (!is_main) {
+		printf("subgraph cluster_%p {\n", graph);
+	}
+	if (is_main) {
+		printf("node_start [label=\"START\"]\n");
+		printf("node_start -> node_%p\n", graph->input);
+	}
+	print_node(graph->input, traversal);
+	for (struct node *node = graph->constants; node; node = node->next_constant) {
+		print_node(node, traversal);
+	}
+	if (!is_main) {
+		printf("}\n");
+	}
+}
+
+void build_graphs(struct block_ptr_array blocks) {
 	foreach (block, blocks) {
 		build_graph(*block);
 	}
-	return true;
+	printf("digraph {\n");
+	u64 traversal = global_traversal++;
+	foreach (block, blocks) {
+		print_graph(&(*block)->graph, block_index == blocks.size - 1, traversal);
+	}
+	printf("}\n");
 }
