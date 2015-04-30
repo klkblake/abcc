@@ -40,8 +40,10 @@ enum uop {
 
 struct node {
 	enum uop uop;
+	u32 in_count;
 	struct node *in[2];
 	u32 src_slot[2];
+	u32 out_count;
 	struct node *out[4];
 	u32 dst_slot[4];
 	union type *output_type[4];
@@ -64,6 +66,7 @@ struct graph {
 	struct node *input;
 	u32 input_slot;
 	struct node *output;
+	u32 output_slot;
 	struct node *constants;
 };
 DEFINE_ARRAY(struct graph, graph);
