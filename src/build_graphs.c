@@ -70,6 +70,8 @@ struct links append_node12(struct node_pool *pool, u8 uop, struct link link, uni
 	if (optimise) {
 		if ((uop == UOP_UNPAIR && link.node->uop == UOP_PAIR) ||
 		    (uop == UOP_UNSUM  && link.node->uop == UOP_SUM)) {
+			link.node->in[0]->out[link.node->src_slot[0]] = NULL;
+			link.node->in[1]->out[link.node->src_slot[1]] = NULL;
 			return (struct links){
 				{link.node->in[0], link.node->src_slot[0], type1},
 				{link.node->in[1], link.node->src_slot[1], type2},
@@ -747,7 +749,7 @@ void print_graph(struct graph *graph, b32 is_main, u64 traversal) {
 
 void build_graphs(struct block_ptr_array blocks) {
 	foreach (block, blocks) {
-		build_graph(*block, false);
+		build_graph(*block, true);
 	}
 	printf("digraph {\n");
 	u64 traversal = global_traversal++;
