@@ -57,7 +57,29 @@ struct node *append_node10(struct node_pool *pool, u8 uop, struct link link) {
 }
 
 internal inline
-struct link append_node11(struct node_pool *pool, u8 uop, struct link link, union type *type) {
+b32 is_constant(u8 uop) {
+	return (uop == UOP_UNIT_CONSTANT   ||
+	        uop == UOP_VOID_CONSTANT   ||
+		uop == UOP_BLOCK_CONSTANT  ||
+		uop == UOP_NUMBER_CONSTANT ||
+		uop == UOP_TEXT_CONSTANT);
+}
+
+internal inline
+struct link append_node11(struct node_pool *pool, u8 uop, struct link link, union type *type, b32 optimise) {
+	if (optimise) {
+		// We ignore assertion errors at this stage. It'll be more
+		// convenient to catch them in future passes
+		u8 prevuop = link.node->uop;
+		if ((uop == UOP_ASSERT_COPYABLE || uop == UOP_ASSERT_DROPPABLE) && is_constant(prevuop)) {
+			return link;
+		}
+		if (uop == UOP_ASSERT_NONZERO && prevuop == UOP_NUMBER_CONSTANT) {
+			if (link.node->number != 0) {
+				return link;
+			}
+		}
+	}
 	struct node *result = append_node10(pool, uop, link);
 	result->output_type[0] = type;
 	result->out_count = 1;
@@ -183,7 +205,7 @@ void build_graph(struct block *block, b32 optimise) {
 	struct link links[4];
 #define append01(uop, type) append_node01(&pool, (uop), &block->graph, (type))
 #define append10(uop, link) append_node10(&pool, (uop), (link))
-#define append11(uop, link, type) append_node11(&pool, (uop), (link), (type))
+#define append11(uop, link, type) append_node11(&pool, (uop), (link), (type), optimise)
 #define append12(uop, link, type1, type2) append_node12(&pool, (uop), (link), (type1), (type2), optimise)
 #define append21(uop, link1, link2, type) \
 	append_node21(&pool, (uop), (link1), (link2), (type))
