@@ -641,11 +641,13 @@ void build_graph(struct block *block, b32 optimise) {
 				}
 		}
 	}
-	fake_first.out[0]->in[fake_first.dst_slot[0]] = NULL;
-	block->graph.input = fake_first.out[0];
-	block->graph.input_slot = fake_first.dst_slot[0];
-	block->graph.output = last.node;
-	block->graph.output_slot = last.slot;
+	if (fake_first.out[0]) {
+		fake_first.out[0]->in[fake_first.dst_slot[0]] = NULL;
+		block->graph.input = fake_first.out[0];
+		block->graph.input_slot = fake_first.dst_slot[0];
+		block->graph.output = last.node;
+		block->graph.output_slot = last.slot;
+	}
 }
 
 internal u64 global_traversal = 1;
@@ -728,21 +730,18 @@ void print_node(struct node *node, struct graph *graph, u64 traversal) {
 		return;
 	}
 	node->seen = traversal;
-	switch (node->uop) {
-		case UOP_NUMBER_CONSTANT:
-			printf("node_%p [label=\"constant: %f\"]\n", node, node->number);
-			break;
-		case UOP_BLOCK_CONSTANT:
-			if (node->block->input) {
-				printf("node_%p [label=\"block constant\"]\n", node);
-				printf("node_%p -> node_%p [style=dotted,constraint=false]\n",
-				       node, node->block->input);
-			} else {
-				printf("node_%p [label=\"empty block constant\"]\n", node);
-			}
-			break;
-		default:
-			printf("node_%p [label=\"%s\"]\n", node, uop_names[node->uop]);
+	if (node->uop == UOP_NUMBER_CONSTANT) {
+		printf("node_%p [label=\"constant: %f\"]\n", node, node->number);
+	} else if (node->uop == UOP_BLOCK_CONSTANT) {
+		if (node->block->input) {
+			printf("node_%p [label=\"block constant\"]\n", node);
+			printf("node_%p -> node_start_%p [style=dotted,constraint=false]\n",
+			       node, node->block);
+		} else {
+			printf("node_%p [label=\"empty block constant\"]\n", node);
+		}
+	} else {
+		printf("node_%p [label=\"%s\"]\n", node, uop_names[node->uop]);
 	}
 	for (u32 i = 0; i < node->out_count; i++) {
 		print_node_link(node, node->out_count, i, graph);
@@ -757,10 +756,14 @@ void print_graph(struct graph *graph, b32 is_main, u64 traversal) {
 		printf("subgraph cluster_%p {\n", graph);
 	}
 	printf("node_start_%p [label=\"START\"]\n", graph);
-	printf("node_start_%p -> node_%p:%s\n",
-	       graph, graph->input, in_port(graph->input->in_count, graph->input_slot));
 	printf("node_end_%p [label=\"END\"]\n", graph);
-	print_node(graph->input, graph, traversal);
+	if (graph->input) {
+		printf("node_start_%p -> node_%p:%s\n",
+		       graph, graph->input, in_port(graph->input->in_count, graph->input_slot));
+		print_node(graph->input, graph, traversal);
+	} else {
+		printf("node_start_%p -> node_end_%p\n", graph, graph);
+	}
 	for (struct node *node = graph->constants; node; node = node->next_constant) {
 		print_node(node, graph, traversal);
 	}

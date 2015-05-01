@@ -7,6 +7,8 @@
 #include "infer_types.h"
 #include "build_graphs.h"
 
+extern char *global_source;
+extern b32 global_verbose;
 char *global_source = NULL;
 b32 global_verbose = false;
 
