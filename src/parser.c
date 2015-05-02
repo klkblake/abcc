@@ -251,10 +251,10 @@ DEFINE_MEMO_TABLE(block, struct block,
 #define PARSE_ERR_UNKNOWN_INVOCATION   5
 #define PARSE_ERR_MALFORMED_INVOCATION 6
 #define PARSE_ERR_MALFORMED_TEXT       7
+#define PARSE_ERR_UNEXPECTED_FRAME_POP 8
 #define PARSE_WARN_UNKNOWN_ANNOTATION   (PARSE_WARN | 0)
-#define PARSE_WARN_UNEXPECTED_FRAME_POP (PARSE_WARN | 1)
-#define PARSE_WARN_MISMATCHED_FRAME_POP (PARSE_WARN | 2)
-#define PARSE_WARN_EOF_IN_FRAME         (PARSE_WARN | 3)
+#define PARSE_WARN_MISMATCHED_FRAME_POP (PARSE_WARN | 1)
+#define PARSE_WARN_EOF_IN_FRAME         (PARSE_WARN | 2)
 
 static char *parse_error_messages[] = {
 	"Hit end-of-file while parsing block",
@@ -265,11 +265,11 @@ static char *parse_error_messages[] = {
 	"Unknown invocation",
 	"Illegal character in invocation",
 	"Malformed text literal",
+	"Popped frame when already at top level",
 };
 
 static char *parse_warning_messages[] = {
 	"Unknown annotation",
-	"Popped frame when already at top level",
 	"Tried to pop frame that does not match the top frame",
 	"Hit end-of-file while inside stack frame",
 };
@@ -409,7 +409,7 @@ b32 parse_stack_annotation(struct parse_state *state, b32 enter) {
 	} else {
 		struct ao_stack_frame *old = state->frame;
 		if (old == NULL) {
-			report_error_here(state, PARSE_WARN_UNEXPECTED_FRAME_POP);
+			report_error_here(state, PARSE_ERR_UNEXPECTED_FRAME_POP);
 			array_stack_free(word_buf, &word_array);
 			array_stack_free(file_buf, &file_array);
 			return true;
