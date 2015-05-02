@@ -32,9 +32,17 @@ struct link {
 	union type *type;
 };
 
-struct links {
-	struct link left;
-	struct link right;
+// Can't return arrays in C.
+struct link2 {
+	struct link l[2];
+};
+
+struct link3 {
+	struct link l[3];
+};
+
+struct link5 {
+	struct link l[5];
 };
 
 internal inline
@@ -92,7 +100,7 @@ struct link append_node11(struct node_pool *pool, u32 *link_id,
 }
 
 internal inline
-struct links append_node12(struct node_pool *pool, u32 *link_id,
+struct link2 append_node12(struct node_pool *pool, u32 *link_id,
                            u8 uop,
                            struct link link,
                            union type *type1, union type *type2,
@@ -102,10 +110,10 @@ struct links append_node12(struct node_pool *pool, u32 *link_id,
 		    (uop == UOP_UNSUM  && link.node->uop == UOP_SUM)) {
 			link.node->in[0]->out[link.node->src_slot[0]] = NULL;
 			link.node->in[1]->out[link.node->src_slot[1]] = NULL;
-			return (struct links){
+			return (struct link2){{
 				{link.node->in[0], link.node->src_slot[0], type1},
 				{link.node->in[1], link.node->src_slot[1], type2},
-			};
+			}};
 		}
 	}
 	struct node *result = append_node10(pool, uop, link);
@@ -114,7 +122,7 @@ struct links append_node12(struct node_pool *pool, u32 *link_id,
 	result->out_link_id[0] = (*link_id)++;
 	result->out_link_id[1] = (*link_id)++;
 	result->out_count = 2;
-	return (struct links){{result, 0, type1}, {result, 1, type2}};
+	return (struct link2){{{result, 0, type1}, {result, 1, type2}}};
 }
 
 internal inline
@@ -148,7 +156,7 @@ struct link append_node21(struct node_pool *pool, u32 *link_id,
 }
 
 internal inline
-struct links append_node22(struct node_pool *pool, u32 *link_id,
+struct link2 append_node22(struct node_pool *pool, u32 *link_id,
                            u8 uop,
 			   struct link link1, struct link link2,
                            union type *type1, union type *type2) {
@@ -158,7 +166,7 @@ struct links append_node22(struct node_pool *pool, u32 *link_id,
 	result->out_link_id[0] = (*link_id)++;
 	result->out_link_id[1] = (*link_id)++;
 	result->out_count = 2;
-	return (struct links){{result, 0, type1}, {result, 1, type2}};
+	return (struct link2){{{result, 0, type1}, {result, 1, type2}}};
 }
 
 #define assert_product(type) assert(!IS_VAR(type) && (type)->symbol == SYMBOL_PRODUCT)
@@ -167,18 +175,16 @@ struct links append_node22(struct node_pool *pool, u32 *link_id,
 #define child2(type) deref((type)->child2)
 
 internal inline
-struct links unpair_(struct node_pool *pool, u32 *link_id, struct link link, b32 optimise) {
+struct link2 unpair_(struct node_pool *pool, u32 *link_id, struct link link, b32 optimise) {
 	assert_product(link.type);
 	return append_node12(pool, link_id, UOP_UNPAIR, link, child1(link.type), child2(link.type), optimise);
 }
 
 internal inline
-void unpair2_(struct node_pool *pool, u32 *link_id, struct link *links, struct link link, b32 optimise) {
-	struct links outer = unpair_(pool, link_id, link, optimise);
-	struct links inner = unpair_(pool, link_id, outer.right, optimise);
-	links[0] = outer.left;
-	links[1] = inner.left;
-	links[2] = inner.right;
+struct link3 unpair2_(struct node_pool *pool, u32 *link_id, struct link link, b32 optimise) {
+	struct link2 outer = unpair_(pool, link_id, link, optimise);
+	struct link2 inner = unpair_(pool, link_id, outer.l[1], optimise);
+	return (struct link3){{outer.l[0], inner.l[0], inner.l[1]}};
 }
 
 internal inline
@@ -191,18 +197,16 @@ struct link pair2_(struct node_pool *pool, u32 *link_id,
 }
 
 internal inline
-struct links unsum_(struct node_pool *pool, u32 *link_id, struct link link, b32 optimise) {
+struct link2 unsum_(struct node_pool *pool, u32 *link_id, struct link link, b32 optimise) {
 	assert_sum(link.type);
 	return append_node12(pool, link_id, UOP_UNSUM, link, child1(link.type), child2(link.type), optimise);
 }
 
 internal inline
-void unsum2_(struct node_pool *pool, u32 *link_id, struct link *links, struct link link, b32 optimise) {
-	struct links outer = unsum_(pool, link_id, link, optimise);
-	struct links inner = unsum_(pool, link_id, outer.right, optimise);
-	links[0] = outer.left;
-	links[1] = inner.left;
-	links[2] = inner.right;
+struct link3 unsum2_(struct node_pool *pool, u32 *link_id, struct link link, b32 optimise) {
+	struct link2 outer = unsum_(pool, link_id, link, optimise);
+	struct link2 inner = unsum_(pool, link_id, outer.l[1], optimise);
+	return (struct link3){{outer.l[0], inner.l[0], inner.l[1]}};
 }
 
 internal inline
@@ -220,7 +224,6 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 		return;
 	}
 	struct node_pool pool = {};
-	struct link links[4];
 #define append01(uop, type) append_node01(&pool, link_id, (uop), &block->graph, (type))
 #define append10(uop, link) append_node10(&pool, (uop), (link))
 #define append11(uop, link, type) append_node11(&pool, link_id, (uop), (link), (type), optimise)
@@ -230,17 +233,17 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 #define append22(uop, link1, link2, type1, type2) \
 	append_node22(&pool, link_id, (uop), (link1), (link2), (type1), (type2))
 #define unpair(link) unpair_(&pool, link_id, (link), optimise)
-#define unpair2(link) unpair2_(&pool, link_id, links, (link), optimise)
+#define unpair2(link) unpair2_(&pool, link_id, (link), optimise)
 #define pair(link1, link2, type) append21(UOP_PAIR, (link1), (link2), (type))
 #define pair2(link1, link2, link3, type) \
 	pair2_(&pool, link_id, (link1), (link2), (link3), (type))
 #define unsum(link) unsum_(&pool, link_id, (link), optimise)
-#define unsum2(link) unsum2_(&pool, link_id, links, (link), optimise)
+#define unsum2(link) unsum2_(&pool, link_id, (link), optimise)
 #define sum(link1, link2, type) append21(UOP_SUM, (link1), (link2), (type))
 #define sum2(link1, link2, link3, type) \
 	sum2_(&pool, link_id, (link1), (link2), (link3), (type))
 	block->graph.input.output_type[0] = deref(block->types[0]);
-	block->graph.input.out_link_id[0] = (*link_id)++; // XXX This is wrong.
+	block->graph.input.out_link_id[0] = (*link_id)++;
 	block->graph.input.out_count = 1;
 	struct link last = {&block->graph.input, 0, block->graph.input.output_type[0]};
 	struct ao_stack_frame *frame = NULL;
@@ -264,11 +267,11 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 				}
 			case OP_ASSERT_EQUAL:
 				{
-					unpair2(last);
-					struct links assert_equal = append22(UOP_ASSERT_EQUAL,
-					                                     links[0], links[1],
-					                                     links[0].type, links[1].type);
-					last = pair2(assert_equal.left, assert_equal.right, links[2], output_type);
+					struct link3 input = unpair2(last);
+					struct link2 assert_equal = append22(UOP_ASSERT_EQUAL,
+					                                     input.l[0], input.l[1],
+					                                     input.l[0].type, input.l[1].type);
+					last = pair2(assert_equal.l[0], assert_equal.l[1], input.l[2], output_type);
 					break;
 				}
 			case OP_DEBUG_PRINT_RAW:
@@ -302,34 +305,34 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 
 			case 'l':
 				{
-					unpair2(last);
+					struct link3 input = unpair2(last);
 					assert_product(output_type);
-					struct link left = pair(links[0], links[1], child1(output_type));
-					last = pair(left, links[2], output_type);
+					struct link left = pair(input.l[0], input.l[1], child1(output_type));
+					last = pair(left, input.l[2], output_type);
 					break;
 				}
 			case 'r':
 				{
-					struct links outer = unpair(last);
-					struct links inner = unpair(outer.left);
-					last = pair2(inner.left, inner.right, outer.right, output_type);
+					struct link2 outer = unpair(last);
+					struct link2 inner = unpair(outer.l[0]);
+					last = pair2(inner.l[0], inner.l[1], outer.l[1], output_type);
 					break;
 				}
 			case 'w':
 				{
-					unpair2(last);
-					last = pair2(links[1], links[0], links[2], output_type);
+					struct link3 input = unpair2(last);
+					last = pair2(input.l[1], input.l[0], input.l[2], output_type);
 					break;
 				}
 			case 'z':
 				{
-					unpair2(last);
-					struct links inner = unpair(links[2]);
+					struct link3 input = unpair2(last);
+					struct link2 inner = unpair(input.l[2]);
 					assert_product(output_type);
 					union type *type = child2(output_type);
 					assert_product(type);
-					links[2] = pair(links[1], inner.right, child2(type));
-					last = pair2(links[0], inner.left, links[2], output_type);
+					struct link new_inner = pair(input.l[1], inner.l[1], child2(type));
+					last = pair2(input.l[0], inner.l[0], new_inner, output_type);
 					break;
 				}
 			case 'v':
@@ -342,75 +345,75 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 				}
 			case 'c':
 				{
-					struct links input = unpair(last);
-					append10(UOP_DROP, input.right);
-					last = input.left;
+					struct link2 input = unpair(last);
+					append10(UOP_DROP, input.l[1]);
+					last = input.l[0];
 					break;
 				}
 			case '%':
 				{
-					struct links input = unpair(last);
+					struct link2 input = unpair(last);
 					struct link to_drop = append11(UOP_ASSERT_DROPPABLE,
-					                               input.left, input.left.type);
+					                               input.l[0], input.l[0].type);
 					append10(UOP_DROP, to_drop);
-					last = input.right;
+					last = input.l[1];
 					break;
 				}
 			case '^':
 				{
-					struct links input = unpair(last);
+					struct link2 input = unpair(last);
 					struct link to_copy = append11(UOP_ASSERT_COPYABLE,
-					                               input.left, input.left.type);
-					struct links copy = append12(UOP_COPY, to_copy,
+					                               input.l[0], input.l[0].type);
+					struct link2 copy = append12(UOP_COPY, to_copy,
 					                             to_copy.type, to_copy.type);
-					last = pair2(copy.left, copy.right, input.right, output_type);
+					last = pair2(copy.l[0], copy.l[1], input.l[1], output_type);
 					break;
 				}
 
 			case '$':
 				{
-					unpair2(last);
+					struct link3 input = unpair2(last);
 					assert_product(output_type);
 					struct link apply = append21(UOP_APPLY,
-					                             links[0], links[1],
+					                             input.l[0], input.l[1],
 					                             child1(output_type));
-					last = pair(apply, links[2], output_type);
+					last = pair(apply, input.l[2], output_type);
 					break;
 				}
 			case 'o':
 				{
-					unpair2(last);
+					struct link3 input = unpair2(last);
 					assert_product(output_type);
 					struct link compose = append21(UOP_COMPOSE,
-					                               links[0], links[1],
+					                               input.l[0], input.l[1],
 					                               child1(output_type));
-					last = pair(compose, links[2], output_type);
+					last = pair(compose, input.l[2], output_type);
 					break;
 				}
 			case '\'':
 				{
-					struct links input = unpair(last);
+					struct link2 input = unpair(last);
 					assert_product(output_type);
-					struct link quote = append11(UOP_QUOTE, input.left, child1(output_type));
-					last = pair(quote, input.right, output_type);
+					struct link quote = append11(UOP_QUOTE, input.l[0], child1(output_type));
+					last = pair(quote, input.l[1], output_type);
 					break;
 				}
 			case 'k':
 				{
-					struct links input = unpair(last);
+					struct link2 input = unpair(last);
 					assert_product(output_type);
 					struct link relevant = append11(UOP_MARK_RELEVANT,
-					                                input.left, child1(output_type));
-					last = pair(relevant, input.right, output_type);
+					                                input.l[0], child1(output_type));
+					last = pair(relevant, input.l[1], output_type);
 					break;
 				}
 			case 'f':
 				{
-					struct links input = unpair(last);
+					struct link2 input = unpair(last);
 					assert_product(output_type);
 					struct link affine = append11(UOP_MARK_AFFINE,
-					                              input.left, child1(output_type));
-					last = pair(affine, input.right, output_type);
+					                              input.l[0], child1(output_type));
+					last = pair(affine, input.l[1], output_type);
 					break;
 				}
 
@@ -426,9 +429,9 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 			case '0'...'9':
 				{
 					u32 digit = op - '0';
-					struct links input = unpair(last);
-					if (input.left.node->uop == UOP_NUMBER_CONSTANT) {
-						input.left.node->number = input.left.node->number * 10 + digit;
+					struct link2 input = unpair(last);
+					if (input.l[0].node->uop == UOP_NUMBER_CONSTANT) {
+						input.l[0].node->number = input.l[0].node->number * 10 + digit;
 						break;
 					}
 					assert_product(output_type);
@@ -438,206 +441,208 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 					struct link digit_constant = append01(UOP_NUMBER_CONSTANT, number);
 					digit_constant.node->number = digit;
 					struct link mul_by_10 = append21(UOP_MULTIPLY,
-					                                 input.left, ten_constant, number);
+					                                 input.l[0], ten_constant, number);
 					struct link add_digit = append21(UOP_ADD,
 					                                 mul_by_10, digit_constant, number);
-					last = pair(add_digit, input.right, output_type);
+					last = pair(add_digit, input.l[1], output_type);
 					break;
 				}
 
 			case '+':
 				{
-					unpair2(last);
+					struct link3 input = unpair2(last);
 					assert_product(output_type);
-					struct link add = append21(UOP_ADD, links[0], links[1], child1(output_type));
-					last = pair(add, links[2], output_type);
+					struct link add = append21(UOP_ADD, input.l[0], input.l[1], child1(output_type));
+					last = pair(add, input.l[2], output_type);
 					break;
 				}
 			case '*':
 				{
-					unpair2(last);
+					struct link3 input = unpair2(last);
 					assert_product(output_type);
 					struct link multiply = append21(UOP_MULTIPLY,
-					                                links[0], links[1], child1(output_type));
-					last = pair(multiply, links[2], output_type);
+					                                input.l[0], input.l[1], child1(output_type));
+					last = pair(multiply, input.l[2], output_type);
 					break;
 				}
 			case '/':
 				{
-					struct links input = unpair(last);
+					struct link2 input = unpair(last);
 					assert_product(output_type);
 					union type *number = child1(output_type);
-					struct link checked_number = append11(UOP_ASSERT_NONZERO, input.left, number);
+					struct link checked_number = append11(UOP_ASSERT_NONZERO, input.l[0], number);
 					struct link inverse = append11(UOP_INVERSE, checked_number, number);
-					last = pair(inverse, input.right, output_type);
+					last = pair(inverse, input.l[1], output_type);
 					break;
 				}
 			case '-':
 				{
-					struct links input = unpair(last);
+					struct link2 input = unpair(last);
 					assert_product(output_type);
-					struct link negate = append11(UOP_NEGATE, input.left, child1(output_type));
-					last = pair(negate, input.right, output_type);
+					struct link negate = append11(UOP_NEGATE, input.l[0], child1(output_type));
+					last = pair(negate, input.l[1], output_type);
 					break;
 				}
 			case 'Q':
 				{
-					unpair2(last);
+					struct link3 input = unpair2(last);
 					assert_product(output_type);
 					union type *number = child1(output_type);
-					struct link checked_number = append11(UOP_ASSERT_NONZERO, links[0], number);
-					struct links divmod = append22(UOP_DIVMOD,
-					                               checked_number, links[1],
+					struct link checked_number = append11(UOP_ASSERT_NONZERO, input.l[0], number);
+					struct link2 divmod = append22(UOP_DIVMOD,
+					                               checked_number, input.l[1],
 					                               number, number);
-					last = pair2(divmod.left, divmod.right, links[2], output_type);
+					last = pair2(divmod.l[0], divmod.l[1], input.l[2], output_type);
 					break;
 				}
 
 			case 'L':
 				{
-					struct links input = unpair(last);
-					unsum2(input.left);
+					struct link2 input = unpair(last);
+					struct link3 branches = unsum2(input.l[0]);
 					assert_product(output_type);
 					union type *type = child1(output_type);
 					assert_sum(type);
-					struct link inner = sum(links[0], links[1], child1(type));
-					struct link outer = sum(inner, links[2], type);
-					last = pair(outer, input.right, output_type);
+					struct link inner = sum(branches.l[0], branches.l[1], child1(type));
+					struct link outer = sum(inner, branches.l[2], type);
+					last = pair(outer, input.l[1], output_type);
 					break;
 				}
 			case 'R':
 				{
-					struct links input = unpair(last);
-					struct links outer = unsum(input.left);
-					struct links inner = unsum(outer.left);
+					struct link2 input = unpair(last);
+					struct link2 outer = unsum(input.l[0]);
+					struct link2 inner = unsum(outer.l[0]);
 					assert_product(output_type);
-					struct link new_outer = sum2(inner.left, inner.right, outer.right,
+					struct link new_outer = sum2(inner.l[0], inner.l[1], outer.l[1],
 					                             child1(output_type));
-					last = pair(new_outer, input.right, output_type);
+					last = pair(new_outer, input.l[1], output_type);
 					break;
 				}
 			case 'W':
 				{
-					struct links input = unpair(last);
-					unsum2(input.left);
+					struct link2 input = unpair(last);
+					struct link3 branches = unsum2(input.l[0]);
 					assert_product(output_type);
-					struct link branches = sum2(links[1], links[0], links[2],
-					                            child1(output_type));
-					last = pair(branches, input.right, output_type);
+					struct link new_branches = sum2(branches.l[1], branches.l[0], branches.l[2],
+					                                child1(output_type));
+					last = pair(new_branches, input.l[1], output_type);
 					break;
 				}
 			case 'Z':
 				{
-					struct links input = unpair(last);
-					unsum2(input.left);
-					struct links inner = unsum(links[2]);
+					struct link2 input = unpair(last);
+					struct link3 branches = unsum2(input.l[0]);
+					struct link2 inner = unsum(branches.l[2]);
 					assert_product(output_type);
 					union type *type = child1(output_type);
 					assert_sum(type);
 					union type *type2 = child2(type);
 					assert_sum(type2);
-					struct link new_inner = sum(links[1], inner.right, child2(type2));
-					struct link branches = sum2(links[0], links[2], new_inner, type);
-					last = pair(branches, input.right, output_type);
+					struct link new_inner = sum(branches.l[1], inner.l[1], child2(type2));
+					struct link new_branches = sum2(branches.l[0], branches.l[2], new_inner,
+					                                type);
+					last = pair(new_branches, input.l[1], output_type);
 					break;
 				}
 			case 'V':
 				{
-					struct links input = unpair(last);
+					struct link2 input = unpair(last);
 					assert_product(output_type);
 					union type *type = child1(output_type);
 					assert_sum(type);
 					struct link void_constant = append01(UOP_VOID_CONSTANT, child2(type));
-					struct link branches = sum(input.left, void_constant, type);
-					last = pair(branches, input.right, output_type);
+					struct link branches = sum(input.l[0], void_constant, type);
+					last = pair(branches, input.l[1], output_type);
 					break;
 				}
 			case 'C':
 				{
-					struct links input = unpair(last);
-					struct links branches = unsum(input.left);
-					append10(UOP_DROP, branches.right);
-					last = pair(branches.left, input.right, output_type);
+					struct link2 input = unpair(last);
+					struct link2 branches = unsum(input.l[0]);
+					append10(UOP_DROP, branches.l[1]);
+					last = pair(branches.l[0], input.l[1], output_type);
 					break;
 				}
 
 			case '?':
 				{
-					unpair2(last);
+					struct link3 input = unpair2(last);
 					struct link checked_block = append11(UOP_ASSERT_DROPPABLE,
-					                                     links[0], links[0].type);
-					struct links branches = unsum(links[1]);
+					                                     input.l[0], input.l[0].type);
+					struct link2 branches = unsum(input.l[1]);
 					assert_product(output_type);
 					union type *type = child1(output_type);
 					assert_sum(type);
 					struct link applied_branch = append21(UOP_APPLY,
-					                                      checked_block, branches.left,
+					                                      checked_block, branches.l[0],
 					                                      child1(type));
-					struct link new_branches = sum(applied_branch, branches.right,
+					struct link new_branches = sum(applied_branch, branches.l[1],
 					                               type);
-					last = pair(new_branches, links[2], output_type);
+					last = pair(new_branches, input.l[2], output_type);
 					break;
 				}
 			case 'D':
 				{
-					unpair2(last);
-					struct links branches = unsum(links[1]);
-					struct links distrib = append12(UOP_DISTRIB, links[0],
-					                                links[0].type, links[0].type);
+					struct link3 input = unpair2(last);
+					struct link2 branches = unsum(input.l[1]);
+					struct link2 distrib = append12(UOP_DISTRIB, input.l[0],
+					                                input.l[0].type, input.l[0].type);
 					assert_product(output_type);
 					union type *type = child1(output_type);
 					assert_sum(type);
-					struct link left = pair(distrib.left, branches.left,
+					struct link left = pair(distrib.l[0], branches.l[0],
 					                        child1(type));
-					struct link right = pair(distrib.right, branches.right,
+					struct link right = pair(distrib.l[1], branches.l[1],
 								 child2(type));
 					struct link new_branches = sum(left, right, type);
-					last = pair(new_branches, links[2], output_type);
+					last = pair(new_branches, input.l[2], output_type);
 					break;
 				}
 			case 'F':
 				{
-					struct links input = unpair(last);
-					struct links branches = unsum(input.left);
-					struct links left = unpair(branches.left);
-					struct links right = unpair(branches.right);
+					struct link2 input = unpair(last);
+					struct link2 branches = unsum(input.l[0]);
+					struct link2 left = unpair(branches.l[0]);
+					struct link2 right = unpair(branches.l[1]);
 					assert_product(output_type);
 					union type *type = child2(output_type);
 					assert_product(type);
-					struct link new_left = sum(left.left, right.left,
+					struct link new_left = sum(left.l[0], right.l[0],
 					                           child1(output_type));
-					struct link new_right = sum(left.right, right.right,
+					struct link new_right = sum(left.l[1], right.l[1],
 					                           child1(type));
-					last = pair2(new_left, new_right, input.right, output_type);
+					last = pair2(new_left, new_right, input.l[1], output_type);
 					break;
 				}
 			case 'M':
 				{
-					struct links input = unpair(last);
-					struct links branches = unsum(input.left);
+					struct link2 input = unpair(last);
+					struct link2 branches = unsum(input.l[0]);
 					assert_product(output_type);
-					struct link merge = append21(UOP_MERGE, branches.left, branches.right,
+					struct link merge = append21(UOP_MERGE, branches.l[0], branches.l[1],
 					                             child1(output_type));
-					last = pair(merge, input.right, output_type);
+					last = pair(merge, input.l[1], output_type);
 					break;
 				}
 			case 'K':
 				{
-					struct links input = unpair(last);
-					struct links branches = unsum(input.left);
-					append10(UOP_ASSERT_VOID, branches.left);
-					last = pair(branches.right, input.right, output_type);
+					struct link2 input = unpair(last);
+					struct link2 branches = unsum(input.l[0]);
+					append10(UOP_ASSERT_VOID, branches.l[0]);
+					last = pair(branches.l[1], input.l[1], output_type);
 					break;
 				}
 
 			case '>':
 				{
-					unpair2(last);
-					struct node *greater = append_node20(&pool, UOP_GREATER, links[0], links[1]);
-					struct link g0 = {greater, 0, links[1].type};
-					struct link g1 = {greater, 1, links[0].type};
-					struct link g2 = {greater, 2, links[0].type};
-					struct link g3 = {greater, 3, links[1].type};
+					struct link3 input = unpair2(last);
+					struct node *greater = append_node20(&pool,
+					                                     UOP_GREATER, input.l[0], input.l[1]);
+					struct link g0 = {greater, 0, input.l[1].type};
+					struct link g1 = {greater, 1, input.l[0].type};
+					struct link g2 = {greater, 2, input.l[0].type};
+					struct link g3 = {greater, 3, input.l[1].type};
 					greater->output_type[0] = g0.type;
 					greater->output_type[1] = g1.type;
 					greater->output_type[2] = g2.type;
@@ -653,7 +658,7 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 					struct link left  = pair(g0, g1, child1(type));
 					struct link right = pair(g2, g3, child2(type));
 					struct link branches = append21(UOP_SUM, left, right, type);
-					last = pair(branches, links[2], output_type);
+					last = pair(branches, input.l[2], output_type);
 					break;
 				}
 
