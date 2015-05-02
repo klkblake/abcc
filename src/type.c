@@ -15,14 +15,6 @@ DEFINE_MAP_IMPL(union type *, b1, type_ptr_b1, type_hash);
 DEFINE_MAP_IMPL(union type *, union type *, type_ptr, type_hash);
 DEFINE_MAP_IMPL(union type *, u64, type_ptr_u64, type_hash);
 
-#define push_cstring(buf, str) push_many(buf, (u8 *)str, sizeof(str) - 1)
-internal
-void push_many(struct u8_array *buf, u8 *str, usize len) {
-	for (usize i = 0; i < len; i++) {
-		array_push(buf, str[i]);
-	}
-}
-
 internal
 u32 var_len(u64 var) {
 	u32 len = 0;
@@ -76,8 +68,8 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 					array_push(buf, ',');
 				}
 				if (IS_SEALED(term->symbol)) {
-					push_cstring(buf, "sealed \" ");
-					push_many(buf, term->seal->data, term->seal->size);
+					u8_array_push_cstring(buf, "sealed \" ");
+					u8_array_push_many(buf, term->seal->data, term->seal->size);
 					array_push(buf, '"');
 				} else {
 					switch (term->symbol) {
@@ -86,8 +78,8 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 						case SYMBOL_NUMBER:  array_push(buf, 'N'); break;
 						case SYMBOL_PRODUCT: array_push(buf, '*'); break;
 						case SYMBOL_SUM:     array_push(buf, '+'); break;
-						case SYMBOL_BLOCK:                   push_cstring(buf, "=>"); break;
-						case SYMBOL_BLOCK | POLYMORPHIC_BIT: push_cstring(buf, "->"); break;
+						case SYMBOL_BLOCK:                   u8_array_push_cstring(buf, "=>"); break;
+						case SYMBOL_BLOCK | POLYMORPHIC_BIT: u8_array_push_cstring(buf, "->"); break;
 						default: array_push(buf, '?'); break;
 					}
 				}
@@ -117,9 +109,9 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 		if (prec > 8) {
 			array_push(buf, '(');
 		}
-		push_cstring(buf, "sealed \"");
-		push_many(buf, type->seal->data, type->seal->size);
-		push_cstring(buf, "\" ");
+		u8_array_push_cstring(buf, "sealed \"");
+		u8_array_push_many(buf, type->seal->data, type->seal->size);
+		u8_array_push_cstring(buf, "\" ");
 		print_type_(type->child1, 9, seen, vars, buf);
 		if (prec > 8) {
 			array_push(buf, ')');
@@ -151,9 +143,9 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 			print_type_(type->child1, newprec + 1, seen, vars, buf);
 		}
 		if (type->symbol == SYMBOL_BLOCK) {
-			push_cstring(buf, " => ");
+			u8_array_push_cstring(buf, " => ");
 		} else if (type->symbol == (SYMBOL_BLOCK | POLYMORPHIC_BIT)) {
-			push_cstring(buf, " -> ");
+			u8_array_push_cstring(buf, " -> ");
 		} else {
 			if (children) {
 				array_push(buf, ' ');

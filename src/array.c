@@ -2,6 +2,12 @@
 
 #include <stdlib.h>
 
+void u8_array_push_many(struct u8_array *buf, u8 *str, usize len) {
+	for (usize i = 0; i < len; i++) {
+		array_push(buf, str[i]);
+	}
+}
+
 void array_grow_(struct u8_array *array, usize size) {
 	if (array->cap == 0) {
 		array->cap = 64;

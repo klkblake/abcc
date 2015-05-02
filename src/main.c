@@ -6,6 +6,8 @@
 #include "peephole.h"
 #include "infer_types.h"
 #include "build_graphs.h"
+#include "generate_graphviz.h"
+#include "generate_c.h"
 
 extern char *global_source;
 extern b32 global_verbose;
@@ -27,17 +29,23 @@ char *help_text =
 	"Usage: abcc [options] [input file]\n"
 	"\n"
 	"Options:\n"
-	"  -h, --help       Display available options\n"
-	"  -c, --compile    Run full compilation (default)\n"
-	"  -t, --typecheck  Only run typechecker\n"
-	"  -v, --verbose    Display verbose output\n";
+	"  -h, --help        Display available options\n"
+	"  -c, --compile     Run full compilation (default)\n"
+	"  -t, --typecheck   Only run typechecker\n"
+	"  -e, --executable  Output an executable (default)"
+	"  -G, --graphviz    Output the dataflow graph in graphviz format\n"
+	"  -C, --c           Output the generated C source\n"
+	"  -v, --verbose     Display verbose output\n";
 
 internal
 struct option long_options[] = {
-	{ "help",      no_argument, NULL, 'h' },
-	{ "compile",   no_argument, NULL, 'c' },
-	{ "typecheck", no_argument, NULL, 't' },
-	{ "verbose",   no_argument, NULL, 'v' },
+	{ "help",       no_argument, NULL, 'h' },
+	{ "compile",    no_argument, NULL, 'c' },
+	{ "typecheck",  no_argument, NULL, 't' },
+	{ "executable", no_argument, NULL, 'e' },
+	{ "graphviz",   no_argument, NULL, 'G' },
+	{ "c",          no_argument, NULL, 'C' },
+	{ "verbose",    no_argument, NULL, 'v' },
 };
 
 int main(int argc, char **argv) {
@@ -45,8 +53,13 @@ int main(int argc, char **argv) {
 		MODE_COMPILE,
 		MODE_TYPECHECK,
 	} mode = MODE_COMPILE;
+	enum output {
+		OUTPUT_EXECUTABLE,
+		OUTPUT_GRAPHVIZ,
+		OUTPUT_C,
+	} output = OUTPUT_EXECUTABLE;
 	while (true) {
-		i32 option = getopt_long(argc, argv, "hctv", long_options, NULL);
+		i32 option = getopt_long(argc, argv, "hcteGCv", long_options, NULL);
 		if (option == -1) {
 			break;
 		}
@@ -59,6 +72,15 @@ int main(int argc, char **argv) {
 				break;
 			case 't':
 				mode = MODE_TYPECHECK;
+				break;
+			case 'e':
+				output = OUTPUT_EXECUTABLE;
+				break;
+			case 'G':
+				output = OUTPUT_GRAPHVIZ;
+				break;
+			case 'C':
+				output = OUTPUT_C;
 				break;
 			case 'v':
 				global_verbose = true;
@@ -116,6 +138,16 @@ int main(int argc, char **argv) {
 		goto cleanup_typecheck;
 	}
 	build_graphs(result.blocks);
+	switch (output) {
+		case OUTPUT_EXECUTABLE:
+			break;
+		case OUTPUT_GRAPHVIZ:
+			generate_graphviz(result.blocks);
+			break;
+		case OUTPUT_C:
+			generate_c(result.blocks);
+			break;
+	}
 
 cleanup_typecheck:
 	foreach (chunk, pool.chunks) {

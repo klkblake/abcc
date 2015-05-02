@@ -43,5 +43,8 @@ void array_free(void *array);
 		     var ## _index < (array).size && (var = &(array).data[var ## _index], true); \
 		     var ## _index++)
 
+void u8_array_push_many(struct u8_array *array, u8 *str, usize len);
+#define u8_array_push_cstring(buf, str) u8_array_push_many(buf, (u8 *)str, sizeof(str) - 1)
+
 #define ARRAY_H
 #endif

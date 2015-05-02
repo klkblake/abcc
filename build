@@ -29,4 +29,5 @@ set -e
 
 clang $CFLAGS -o expect src/expect.c
 ./expect < src/infer_types.c > src/infer_types.gen.c
-$CC $CFLAGS -o abcc src/main.c src/array.c src/map.c src/string.c src/type.c src/block.c src/parser.c src/peephole.c src/infer_types.gen.c src/build_graphs.c
+sed -e 's/^.*$/"\0\\n"/' < src/rts.c | cat <(echo "extern char* rts_c; char *rts_c = ") - <(echo ";") > src/rts.gen.c
+$CC $CFLAGS -o abcc src/main.c src/array.c src/map.c src/string.c src/type.c src/block.c src/parser.c src/peephole.c src/infer_types.gen.c src/build_graphs.c src/generate_graphviz.c src/generate_c.c src/rts.gen.c

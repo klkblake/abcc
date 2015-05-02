@@ -3,6 +3,8 @@
 #include "array.h"
 
 enum uop {
+	UOP_START,
+	UOP_END,
 	UOP_SEAL,
 	UOP_UNSEAL,
 	UOP_PAIR,
@@ -46,6 +48,7 @@ struct node {
 	u32 out_count;
 	struct node *out[4];
 	u32 dst_slot[4];
+	u32 out_link_id[4];
 	union type *output_type[4];
 	union {
 		struct node *next_constant;
@@ -63,13 +66,24 @@ struct node {
 DEFINE_ARRAY(struct node *, node_ptr);
 
 struct graph {
-	struct node *input;
-	u32 input_slot;
-	struct node *output;
-	u32 output_slot;
+	struct node input;
+	struct node output;
 	struct node *constants;
 };
 DEFINE_ARRAY(struct graph, graph);
+
+struct chunk {
+	u32 indent;
+	struct u8_array text;
+	struct chunk *root; // Only filled for chunks with only constant roots
+	struct chunk *next;
+	struct chunk *next_else;
+	u32 depth;
+};
+DEFINE_ARRAY(struct chunk, chunk);
+DEFINE_ARRAY(struct chunk *, chunk_ptr);
+
+extern u64 global_traversal;
 
 #define GRAPH_H
 #endif
