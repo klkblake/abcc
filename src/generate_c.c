@@ -18,14 +18,18 @@ void do_indent(u32 indent) {
 internal
 void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 	u32 indent = 1;
-	printf("Value block_%p(Value v%u) {\n", graph, graph->input.out_link_id[0]);
+	printf("\nValue block_%p(Value v%u) {\n", graph, graph->input.out_link_id[0]);
 	struct node_ptr_array worklist = {};
 	array_push(&worklist, graph->input.out[0]);
 	for (struct node *constant = graph->constants; constant; constant = constant->next_constant) {
 		array_push(&worklist, constant);
 	}
+	graph->input.seen = traversal1;
 	while (worklist.size > 0) {
 		struct node *node = array_pop(&worklist);
+		if (node->seen == traversal1) {
+			continue;
+		}
 		b32 ready = true;
 		for (u32 i = 0; i < node->in_count; i++) {
 			if (node->in[i]->seen != traversal1) {
@@ -46,8 +50,12 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 	for (struct node *constant = graph->constants; constant; constant = constant->next_constant) {
 		array_push(&worklist, constant);
 	}
+	graph->input.seen = traversal2;
 	while (worklist.size > 0) {
 		struct node *node = array_pop(&worklist);
+		if (node->seen == traversal2) {
+			continue;
+		}
 		b32 ready = true;
 		for (u32 i = 0; i < node->in_count; i++) {
 			if (node->in[i]->seen != traversal2) {
@@ -78,8 +86,8 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 					out("return v%u;", in[0]);
 					break;
 				}
-			case UOP_SEAL:   break;
-			case UOP_UNSEAL: break;
+			case UOP_SEAL:   out("v%u = v%u;", out[0], in[0]); break;
+			case UOP_UNSEAL: out("v%u = v%u;", out[0], in[0]); break;
 			case UOP_PAIR:
 				{
 					out("v%u = alloc_pair(v%u, v%u);", out[0], in[0], in[1]);
@@ -118,7 +126,7 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 				}
 			case UOP_VOID_CONSTANT:
 				{
-					out("__builtin_unreachable();");
+					out("v%u = VOID;", out[0]);
 					break;
 				}
 			case UOP_BLOCK_CONSTANT:
@@ -134,34 +142,43 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 			case UOP_TEXT_CONSTANT:
 				{
 					// TODO implement this
-					out("XXX FAIL UNIMPLEMENTED XXX");
+					out("XXX FAIL UNIMPLEMENTED TEXT CONSTANT XXX");
 					break;
 				}
 			case UOP_COPY:
 				{
 					union type *in_type = node->in[0]->output_type[node->src_slot[0]];
-					assert(!IS_VAR(in_type));
-					switch (in_type->symbol) {
-						case SYMBOL_PRODUCT:
-							{
-								out("v%u.pair->refcount++;", in[0]);
-								break;
-							}
-						case SYMBOL_SUM:
-							{
-								out("v%u.sum->refcount++;", in[0]);
-								break;
-							}
-						case SYMBOL_UNIT:
-							{
-								break;
-							}
-						case SYMBOL_NUMBER:
-							{
-								break;
-							}
-						default:
-							assert(!"Don't know how to do copy");
+					while (!IS_VAR(in_type) && IS_SEALED(in_type->symbol)) {
+						// FIXME This can loop infinitely if there is a loop of
+						// seals. This is invalid, but we don't check for it.
+						in_type = deref(in_type->child1);
+					}
+					if (IS_VAR(in_type)) {
+						out("XXX FAIL UNIMPLEMENTED COPY VAR XXX");
+					} else {
+						switch (in_type->symbol) {
+							case SYMBOL_PRODUCT:
+								{
+									out("v%u.pair->refcount++;", in[0]);
+									break;
+								}
+							case SYMBOL_SUM:
+								{
+									out("v%u.sum->refcount++;", in[0]);
+									break;
+								}
+							case SYMBOL_UNIT:
+								{
+									break;
+								}
+							case SYMBOL_NUMBER:
+								{
+									break;
+								}
+							default:
+								out("XXX FAIL UNIMPLEMENTED COPY SYMBOL %lu XXX",
+								    in_type->symbol);
+						}
 					}
 					out("v%u = v%u;", out[0], in[0]);
 					out("v%u = v%u;", out[1], in[0]);
@@ -173,18 +190,76 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 					break;
 				}
 			case UOP_APPLY:
+				{
+					out("v%u = apply(v%u.block, v%u);", out[0], in[0], in[1]);
+					break;
+				}
 			case UOP_COMPOSE:
+				{
+					out("v%u = alloc_block_composed(v%u, v%u);", out[0], in[0], in[1]);
+					break;
+				}
 			case UOP_QUOTE:
-			case UOP_MARK_RELEVANT:
-			case UOP_MARK_AFFINE:
+				{
+					out("v%u = alloc_block_quote(v%u);", out[0], in[0]);
+					break;
+				}
+			case UOP_MARK_RELEVANT: out("v%u = v%u;", out[0], in[0]); break;
+			case UOP_MARK_AFFINE:   out("v%u = v%u;", out[0], in[0]); break;
 			case UOP_ADD:
+				{
+					out("v%u.number = v%u.number + v%u.number;", out[0], in[0], in[1]);
+					break;
+				}
 			case UOP_MULTIPLY:
+				{
+					out("v%u.number = v%u.number * v%u.number;", out[0], in[0], in[1]);
+					break;
+				}
 			case UOP_INVERSE:
+				{
+					out("v%u.number = 1 / v%u.number;", out[0], in[0]);
+					break;
+				}
 			case UOP_NEGATE:
+				{
+					out("v%u.number = -v%u.number;", out[0], in[0]);
+					break;
+				}
 			case UOP_DIVMOD:
+				{
+					out("v%u = __builtin_floor(v%u/v%u);", out[1], in[1], in[0]);
+					out("v%u = v%u - v%u * v%u;", out[0], in[1], out[1], in[0]);
+					break;
+				}
 			case UOP_DISTRIB:
+				{
+					out("// Distrib");
+					out("v%u = v%u;", out[0], in[0]);
+					out("v%u = v%u;", out[1], in[0]);
+					break;
+				}
 			case UOP_MERGE:
+				{
+					indent--;
+					out("}");
+					struct node *cond_node = array_pop(&cond_stack);
+					out("v%u = cond_%u ? v%u : v%u;",
+					    out[0], cond_node->out_link_id[0], in[0], in[1]);
+					break;
+				}
 			case UOP_GREATER:
+				{
+					array_push(&cond_stack, node);
+					out("b32 cond_%u = v%u > v%u;", out[0], in[0], in[1]);
+					out("v%u = v%u;", out[0], in[1]);
+					out("v%u = v%u;", out[1], in[0]);
+					out("v%u = v%u;", out[2], in[0]);
+					out("v%u = v%u;", out[3], in[1]);
+					out("if (cond_%u) {", out[0]);
+					indent++;
+					break;
+				}
 			case UOP_ASSERT_COPYABLE:
 			case UOP_ASSERT_DROPPABLE:
 			case UOP_ASSERT_NONZERO:
