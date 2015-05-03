@@ -30,6 +30,7 @@ internal char *uop_names[] = {
 	"negate",
 	"divmod",
 	"and",
+	"or",
 	"not",
 	"distribute",
 	"merge",

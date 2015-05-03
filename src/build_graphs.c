@@ -303,8 +303,9 @@ void build_graph(struct block *block, u32 *link_id, union type *bool_type, b32 o
 #define sum(link1, link2, link3, type) append31(UOP_SUM, (link1), (link2), (link3), (type))
 #define sum2(link1, link2, link3, link4, link5, type) \
 	sum2_(&pool, link_id, (link1), (link2), (link3), (link4), (link5), (type))
-#define not(link) append11(UOP_NOT, (link), bool_type)
 #define and(link1, link2) append21(UOP_AND, (link1), (link2), bool_type)
+#define or(link1, link2) append21(UOP_OR, (link1), (link2), bool_type)
+#define not(link) append11(UOP_NOT, (link), bool_type)
 	block->graph.input.output_type[0] = deref(block->types[0]);
 	block->graph.input.out_link_id[0] = (*link_id)++;
 	block->graph.input.out_count = 1;
@@ -565,8 +566,16 @@ void build_graph(struct block *block, u32 *link_id, union type *bool_type, b32 o
 					break;
 				}
 
+			// The condition equations are listed for the output
+			// nodes, in outside-in order. The variables a, b, c
+			// represent the conditions of the input nodes, in
+			// outside-in order (e.g. a is the condition of the
+			// outermost node in the input).
 			case 'L':
 				{
+					// Conditions:
+					// a || b
+					// a
 					struct link2 input = unpair(last);
 					struct link5 branches = unsum2(input.l[0]);
 					assert_product(output_type);
@@ -576,54 +585,75 @@ void build_graph(struct block *block, u32 *link_id, union type *bool_type, b32 o
 					assert_sum(type);
 					struct link inner = sum(branches.l[0], branches.l[1], cond_inner.l[0],
 					                        child1(type));
-					struct link cond_outer = not(and(cond_inner.l[1], branches.l[4]));
+					struct link cond_outer = or(cond_inner.l[1], branches.l[4]);
 					struct link outer = sum(inner, branches.l[2], cond_outer, type);
 					last = pair(outer, input.l[1], output_type);
 					break;
 				}
 			case 'R':
 				{
+					// Conditions:
+					// a && b
+					// a && !b
 					struct link2 input = unpair(last);
 					struct link3 outer = unsum(input.l[0]);
 					struct link3 inner = unsum(outer.l[0]);
-					struct link2 cond_inner = append12(UOP_COPY, outer.l[2],
+					struct link2 cond_outer = append12(UOP_COPY, outer.l[2],
 					                                   bool_type, bool_type);
-					struct link cond_outer = and(cond_inner.l[0], inner.l[2]);
+					struct link2 cond_inner = append12(UOP_COPY, inner.l[2],
+					                                   bool_type, bool_type);
 					assert_product(output_type);
 					struct link new_outer = sum2(inner.l[0], inner.l[1], outer.l[1],
-					                             cond_outer, cond_inner.l[1],
+					                             and(cond_outer.l[0], cond_inner.l[0]),
+					                             and(cond_outer.l[1], not(cond_inner.l[1])),
 					                             child1(output_type));
 					last = pair(new_outer, input.l[1], output_type);
 					break;
 				}
 			case 'W':
 				{
+					// Conditions:
+					// a
+					// !a && !b
 					struct link2 input = unpair(last);
 					struct link5 branches = unsum2(input.l[0]);
+					struct link2 cond_outer = append12(UOP_COPY, branches.l[3],
+					                                   bool_type, bool_type);
 					assert_product(output_type);
 					struct link new_branches = sum2(branches.l[1], branches.l[0], branches.l[2],
-					                                branches.l[3], not(branches.l[4]),
+					                                cond_outer.l[0],
+					                                and(not(cond_outer.l[1]), not(branches.l[4])),
 					                                child1(output_type));
 					last = pair(new_branches, input.l[1], output_type);
 					break;
 				}
 			case 'Z':
 				{
+					// Conditions:
+					// a
+					// !a && !b && c
+					// !a && b
 					struct link2 input = unpair(last);
 					struct link5 branches = unsum2(input.l[0]);
 					struct link3 inner = unsum(branches.l[2]);
-					struct link2 cond_inner = append12(UOP_COPY, branches.l[4],
+					struct link2 cond_outer = append12(UOP_COPY, branches.l[3],
 					                                   bool_type, bool_type);
+					struct link2 not_cond_outer = append12(UOP_COPY, not(cond_outer.l[0]),
+					                                       bool_type, bool_type);
+					struct link2 cond_middle = append12(UOP_COPY, branches.l[4],
+					                                    bool_type, bool_type);
 					assert_product(output_type);
 					union type *type = child1(output_type);
 					assert_sum(type);
 					union type *type2 = child2(type);
 					assert_sum(type2);
-					struct link new_inner = sum(branches.l[1], inner.l[1], cond_inner.l[0],
+					struct link new_inner = sum(branches.l[1], inner.l[1],
+					                            and(not_cond_outer.l[0], cond_middle.l[0]),
 					                            child2(type2));
-					struct link cond_outer = and(not(cond_inner.l[1]), inner.l[2]);
 					struct link new_branches = sum2(branches.l[0], branches.l[2], new_inner,
-					                                branches.l[3], cond_outer,
+					                                cond_outer.l[1],
+					                                and(not_cond_outer.l[1],
+					                                    and(not(cond_middle.l[1]), inner.l[2])),
 					                                type);
 					last = pair(new_branches, input.l[1], output_type);
 					break;

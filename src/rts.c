@@ -50,6 +50,7 @@ typedef struct block {
 #define UNIT 0xdeadc0de00000001
 #define VOID 0xdeadc0de00000000
 
+void die(char *message);
 Value alloc_pair(Value first, Value second);
 Value alloc_sum(b32 in_left, Value value);
 Value alloc_block_direct(BlockFunction function);
@@ -69,4 +70,27 @@ Value apply(Block *block, Value value) {
 			return alloc_pair(block->quoted, value);
 	}
 	__builtin_unreachable();
+}
+
+void run(int argc, char **argv, BlockFunction func) {
+	if (argc != 2) {
+		die("Takes exactly one argument");
+	}
+	char *argstr = argv[1];
+	f64 arg = 0;
+	b32 negate = false;
+	if (argstr[0] == '-') {
+		argstr++;
+		negate = true;
+	}
+	char c;
+	while ((c = *argstr++)) {
+		if (c < '0' || c > '9') {
+			die("Argument must be an integer");
+		}
+		arg *= 10;
+		arg += c - '0';
+	}
+	Value unit = {.bits = UNIT};
+	func(alloc_pair((Value){.number = arg}, alloc_pair(unit, unit)));
 }

@@ -257,6 +257,11 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 					out("v%u.boolean = v%u.boolean && v%u.boolean;", out[0], in[0], in[1]);
 					break;
 				}
+			case UOP_OR:
+				{
+					out("v%u.boolean = v%u.boolean || v%u.boolean;", out[0], in[0], in[1]);
+					break;
+				}
 			case UOP_NOT:
 				{
 					out("v%u.boolean = !v%u.boolean;", out[0], in[0]);
@@ -355,4 +360,9 @@ void generate_c(struct block_ptr_array blocks) {
 	foreach (block, blocks) {
 		generate(&(*block)->graph, traversal1, traversal2);
 	}
+	printf("\n");
+	printf("int main(int argc, char **argv) {\n");
+	printf("\trun(argc, argv, &block_%p);\n", &blocks.data[blocks.size - 1]->graph);
+	printf("\treturn 0;\n");
+	printf("}\n");
 }
