@@ -106,8 +106,7 @@ struct link2 append_node12(struct node_pool *pool, u32 *link_id,
                            union type *type1, union type *type2,
                            b32 optimise) {
 	if (optimise) {
-		if ((uop == UOP_UNPAIR && link.node->uop == UOP_PAIR) ||
-		    (uop == UOP_UNSUM  && link.node->uop == UOP_SUM)) {
+		if (uop == UOP_UNPAIR && link.node->uop == UOP_PAIR) {
 			link.node->in[0]->out[link.node->src_slot[0]] = NULL;
 			link.node->in[1]->out[link.node->src_slot[1]] = NULL;
 			return (struct link2){{
@@ -126,6 +125,35 @@ struct link2 append_node12(struct node_pool *pool, u32 *link_id,
 }
 
 internal inline
+struct link3 append_node13(struct node_pool *pool, u32 *link_id,
+                           u8 uop,
+                           struct link link,
+                           union type *type1, union type *type2, union type *type3,
+                           b32 optimise) {
+	if (optimise) {
+		if (uop == UOP_UNSUM  && link.node->uop == UOP_SUM) {
+			link.node->in[0]->out[link.node->src_slot[0]] = NULL;
+			link.node->in[1]->out[link.node->src_slot[1]] = NULL;
+			link.node->in[2]->out[link.node->src_slot[2]] = NULL;
+			return (struct link3){{
+				{link.node->in[0], link.node->src_slot[0], type1},
+				{link.node->in[1], link.node->src_slot[1], type2},
+				{link.node->in[2], link.node->src_slot[2], type3},
+			}};
+		}
+	}
+	struct node *result = append_node10(pool, uop, link);
+	result->output_type[0] = type1;
+	result->output_type[1] = type2;
+	result->output_type[2] = type2;
+	result->out_link_id[0] = (*link_id)++;
+	result->out_link_id[1] = (*link_id)++;
+	result->out_link_id[2] = (*link_id)++;
+	result->out_count = 3;
+	return (struct link3){{{result, 0, type1}, {result, 1, type2}, {result, 2, type3}}};
+}
+
+internal inline
 struct node *append_node20(struct node_pool *pool, u8 uop, struct link link1, struct link link2) {
 	struct node *result = alloc_node(pool, uop);
 	result->in[0] = link1.node;
@@ -137,7 +165,7 @@ struct node *append_node20(struct node_pool *pool, u8 uop, struct link link1, st
 	link1.node->dst_slot[link1.slot] = 0;
 	link2.node->dst_slot[link2.slot] = 1;
 	result->in_count = 2;
-	if (uop == UOP_SUM || uop == UOP_MERGE) {
+	if (uop == UOP_MERGE) {
 		link2.node->out_link_id[link2.slot] = link1.node->out_link_id[link1.slot];
 	}
 	return result;
@@ -169,6 +197,40 @@ struct link2 append_node22(struct node_pool *pool, u32 *link_id,
 	return (struct link2){{{result, 0, type1}, {result, 1, type2}}};
 }
 
+internal inline
+struct node *append_node30(struct node_pool *pool, u8 uop, struct link link1, struct link link2, struct link link3) {
+	struct node *result = alloc_node(pool, uop);
+	result->in[0] = link1.node;
+	result->in[1] = link2.node;
+	result->in[2] = link3.node;
+	result->src_slot[0] = link1.slot;
+	result->src_slot[1] = link2.slot;
+	result->src_slot[2] = link3.slot;
+	link1.node->out[link1.slot] = result;
+	link2.node->out[link2.slot] = result;
+	link3.node->out[link3.slot] = result;
+	link1.node->dst_slot[link1.slot] = 0;
+	link2.node->dst_slot[link2.slot] = 1;
+	link3.node->dst_slot[link3.slot] = 2;
+	result->in_count = 3;
+	if (uop == UOP_SUM) {
+		link2.node->out_link_id[link2.slot] = link1.node->out_link_id[link1.slot];
+	}
+	return result;
+}
+
+internal inline
+struct link append_node31(struct node_pool *pool, u32 *link_id,
+                          u8 uop,
+                          struct link link1, struct link link2, struct link link3,
+                          union type *type) {
+	struct node *result = append_node30(pool, uop, link1, link2, link3);
+	result->output_type[0] = type;
+	result->out_link_id[0] = (*link_id)++;
+	result->out_count = 1;
+	return (struct link){result, 0, type};
+}
+
 #define assert_product(type) assert(!IS_VAR(type) && (type)->symbol == SYMBOL_PRODUCT)
 #define assert_sum(type)     assert(!IS_VAR(type) && (type)->symbol == SYMBOL_SUM)
 #define child1(type) deref((type)->child1)
@@ -197,29 +259,31 @@ struct link pair2_(struct node_pool *pool, u32 *link_id,
 }
 
 internal inline
-struct link2 unsum_(struct node_pool *pool, u32 *link_id, struct link link, b32 optimise) {
+struct link3 unsum_(struct node_pool *pool, u32 *link_id, struct link link, union type *bool_type, b32 optimise) {
 	assert_sum(link.type);
-	return append_node12(pool, link_id, UOP_UNSUM, link, child1(link.type), child2(link.type), optimise);
+	return append_node13(pool, link_id, UOP_UNSUM, link,
+	                     child1(link.type), child2(link.type), bool_type,
+	                     optimise);
 }
 
 internal inline
-struct link3 unsum2_(struct node_pool *pool, u32 *link_id, struct link link, b32 optimise) {
-	struct link2 outer = unsum_(pool, link_id, link, optimise);
-	struct link2 inner = unsum_(pool, link_id, outer.l[1], optimise);
-	return (struct link3){{outer.l[0], inner.l[0], inner.l[1]}};
+struct link5 unsum2_(struct node_pool *pool, u32 *link_id, struct link link, union type *bool_type, b32 optimise) {
+	struct link3 outer = unsum_(pool, link_id, link, bool_type, optimise);
+	struct link3 inner = unsum_(pool, link_id, outer.l[1], bool_type, optimise);
+	return (struct link5){{outer.l[0], inner.l[0], inner.l[1], outer.l[2], inner.l[2]}};
 }
 
 internal inline
 struct link sum2_(struct node_pool *pool, u32 *link_id,
-                   struct link link1, struct link link2, struct link link3,
+                   struct link link1, struct link link2, struct link link3, struct link link4, struct link link5,
                    union type *type) {
 	assert_sum(type);
-	struct link right = append_node21(pool, link_id, UOP_SUM, link2, link3, child2(type));
-	return append_node21(pool, link_id, UOP_SUM, link1, right, type);
+	struct link right = append_node31(pool, link_id, UOP_SUM, link2, link3, link5, child2(type));
+	return append_node31(pool, link_id, UOP_SUM, link1, right, link4, type);
 }
 
 internal
-void build_graph(struct block *block, u32 *link_id, b32 optimise) {
+void build_graph(struct block *block, u32 *link_id, union type *bool_type, b32 optimise) {
 	if (block->size == 0) {
 		return;
 	}
@@ -228,20 +292,25 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 #define append10(uop, link) append_node10(&pool, (uop), (link))
 #define append11(uop, link, type) append_node11(&pool, link_id, (uop), (link), (type), optimise)
 #define append12(uop, link, type1, type2) append_node12(&pool, link_id, (uop), (link), (type1), (type2), optimise)
+#define append20(uop, link1, link2) append_node20(&pool, (uop), (link1), (link2))
 #define append21(uop, link1, link2, type) \
 	append_node21(&pool, link_id, (uop), (link1), (link2), (type))
 #define append22(uop, link1, link2, type1, type2) \
 	append_node22(&pool, link_id, (uop), (link1), (link2), (type1), (type2))
+#define append31(uop, link1, link2, link3, type) \
+	append_node31(&pool, link_id, (uop), (link1), (link2), (link3), (type))
 #define unpair(link) unpair_(&pool, link_id, (link), optimise)
 #define unpair2(link) unpair2_(&pool, link_id, (link), optimise)
 #define pair(link1, link2, type) append21(UOP_PAIR, (link1), (link2), (type))
 #define pair2(link1, link2, link3, type) \
 	pair2_(&pool, link_id, (link1), (link2), (link3), (type))
-#define unsum(link) unsum_(&pool, link_id, (link), optimise)
-#define unsum2(link) unsum2_(&pool, link_id, (link), optimise)
-#define sum(link1, link2, type) append21(UOP_SUM, (link1), (link2), (type))
-#define sum2(link1, link2, link3, type) \
-	sum2_(&pool, link_id, (link1), (link2), (link3), (type))
+#define unsum(link) unsum_(&pool, link_id, (link), bool_type, optimise)
+#define unsum2(link) unsum2_(&pool, link_id, (link), bool_type, optimise)
+#define sum(link1, link2, link3, type) append31(UOP_SUM, (link1), (link2), (link3), (type))
+#define sum2(link1, link2, link3, link4, link5, type) \
+	sum2_(&pool, link_id, (link1), (link2), (link3), (link4), (link5), (type))
+#define not(link) append11(UOP_NOT, (link), bool_type)
+#define and(link1, link2) append21(UOP_AND, (link1), (link2), bool_type)
 	block->graph.input.output_type[0] = deref(block->types[0]);
 	block->graph.input.out_link_id[0] = (*link_id)++;
 	block->graph.input.out_count = 1;
@@ -256,13 +325,19 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 			case OP_SEAL:
 				{
 					last = append11(UOP_SEAL, last, output_type);
-					last.node->seal = block->sealers[sealer_index++];
+					// Only set the seal if the node wasn't optimised away
+					if (last.node->uop == UOP_SEAL && last.node->seal == NULL) {
+						last.node->seal = block->sealers[sealer_index++];
+					}
 					break;
 				}
 			case OP_UNSEAL:
 				{
 					last = append11(UOP_UNSEAL, last, output_type);
-					last.node->seal = block->sealers[sealer_index++];
+					// Only set the seal if the node wasn't optimised away
+					if (last.node->uop == UOP_UNSEAL && last.node->seal == NULL) {
+						last.node->seal = block->sealers[sealer_index++];
+					}
 					break;
 				}
 			case OP_ASSERT_EQUAL:
@@ -499,22 +574,30 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 			case 'L':
 				{
 					struct link2 input = unpair(last);
-					struct link3 branches = unsum2(input.l[0]);
+					struct link5 branches = unsum2(input.l[0]);
 					assert_product(output_type);
 					union type *type = child1(output_type);
+					struct link2 cond_inner = append12(UOP_COPY, branches.l[3],
+					                               bool_type, bool_type);
 					assert_sum(type);
-					struct link inner = sum(branches.l[0], branches.l[1], child1(type));
-					struct link outer = sum(inner, branches.l[2], type);
+					struct link inner = sum(branches.l[0], branches.l[1], cond_inner.l[0],
+					                        child1(type));
+					struct link cond_outer = not(and(cond_inner.l[1], branches.l[4]));
+					struct link outer = sum(inner, branches.l[2], cond_outer, type);
 					last = pair(outer, input.l[1], output_type);
 					break;
 				}
 			case 'R':
 				{
 					struct link2 input = unpair(last);
-					struct link2 outer = unsum(input.l[0]);
-					struct link2 inner = unsum(outer.l[0]);
+					struct link3 outer = unsum(input.l[0]);
+					struct link3 inner = unsum(outer.l[0]);
+					struct link2 cond_inner = append12(UOP_COPY, outer.l[2],
+					                                   bool_type, bool_type);
+					struct link cond_outer = and(cond_inner.l[0], inner.l[2]);
 					assert_product(output_type);
 					struct link new_outer = sum2(inner.l[0], inner.l[1], outer.l[1],
+					                             cond_outer, cond_inner.l[1],
 					                             child1(output_type));
 					last = pair(new_outer, input.l[1], output_type);
 					break;
@@ -522,9 +605,10 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 			case 'W':
 				{
 					struct link2 input = unpair(last);
-					struct link3 branches = unsum2(input.l[0]);
+					struct link5 branches = unsum2(input.l[0]);
 					assert_product(output_type);
 					struct link new_branches = sum2(branches.l[1], branches.l[0], branches.l[2],
+					                                branches.l[3], not(branches.l[4]),
 					                                child1(output_type));
 					last = pair(new_branches, input.l[1], output_type);
 					break;
@@ -532,15 +616,20 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 			case 'Z':
 				{
 					struct link2 input = unpair(last);
-					struct link3 branches = unsum2(input.l[0]);
-					struct link2 inner = unsum(branches.l[2]);
+					struct link5 branches = unsum2(input.l[0]);
+					struct link3 inner = unsum(branches.l[2]);
+					struct link2 cond_inner = append12(UOP_COPY, branches.l[4],
+					                                   bool_type, bool_type);
 					assert_product(output_type);
 					union type *type = child1(output_type);
 					assert_sum(type);
 					union type *type2 = child2(type);
 					assert_sum(type2);
-					struct link new_inner = sum(branches.l[1], inner.l[1], child2(type2));
+					struct link new_inner = sum(branches.l[1], inner.l[1], cond_inner.l[0],
+					                            child2(type2));
+					struct link cond_outer = and(not(cond_inner.l[1]), inner.l[2]);
 					struct link new_branches = sum2(branches.l[0], branches.l[2], new_inner,
+					                                branches.l[3], cond_outer,
 					                                type);
 					last = pair(new_branches, input.l[1], output_type);
 					break;
@@ -552,15 +641,18 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 					union type *type = child1(output_type);
 					assert_sum(type);
 					struct link void_constant = append01(UOP_VOID_CONSTANT, child2(type));
-					struct link branches = sum(input.l[0], void_constant, type);
+					struct link bool_constant = append01(UOP_BOOL_CONSTANT, bool_type);
+					bool_constant.node->bool_value = true;
+					struct link branches = sum(input.l[0], void_constant, bool_constant, type);
 					last = pair(branches, input.l[1], output_type);
 					break;
 				}
 			case 'C':
 				{
 					struct link2 input = unpair(last);
-					struct link2 branches = unsum(input.l[0]);
+					struct link3 branches = unsum(input.l[0]);
 					append10(UOP_DROP, branches.l[1]);
+					append10(UOP_DROP, branches.l[2]);
 					last = pair(branches.l[0], input.l[1], output_type);
 					break;
 				}
@@ -570,14 +662,14 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 					struct link3 input = unpair2(last);
 					struct link checked_block = append11(UOP_ASSERT_DROPPABLE,
 					                                     input.l[0], input.l[0].type);
-					struct link2 branches = unsum(input.l[1]);
+					struct link3 branches = unsum(input.l[1]);
 					assert_product(output_type);
 					union type *type = child1(output_type);
 					assert_sum(type);
 					struct link applied_branch = append21(UOP_APPLY,
 					                                      checked_block, branches.l[0],
 					                                      child1(type));
-					struct link new_branches = sum(applied_branch, branches.l[1],
+					struct link new_branches = sum(applied_branch, branches.l[1], branches.l[2],
 					                               type);
 					last = pair(new_branches, input.l[2], output_type);
 					break;
@@ -585,8 +677,9 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 			case 'D':
 				{
 					struct link3 input = unpair2(last);
-					struct link2 branches = unsum(input.l[1]);
-					struct link2 distrib = append12(UOP_DISTRIB, input.l[0],
+					struct link3 branches = unsum(input.l[1]);
+					struct link2 cond = append12(UOP_COPY, branches.l[2], bool_type, bool_type);
+					struct link2 distrib = append22(UOP_DISTRIB, input.l[0], cond.l[0],
 					                                input.l[0].type, input.l[0].type);
 					assert_product(output_type);
 					union type *type = child1(output_type);
@@ -595,22 +688,23 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 					                        child1(type));
 					struct link right = pair(distrib.l[1], branches.l[1],
 								 child2(type));
-					struct link new_branches = sum(left, right, type);
+					struct link new_branches = sum(left, right, cond.l[1], type);
 					last = pair(new_branches, input.l[2], output_type);
 					break;
 				}
 			case 'F':
 				{
 					struct link2 input = unpair(last);
-					struct link2 branches = unsum(input.l[0]);
+					struct link3 branches = unsum(input.l[0]);
+					struct link2 cond = append12(UOP_COPY, branches.l[2], bool_type, bool_type);
 					struct link2 left = unpair(branches.l[0]);
 					struct link2 right = unpair(branches.l[1]);
 					assert_product(output_type);
 					union type *type = child2(output_type);
 					assert_product(type);
-					struct link new_left = sum(left.l[0], right.l[0],
+					struct link new_left = sum(left.l[0], right.l[0], cond.l[0],
 					                           child1(output_type));
-					struct link new_right = sum(left.l[1], right.l[1],
+					struct link new_right = sum(left.l[1], right.l[1], cond.l[1],
 					                           child1(type));
 					last = pair2(new_left, new_right, input.l[1], output_type);
 					break;
@@ -618,9 +712,10 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 			case 'M':
 				{
 					struct link2 input = unpair(last);
-					struct link2 branches = unsum(input.l[0]);
+					struct link3 branches = unsum(input.l[0]);
 					assert_product(output_type);
-					struct link merge = append21(UOP_MERGE, branches.l[0], branches.l[1],
+					struct link merge = append31(UOP_MERGE, branches.l[0], branches.l[1],
+					                             branches.l[2],
 					                             child1(output_type));
 					last = pair(merge, input.l[1], output_type);
 					break;
@@ -628,8 +723,8 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 			case 'K':
 				{
 					struct link2 input = unpair(last);
-					struct link2 branches = unsum(input.l[0]);
-					append10(UOP_ASSERT_VOID, branches.l[0]);
+					struct link3 branches = unsum(input.l[0]);
+					append20(UOP_ASSERT_VOID, branches.l[0], branches.l[2]);
 					last = pair(branches.l[1], input.l[1], output_type);
 					break;
 				}
@@ -643,21 +738,24 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 					struct link g1 = {greater, 1, input.l[0].type};
 					struct link g2 = {greater, 2, input.l[0].type};
 					struct link g3 = {greater, 3, input.l[1].type};
+					struct link g4 = {greater, 4, bool_type};
 					greater->output_type[0] = g0.type;
 					greater->output_type[1] = g1.type;
 					greater->output_type[2] = g2.type;
 					greater->output_type[3] = g3.type;
+					greater->output_type[4] = g4.type;
 					greater->out_link_id[0] = (*link_id)++;
 					greater->out_link_id[1] = (*link_id)++;
 					greater->out_link_id[2] = (*link_id)++;
 					greater->out_link_id[3] = (*link_id)++;
-					greater->out_count = 4;
+					greater->out_link_id[4] = (*link_id)++;
+					greater->out_count = 5;
 					assert_product(output_type);
 					union type *type = child1(output_type);
 					assert_sum(type);
 					struct link left  = pair(g0, g1, child1(type));
 					struct link right = pair(g2, g3, child2(type));
-					struct link branches = append21(UOP_SUM, left, right, type);
+					struct link branches = sum(left, right, g4, type);
 					last = pair(branches, input.l[2], output_type);
 					break;
 				}
@@ -676,9 +774,9 @@ void build_graph(struct block *block, u32 *link_id, b32 optimise) {
 	block->graph.output.src_slot[0] = last.slot;
 }
 
-void build_graphs(struct block_ptr_array blocks) {
+void build_graphs(struct block_ptr_array blocks, union type *bool_type) {
 	u32 link_id = 0;
 	foreach (block, blocks) {
-		build_graph(*block, &link_id, true);
+		build_graph(*block, &link_id, bool_type, true);
 	}
 }

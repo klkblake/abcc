@@ -9,6 +9,7 @@ struct type_pool {
 	union type *unit;
 	union type *number;
 	union type *text;
+	union type *boolean;
 };
 
 b32 infer_types(struct block_ptr_array blocks, struct type_pool *pool);

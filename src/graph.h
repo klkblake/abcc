@@ -14,6 +14,7 @@ enum uop {
 	UOP_UNIT_CONSTANT,
 	UOP_VOID_CONSTANT,
 	UOP_BLOCK_CONSTANT,
+	UOP_BOOL_CONSTANT,
 	UOP_NUMBER_CONSTANT,
 	UOP_TEXT_CONSTANT,
 	UOP_COPY,
@@ -28,6 +29,8 @@ enum uop {
 	UOP_INVERSE,
 	UOP_NEGATE,
 	UOP_DIVMOD,
+	UOP_AND,
+	UOP_NOT,
 	UOP_DISTRIB,
 	UOP_MERGE,
 	UOP_GREATER,
@@ -43,13 +46,13 @@ enum uop {
 struct node {
 	enum uop uop;
 	u32 in_count;
-	struct node *in[2];
-	u32 src_slot[2];
+	struct node *in[3];
+	u32 src_slot[3]; // TODO more consistent naming
 	u32 out_count;
-	struct node *out[4];
-	u32 dst_slot[4];
-	u32 out_link_id[4];
-	union type *output_type[4];
+	struct node *out[5];
+	u32 dst_slot[5];
+	u32 out_link_id[5];
+	union type *output_type[5];
 	union {
 		struct node *next_constant;
 		struct node *left_constant;
@@ -60,6 +63,7 @@ struct node {
 		struct string_rc *seal;
 		struct string_rc *text;
 		f64 number; // XXX should be a rational
+		b32 bool_value;
 	};
 	u64 seen;
 };

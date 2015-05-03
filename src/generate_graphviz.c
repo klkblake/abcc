@@ -14,6 +14,7 @@ internal char *uop_names[] = {
 	"unit constant",
 	"void constant",
 	"block constant",
+	"bool constant",
 	"number constant",
 	"text constant",
 	"copy",
@@ -28,6 +29,8 @@ internal char *uop_names[] = {
 	"inverse",
 	"negate",
 	"divmod",
+	"and",
+	"not",
 	"distribute",
 	"merge",
 	"greater",
@@ -41,11 +44,16 @@ internal char *uop_names[] = {
 };
 
 char *in_port(u32 slot_count, u32 slot) {
-	static char *ports[] = {"nw", "ne"};
-	if (slot_count == 1) {
-		return "c";
-	} else {
-		return ports[slot];
+	static char *ports[] = {"nw", "n", "ne"};
+	switch (slot_count) {
+		case 1:
+			return "c";
+		case 2:
+			return ports[slot * 2];
+		case 3:
+			return ports[slot];
+		default:
+			assert(!"Unhandled in count");
 	}
 }
 
@@ -60,8 +68,10 @@ char *out_port(u32 slot_count, u32 slot) {
 		        return ports[slot + 1];
 		case 4:
 		        return ports[slot + slot / 2];
+		case 5:
+		        return ports[slot];
 		default:
-		        assert(!"Impossible out count");
+		        assert(!"Unhandled out count");
 	}
 }
 
@@ -76,7 +86,9 @@ void print_node(struct node *node, struct graph *graph, u64 traversal) {
 		return;
 	}
 	node->seen = traversal;
-	if (node->uop == UOP_NUMBER_CONSTANT) {
+	if (node->uop == UOP_BOOL_CONSTANT) {
+		printf("node_%p [label=\"constant: %s\"]\n", node, node->bool_value ? "true" : "false");
+	} else if (node->uop == UOP_NUMBER_CONSTANT) {
 		printf("node_%p [label=\"constant: %f\"]\n", node, node->number);
 	} else if (node->uop == UOP_BLOCK_CONSTANT) {
 		printf("node_%p [label=\"block constant\"]\n", node);

@@ -137,7 +137,7 @@ int main(int argc, char **argv) {
 		map_free(&vars);
 		goto cleanup_typecheck;
 	}
-	build_graphs(result.blocks);
+	build_graphs(result.blocks, pool.boolean);
 	switch (output) {
 		case OUTPUT_EXECUTABLE:
 			break;

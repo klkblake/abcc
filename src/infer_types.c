@@ -794,6 +794,7 @@ b32 infer_types(struct block_ptr_array blocks, struct type_pool *pool) {
 	assign(pool->text, set_term(alloc_type(pool), SYMBOL_SUM,
 	                            set_term(alloc_type(pool), SYMBOL_PRODUCT, pool->number, pool->text),
 	                            pool->unit));
+	pool->boolean = set_term(alloc_type(pool), SYMBOL_BOOL, NULL, NULL);
 	foreach (block, blocks) {
 		if (!infer_block(*block, pool)) {
 			printf("Failed in block %lu\n", block_index);

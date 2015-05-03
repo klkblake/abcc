@@ -15,6 +15,8 @@
 #define SYMBOL_PRODUCT    (HIGH_PTR_BIT | 3)
 #define SYMBOL_SUM        (HIGH_PTR_BIT | 4)
 #define SYMBOL_BLOCK      (HIGH_PTR_BIT | 5)
+// This is not part of the user-visible type system
+#define SYMBOL_BOOL       (HIGH_PTR_BIT | 6)
 
 #define IS_SEALED(sym) ((sym & HIGH_PTR_BIT) == 0)
 
