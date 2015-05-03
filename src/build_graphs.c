@@ -165,9 +165,6 @@ struct node *append_node20(struct node_pool *pool, u8 uop, struct link link1, st
 	link1.node->dst_slot[link1.slot] = 0;
 	link2.node->dst_slot[link2.slot] = 1;
 	result->in_count = 2;
-	if (uop == UOP_MERGE) {
-		link2.node->out_link_id[link2.slot] = link1.node->out_link_id[link1.slot];
-	}
 	return result;
 }
 
@@ -213,9 +210,6 @@ struct node *append_node30(struct node_pool *pool, u8 uop, struct link link1, st
 	link2.node->dst_slot[link2.slot] = 1;
 	link3.node->dst_slot[link3.slot] = 2;
 	result->in_count = 3;
-	if (uop == UOP_SUM) {
-		link2.node->out_link_id[link2.slot] = link1.node->out_link_id[link1.slot];
-	}
 	return result;
 }
 

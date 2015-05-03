@@ -111,14 +111,14 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 				}
 			case UOP_SUM:
 				{
-					out("v%u = alloc_sum(v%u, v%u.boolean ? v%u : v%u);",
+					out("v%u = alloc_sum(v%u.boolean, v%u.boolean ? v%u : v%u);",
 					    out[0], in[2], in[2], in[0], in[1]);
 					break;
 				}
 			case UOP_UNSUM:
 				{
-					out("v%u.boolean = v%u.sum & 0x1;", out[2], in[0]);
-					out("v%u = (v%u.sum &~ 0x1)->value;", out[0], in[0]);
+					out("v%u.boolean = v%u.bits & 0x1;", out[2], in[0]);
+					out("v%u = ((Sum *)(v%u.bits &~ 0x1))->value;", out[0], in[0]);
 					out("v%u = v%u;", out[1], out[0]);
 					out("if (v%u.boolean) {", out[2]);
 					indent++;
@@ -132,12 +132,12 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 				}
 			case UOP_UNIT_CONSTANT:
 				{
-					out("v%u = UNIT;", out[0]);
+					out("v%u.bits = UNIT;", out[0]);
 					break;
 				}
 			case UOP_VOID_CONSTANT:
 				{
-					out("v%u = VOID;", out[0]);
+					out("v%u.bits = VOID;", out[0]);
 					break;
 				}
 			case UOP_BLOCK_CONSTANT:
@@ -147,7 +147,7 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 				}
 			case UOP_BOOL_CONSTANT:
 				{
-					out("v%u = %s;", out[0], node->boolean ? "true" : "false");
+					out("v%u.boolean = %s;", out[0], node->boolean ? "true" : "false");
 					break;
 				}
 			case UOP_NUMBER_CONSTANT:
@@ -214,7 +214,7 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 				}
 			case UOP_COMPOSE:
 				{
-					out("v%u = alloc_block_composed(v%u, v%u);", out[0], in[0], in[1]);
+					out("v%u = alloc_block_composed(v%u.block, v%u.block);", out[0], in[0], in[1]);
 					break;
 				}
 			case UOP_QUOTE:
@@ -246,8 +246,10 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 				}
 			case UOP_DIVMOD:
 				{
-					out("v%u = __builtin_floor(v%u/v%u);", out[1], in[1], in[0]);
-					out("v%u = v%u - v%u * v%u;", out[0], in[1], out[1], in[0]);
+					out("v%u.number = __builtin_floor(v%u.number/v%u.number);",
+					    out[1], in[1], in[0]);
+					out("v%u.number = v%u.number - v%u.number * v%u.number;",
+					    out[0], in[1], out[1], in[0]);
 					break;
 				}
 			case UOP_AND:
@@ -276,7 +278,7 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 				}
 			case UOP_GREATER:
 				{
-					out("v%u.boolean = v%u > v%u;", out[4], in[0], in[1]);
+					out("v%u.boolean = v%u.number > v%u.number;", out[4], in[0], in[1]);
 					out("v%u = v%u;", out[0], in[1]);
 					out("v%u = v%u;", out[1], in[0]);
 					out("v%u = v%u;", out[2], in[0]);
