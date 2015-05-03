@@ -87,7 +87,7 @@ void print_node(struct node *node, struct graph *graph, u64 traversal) {
 	}
 	node->seen = traversal;
 	if (node->uop == UOP_BOOL_CONSTANT) {
-		printf("node_%p [label=\"constant: %s\"]\n", node, node->bool_value ? "true" : "false");
+		printf("node_%p [label=\"constant: %s\"]\n", node, node->boolean ? "true" : "false");
 	} else if (node->uop == UOP_NUMBER_CONSTANT) {
 		printf("node_%p [label=\"constant: %f\"]\n", node, node->number);
 	} else if (node->uop == UOP_BLOCK_CONSTANT) {

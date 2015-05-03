@@ -63,7 +63,7 @@ struct node {
 		struct string_rc *seal;
 		struct string_rc *text;
 		f64 number; // XXX should be a rational
-		b32 bool_value;
+		b32 boolean;
 	};
 	u64 seen;
 };

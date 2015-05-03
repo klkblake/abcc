@@ -642,7 +642,7 @@ void build_graph(struct block *block, u32 *link_id, union type *bool_type, b32 o
 					assert_sum(type);
 					struct link void_constant = append01(UOP_VOID_CONSTANT, child2(type));
 					struct link bool_constant = append01(UOP_BOOL_CONSTANT, bool_type);
-					bool_constant.node->bool_value = true;
+					bool_constant.node->boolean = true;
 					struct link branches = sum(input.l[0], void_constant, bool_constant, type);
 					last = pair(branches, input.l[1], output_type);
 					break;

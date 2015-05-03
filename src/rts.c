@@ -1,5 +1,6 @@
 typedef __UINT64_TYPE__ u64;
 typedef double f64;
+typedef __UINT32_TYPE__ b32;
 
 typedef union value {
 	union value *next;  // for freelist
@@ -7,6 +8,7 @@ typedef union value {
 	struct sum *sum;    // bottom bit set indicates sum in left
 	struct block *block; // bottom two bits indicates type
 	f64 number;
+	b32 boolean;
 } Value;
 
 typedef struct pair {

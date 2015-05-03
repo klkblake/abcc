@@ -45,7 +45,9 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 			array_push(&worklist, node->out[i]);
 		}
 	}
-	struct node_ptr_array cond_stack = {};
+	struct node *const MARKER_ELSE = (struct node *)0x1;
+	struct node *const MARKER_END  = (struct node *)0x2;
+	u32 return_value = (u32)-1;
 	array_push(&worklist, graph->input.out[0]);
 	for (struct node *constant = graph->constants; constant; constant = constant->next_constant) {
 		array_push(&worklist, constant);
@@ -53,6 +55,17 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 	graph->input.seen = traversal2;
 	while (worklist.size > 0) {
 		struct node *node = array_pop(&worklist);
+		if (node == MARKER_ELSE) {
+			indent--;
+			out("} else {");
+			indent++;
+			continue;
+		}
+		if (node == MARKER_END) {
+			indent--;
+			out("}");
+			continue;
+		}
 		if (node->seen == traversal2) {
 			continue;
 		}
@@ -63,27 +76,23 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 			}
 		}
 		if (!ready) {
-			if (node->uop == UOP_SUM || node->uop == UOP_MERGE) {
-				indent--;
-				out("} else {");
-				indent++;
-			}
 			continue;
 		}
 		node->seen = traversal2;
-		u32 in[2];
-		u32 out[4];
+		u32 in[array_count(node->in)];
+		u32 out[array_count(node->out)];
 		for (u32 i = 0; i < node->in_count; i++) {
 			in[i] = node->in[i]->out_link_id[node->src_slot[i]];
 		}
 		for (u32 i = 0; i < node->out_count; i++) {
 			out[i] = node->out_link_id[i];
 		}
+		b32 add_out_nodes = true;
 		switch (node->uop) {
 			case UOP_START: assert(!"Start node pushed onto worklist");
 			case UOP_END:
 				{
-					out("return v%u;", in[0]);
+					return_value = in[0];
 					break;
 				}
 			case UOP_SEAL:   out("v%u = v%u;", out[0], in[0]); break;
@@ -102,21 +111,23 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 				}
 			case UOP_SUM:
 				{
-					indent--;
-					out("}");
-					struct node *cond_node = array_pop(&cond_stack);
-					out("v%u = alloc_sum(cond_%u, v%u);",
-					    out[0], cond_node->out_link_id[0], in[0]);
+					out("v%u = alloc_sum(v%u, v%u.boolean ? v%u : v%u);",
+					    out[0], in[2], in[2], in[0], in[1]);
 					break;
 				}
 			case UOP_UNSUM:
 				{
-					array_push(&cond_stack, node);
-					out("b32 cond_%u = v%u.sum & 0x1;", out[0], in[0]);
+					out("v%u.boolean = v%u.sum & 0x1;", out[2], in[0]);
 					out("v%u = (v%u.sum &~ 0x1)->value;", out[0], in[0]);
 					out("v%u = v%u;", out[1], out[0]);
-					out("if (cond_%u) {", out[0]);
+					out("if (v%u.boolean) {", out[2]);
 					indent++;
+					array_push(&worklist, node->out[2]);
+					array_push(&worklist, MARKER_END);
+					array_push(&worklist, node->out[1]);
+					array_push(&worklist, MARKER_ELSE);
+					array_push(&worklist, node->out[0]);
+					add_out_nodes = false;
 					break;
 				}
 			case UOP_UNIT_CONSTANT:
@@ -132,6 +143,11 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 			case UOP_BLOCK_CONSTANT:
 				{
 					out("v%u = alloc_block_direct(&block_%p);", out[0], node->block);
+					break;
+				}
+			case UOP_BOOL_CONSTANT:
+				{
+					out("v%u = %s;", out[0], node->boolean ? "true" : "false");
 					break;
 				}
 			case UOP_NUMBER_CONSTANT:
@@ -154,9 +170,12 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 						in_type = deref(in_type->child1);
 					}
 					if (IS_VAR(in_type)) {
+						// TODO implement this
 						out("XXX FAIL UNIMPLEMENTED COPY VAR XXX");
 					} else {
-						switch (in_type->symbol) {
+						switch (in_type->symbol & POLYMORPHIC_MASK) {
+							case SYMBOL_UNIT:   break;
+							case SYMBOL_NUMBER: break;
 							case SYMBOL_PRODUCT:
 								{
 									out("v%u.pair->refcount++;", in[0]);
@@ -167,16 +186,15 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 									out("v%u.sum->refcount++;", in[0]);
 									break;
 								}
-							case SYMBOL_UNIT:
+							case SYMBOL_BLOCK:
 								{
+									out("v%u.block->refcount++;", in[0]);
 									break;
 								}
-							case SYMBOL_NUMBER:
-								{
-									break;
-								}
+							case SYMBOL_BOOL:   break;
 							default:
-								out("XXX FAIL UNIMPLEMENTED COPY SYMBOL %lu XXX",
+							        // TODO implement this
+								out("XXX FAIL UNIMPLEMENTED COPY SYMBOL %lx XXX",
 								    in_type->symbol);
 						}
 					}
@@ -232,47 +250,98 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 					out("v%u = v%u - v%u * v%u;", out[0], in[1], out[1], in[0]);
 					break;
 				}
+			case UOP_AND:
+				{
+					out("v%u.boolean = v%u.boolean && v%u.boolean;", out[0], in[0], in[1]);
+					break;
+				}
+			case UOP_NOT:
+				{
+					out("v%u.boolean = !v%u.boolean;", out[0], in[0]);
+					break;
+				}
 			case UOP_DISTRIB:
 				{
-					out("// Distrib");
+					out("// Distribute");
+					out("(void) v%u;", in[1]);
 					out("v%u = v%u;", out[0], in[0]);
 					out("v%u = v%u;", out[1], in[0]);
 					break;
 				}
 			case UOP_MERGE:
 				{
-					indent--;
-					out("}");
-					struct node *cond_node = array_pop(&cond_stack);
-					out("v%u = cond_%u ? v%u : v%u;",
-					    out[0], cond_node->out_link_id[0], in[0], in[1]);
+					out("v%u = v%u.boolean ? v%u : v%u;",
+					    out[0], in[2], in[0], in[1]);
 					break;
 				}
 			case UOP_GREATER:
 				{
-					array_push(&cond_stack, node);
-					out("b32 cond_%u = v%u > v%u;", out[0], in[0], in[1]);
+					out("v%u.boolean = v%u > v%u;", out[4], in[0], in[1]);
 					out("v%u = v%u;", out[0], in[1]);
 					out("v%u = v%u;", out[1], in[0]);
 					out("v%u = v%u;", out[2], in[0]);
 					out("v%u = v%u;", out[3], in[1]);
-					out("if (cond_%u) {", out[0]);
+					out("if (v%u.boolean) {", out[4]);
 					indent++;
+					array_push(&worklist, node->out[4]);
+					array_push(&worklist, MARKER_END);
+					array_push(&worklist, node->out[3]);
+					array_push(&worklist, node->out[2]);
+					array_push(&worklist, MARKER_ELSE);
+					array_push(&worklist, node->out[1]);
+					array_push(&worklist, node->out[0]);
+					add_out_nodes = false;
 					break;
 				}
 			case UOP_ASSERT_COPYABLE:
+				{
+					out("v%u = v%u;", out[0], in[0]);
+					break;
+				}
 			case UOP_ASSERT_DROPPABLE:
+				{
+					out("v%u = v%u;", out[0], in[0]);
+					break;
+				}
 			case UOP_ASSERT_NONZERO:
+				{
+					out("assert_nonzero(v%u.number);", in[0]);
+					out("v%u = v%u;", out[0], in[0]);
+					break;
+				}
 			case UOP_ASSERT_VOID:
+				{
+					out("assert_void(v%u, v%u.boolean);", in[0], in[1]);
+					break;
+				}
 			case UOP_ASSERT_EQUAL:
+				{
+					out("assert_equal(v%u, v%u);", in[0], in[1]);
+					out("v%u = v%u;", out[0], in[0]);
+					out("v%u = v%u;", out[1], in[1]);
+					break;
+				}
 			case UOP_DEBUG_PRINT_RAW:
+				{
+					// TODO implement this
+					out("XXX FAIL UNIMPLEMENTED PRINT RAW XXX");
+					break;
+				}
 			case UOP_DEBUG_PRINT_TEXT:
-				;
+				{
+					// TODO implement this
+					out("XXX FAIL UNIMPLEMENTED PRINT TEXT XXX");
+					break;
+				}
 		}
-		for (u32 i = 0; i < node->out_count; i++) {
-			array_push(&worklist, node->out[i]);
+		if (add_out_nodes) {
+			for (u32 i = 0; i < node->out_count; i++) {
+				array_push(&worklist, node->out[i]);
+			}
 		}
 	}
+	assert(return_value != (u32)-1);
+	out("return v%u;", return_value);
 	printf("}\n");
 	array_free(&worklist);
 }
