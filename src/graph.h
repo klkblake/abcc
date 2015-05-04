@@ -71,6 +71,7 @@ struct node {
 DEFINE_ARRAY(struct node *, node_ptr);
 
 struct graph {
+	u32 id;
 	struct node input;
 	struct node output;
 	struct node *constants;

@@ -18,7 +18,7 @@ void do_indent(u32 indent) {
 internal
 void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 	u32 indent = 1;
-	printf("\nValue block_%p(Value v%u) {\n", graph, graph->input.out_link_id[0]);
+	printf("\nValue block_%u(Value v%u) {\n", graph->id, graph->input.out_link_id[0]);
 	struct node_ptr_array worklist = {};
 	array_push(&worklist, graph->input.out[0]);
 	for (struct node *constant = graph->constants; constant; constant = constant->next_constant) {
@@ -142,7 +142,7 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 				}
 			case UOP_BLOCK_CONSTANT:
 				{
-					out("v%u = alloc_block_direct(&block_%p);", out[0], node->block);
+					out("v%u = alloc_block_direct(&block_%u);", out[0], node->block->id);
 					break;
 				}
 			case UOP_BOOL_CONSTANT:
@@ -360,9 +360,4 @@ void generate_c(struct block_ptr_array blocks) {
 	foreach (block, blocks) {
 		generate(&(*block)->graph, traversal1, traversal2);
 	}
-	printf("\n");
-	printf("int main(int argc, char **argv) {\n");
-	printf("\trun(argc, argv, &block_%p);\n", &blocks.data[blocks.size - 1]->graph);
-	printf("\treturn 0;\n");
-	printf("}\n");
 }

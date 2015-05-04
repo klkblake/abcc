@@ -277,7 +277,7 @@ struct link sum2_(struct node_pool *pool, u32 *link_id,
 }
 
 internal
-void build_graph(struct block *block, u32 *link_id, union type *bool_type, b32 optimise) {
+void build_graph(struct block *block, u32 graph_id, u32 *link_id, union type *bool_type, b32 optimise) {
 	if (block->size == 0) {
 		return;
 	}
@@ -306,6 +306,7 @@ void build_graph(struct block *block, u32 *link_id, union type *bool_type, b32 o
 #define and(link1, link2) append21(UOP_AND, (link1), (link2), bool_type)
 #define or(link1, link2) append21(UOP_OR, (link1), (link2), bool_type)
 #define not(link) append11(UOP_NOT, (link), bool_type)
+	block->graph.id = graph_id;
 	block->graph.input.output_type[0] = deref(block->types[0]);
 	block->graph.input.out_link_id[0] = (*link_id)++;
 	block->graph.input.out_count = 1;
@@ -801,6 +802,6 @@ void build_graph(struct block *block, u32 *link_id, union type *bool_type, b32 o
 void build_graphs(struct block_ptr_array blocks, union type *bool_type) {
 	u32 link_id = 0;
 	foreach (block, blocks) {
-		build_graph(*block, &link_id, bool_type, true);
+		build_graph(*block, blocks.size - block_index - 1, &link_id, bool_type, true);
 	}
 }
