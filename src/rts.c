@@ -255,14 +255,14 @@ void free(Pool *pool, void *ptr) {
 static
 Value alloc_pair(Value first, Value second) {
 	Value result = {.pair = alloc(Pair)};
-	*result.pair = (Pair){first, second, 0};
+	*result.pair = (Pair){first, second, 0xcafe1000};
 	return result;
 }
 
 static
 Value alloc_sum(b1 in_left, Value value) {
 	Value result = {.sum = alloc(Sum)};
-	*result.sum = (Sum){value, 0};
+	*result.sum = (Sum){value, 0xcafe2000};
 	result.bits |= in_left;
 	return result;
 }
@@ -270,7 +270,7 @@ Value alloc_sum(b1 in_left, Value value) {
 static
 Value alloc_block_direct(BlockFunction function) {
 	Value result = {.block = alloc(Block)};
-	*result.block = (Block){{.direct = function}, 0};
+	*result.block = (Block){{.direct = function}, 0xcafe3000};
 	result.bits |= BLOCK_DIRECT;
 	return result;
 }
@@ -278,7 +278,7 @@ Value alloc_block_direct(BlockFunction function) {
 static
 Value alloc_block_composed(Block *xy, Block *yz) {
 	Value result = {.block = alloc(Block)};
-	*result.block = (Block){{.block_xy = xy, .block_yz = yz}, 0};
+	*result.block = (Block){{.block_xy = xy, .block_yz = yz}, 0xcafe4000};
 	result.bits |= BLOCK_COMPOSED;
 	return result;
 }
@@ -286,7 +286,7 @@ Value alloc_block_composed(Block *xy, Block *yz) {
 static
 Value alloc_block_quote(Value quoted) {
 	Value result = {.block = alloc(Block)};
-	*result.block = (Block){{.quoted = quoted}, 0};
+	*result.block = (Block){{.quoted = quoted}, 0xcafe5000};
 	result.bits |= BLOCK_QUOTE;
 	return result;
 }
@@ -308,7 +308,9 @@ void assert_void(Value value, b32 in_left) {
 
 static
 Value apply(Block *block, Value value) {
-	switch ((u64)block & 0x3) {
+	u64 type = (u64)block & 0x3;
+	block = (Block *)((u64)block &~ 0x3ull);
+	switch (type) {
 		case BLOCK_DIRECT:
 			return block->direct(value);
 		case BLOCK_COMPOSED:

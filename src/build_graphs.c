@@ -614,16 +614,16 @@ void build_graph(struct block *block, u32 graph_id, u32 *link_id, union type *bo
 			case 'W':
 				{
 					// Conditions:
+					// !a && b
 					// a
-					// !a && !b
 					struct link2 input = unpair(last);
 					struct link5 branches = unsum2(input.l[0]);
 					struct link2 cond_outer = append12(UOP_COPY, branches.l[3],
 					                                   bool_type, bool_type);
 					assert_product(output_type);
 					struct link new_branches = sum2(branches.l[1], branches.l[0], branches.l[2],
-					                                cond_outer.l[0],
-					                                and(not(cond_outer.l[1]), not(branches.l[4])),
+					                                and(not(cond_outer.l[0]), branches.l[4]),
+					                                cond_outer.l[1],
 					                                child1(output_type));
 					last = pair(new_branches, input.l[1], output_type);
 					break;
