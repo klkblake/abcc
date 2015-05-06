@@ -80,6 +80,7 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 						case SYMBOL_SUM:     array_push(buf, '+'); break;
 						case SYMBOL_BLOCK:                   u8_array_push_cstring(buf, "=>"); break;
 						case SYMBOL_BLOCK | POLYMORPHIC_BIT: u8_array_push_cstring(buf, "->"); break;
+						case SYMBOL_BOOL: array_push(buf, 'B'); break;
 						default: array_push(buf, '?'); break;
 					}
 				}
@@ -131,6 +132,7 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 			case SYMBOL_BLOCK | POLYMORPHIC_BIT:
 			                     block = true;
 			                     break;
+			case SYMBOL_BOOL: sym = 'B'; children = false; break;
 			default:
 			                     sym = '?';
 		}

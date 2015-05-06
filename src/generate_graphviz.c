@@ -1,5 +1,7 @@
 #include "generate_graphviz.h"
 
+#include "type.h"
+
 #include <stdio.h>
 
 internal char *uop_names[] = {
@@ -76,13 +78,15 @@ char *out_port(u32 slot_count, u32 slot) {
 	}
 }
 
-void print_node_link(struct node *from, u32 slot_count, u32 slot) {
+void print_node_link(struct node *from, u32 slot_count, u32 slot, struct type_ptr_u64_map *vars) {
 	struct node *to = from->out[slot];
-	printf("node_%p:%s -> node_%p:%s\n",
+	printf("node_%p:%s -> node_%p:%s [label=\"",
 	       from, out_port(slot_count, slot), to, in_port(to->in_count, from->dst_slot[slot]));
+	print_type(from->output_type[slot], vars);
+	printf("\"]\n");
 }
 
-void print_node(struct node *node, struct graph *graph, u64 traversal) {
+void print_node(struct node *node, struct graph *graph, u64 traversal, struct type_ptr_u64_map *vars) {
 	if (node->seen == traversal) {
 		return;
 	}
@@ -98,8 +102,8 @@ void print_node(struct node *node, struct graph *graph, u64 traversal) {
 		printf("node_%p [label=\"%s\"]\n", node, uop_names[node->uop]);
 	}
 	for (u32 i = 0; i < node->out_count; i++) {
-		print_node_link(node, node->out_count, i);
-		print_node(node->out[i], graph, traversal);
+		print_node_link(node, node->out_count, i, vars);
+		print_node(node->out[i], graph, traversal, vars);
 	}
 }
 
@@ -107,10 +111,12 @@ void print_graph(struct graph *graph, b32 is_main, u64 traversal) {
 	if (!is_main) {
 		printf("subgraph cluster_%p {\n", graph);
 	}
-	print_node(&graph->input, graph, traversal);
+	struct type_ptr_u64_map vars = {};
+	print_node(&graph->input, graph, traversal, &vars);
 	for (struct node *node = graph->constants; node; node = node->next_constant) {
-		print_node(node, graph, traversal);
+		print_node(node, graph, traversal, &vars);
 	}
+	map_free(&vars);
 	if (!is_main) {
 		printf("}\n");
 	}
