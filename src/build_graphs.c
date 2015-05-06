@@ -802,6 +802,6 @@ void build_graph(struct block *block, u32 graph_id, u32 *link_id, union type *bo
 void build_graphs(struct block_ptr_array blocks, union type *bool_type) {
 	u32 link_id = 0;
 	foreach (block, blocks) {
-		build_graph(*block, blocks.size - block_index - 1, &link_id, bool_type, true);
+		build_graph(*block, (u32)(blocks.size - block_index - 1), &link_id, bool_type, true);
 	}
 }

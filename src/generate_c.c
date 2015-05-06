@@ -18,7 +18,8 @@ void do_indent(u32 indent) {
 internal
 void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 	u32 indent = 1;
-	printf("\nValue block_%u(Value v%u) {\n", graph->id, graph->input.out_link_id[0]);
+	printf("\nstatic\n");
+	printf("Value block_%u(Value v%u) {\n", graph->id, graph->input.out_link_id[0]);
 	struct node_ptr_array worklist = {};
 	array_push(&worklist, graph->input.out[0]);
 	for (struct node *constant = graph->constants; constant; constant = constant->next_constant) {
@@ -246,7 +247,7 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 				}
 			case UOP_DIVMOD:
 				{
-					out("v%u.number = __builtin_floor(v%u.number/v%u.number);",
+					out("v%u.number = floor(v%u.number/v%u.number);",
 					    out[1], in[1], in[0]);
 					out("v%u.number = v%u.number - v%u.number * v%u.number;",
 					    out[0], in[1], out[1], in[0]);
