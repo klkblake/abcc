@@ -326,7 +326,7 @@ void main(int argc, char **argv) {
 		arg += c - '0';
 	}
 	Value unit = {.bits = UNIT};
-	Value result = block_0(alloc_pair((Value){.number = arg}, alloc_pair(unit, unit)));
+	Value result = block_0(alloc_pair(alloc_pair((Value){.number = arg}, unit), alloc_pair(unit, unit)));
 	printf("%f\n", result.pair->first.number);
 }
 
