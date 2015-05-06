@@ -410,7 +410,7 @@ void build_graph(struct block *block, u32 graph_id, u32 *link_id, union type *bo
 				{
 					assert_product(output_type);
 					struct link unit_constant = append01(UOP_UNIT_CONSTANT,
-					                                     child1(output_type));
+					                                     child2(output_type));
 					last = pair(last, unit_constant, output_type);
 					break;
 				}
