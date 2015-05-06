@@ -145,7 +145,7 @@ struct link3 append_node13(struct node_pool *pool, u32 *link_id,
 	struct node *result = append_node10(pool, uop, link);
 	result->output_type[0] = type1;
 	result->output_type[1] = type2;
-	result->output_type[2] = type2;
+	result->output_type[2] = type3;
 	result->out_link_id[0] = (*link_id)++;
 	result->out_link_id[1] = (*link_id)++;
 	result->out_link_id[2] = (*link_id)++;
