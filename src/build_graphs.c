@@ -758,11 +758,11 @@ void build_graph(struct block *block, u32 graph_id, u32 *link_id, union type *bo
 				{
 					struct link3 input = unpair2(last);
 					struct node *greater = append_node20(&pool,
-					                                     UOP_GREATER, input.l[0], input.l[1]);
-					struct link g0 = {greater, 0, input.l[1].type};
-					struct link g1 = {greater, 1, input.l[0].type};
-					struct link g2 = {greater, 2, input.l[0].type};
-					struct link g3 = {greater, 3, input.l[1].type};
+					                                     UOP_GREATER, input.l[1], input.l[0]);
+					struct link g0 = {greater, 0, input.l[0].type};
+					struct link g1 = {greater, 1, input.l[1].type};
+					struct link g2 = {greater, 2, input.l[1].type};
+					struct link g3 = {greater, 3, input.l[0].type};
 					struct link g4 = {greater, 4, bool_type};
 					greater->output_type[0] = g0.type;
 					greater->output_type[1] = g1.type;
@@ -778,9 +778,10 @@ void build_graph(struct block *block, u32 graph_id, u32 *link_id, union type *bo
 					assert_product(output_type);
 					union type *type = child1(output_type);
 					assert_sum(type);
-					struct link left  = pair(g0, g1, child1(type));
-					struct link right = pair(g2, g3, child2(type));
-					struct link branches = sum(left, right, g4, type);
+					// We have truth on left in the graph IR
+					struct link right = pair(g0, g1, child1(type));
+					struct link left  = pair(g2, g3, child2(type));
+					struct link branches = sum(left, right, not(g4), type);
 					last = pair(branches, input.l[2], output_type);
 					break;
 				}
