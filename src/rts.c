@@ -18,6 +18,12 @@ typedef double v2df __attribute__((vector_size(16)));
 
 extern f64 floor(f64 value);
 
+#ifdef NDEBUG
+# define BREAK
+#else
+# define BREAK __asm__("int3")
+#endif
+
 static inline
 s64 syscall6(u64 syscall_number, s64 arg1, s64 arg2, s64 arg3, s64 arg4, s64 arg5, s64 arg6) {
 	register s64 result __asm__("rax");
@@ -218,12 +224,24 @@ void *alloc_(Pool *pool, u64 size) {
 	if (pool->first_free) {
 		void *result = pool->first_free;
 		pool->first_free = *((void **)pool->first_free);
+#ifndef NDEBUG
+		u64 *memory = result;
+		for (u64 i = 0; i < size; i++) {
+			memory[i] = 0xdeadbeefdeadbeef;
+		}
+#endif
 		return result;
 	}
 	if (pool->used == CHUNK_DATA_LENGTH) {
 		pool->first_chunk = mmap(CHUNK_SIZE);
 		pool->used = 0;
 		pool->num_chunks++;
+#ifndef NDEBUG
+		u64 *memory = pool->first_chunk->data;
+		for (u64 i = 0; i < size; i++) {
+			memory[i] = 0xdeadbeefdeadbeef;
+		}
+#endif
 	}
 	return &pool->first_chunk->data[pool->used++ * size];
 }
@@ -281,8 +299,9 @@ void decref(Value value) {
 
 static
 void assert_void(Value value, b32 in_left) {
-	if (!in_left) {
+	if (in_left) {
 		printf("Assertion failed, value not void: %x\n", value.bits);
+		BREAK;
 		exit(EXIT_ASSERT_FAILED);
 	}
 }
