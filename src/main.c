@@ -32,6 +32,9 @@ char *help_text =
 	"  -h, --help        Display available options\n"
 	"  -c, --compile     Run full compilation (default)\n"
 	"  -t, --typecheck   Only run typechecker\n"
+	"  -O0               Disable optimisation (not recommended)\n"
+	"  -O1               Enable basic optimisations (default)\n"
+	"  -O2, -O           Enable advanced optimisations\n"
 	"  -e, --executable  Output an executable (default)"
 	"  -G, --graphviz    Output the dataflow graph in graphviz format\n"
 	"  -C, --c           Output the generated C source\n"
@@ -58,8 +61,9 @@ int main(int argc, char **argv) {
 		OUTPUT_GRAPHVIZ,
 		OUTPUT_C,
 	} output = OUTPUT_EXECUTABLE;
+	u32 optlevel = 1;
 	while (true) {
-		i32 option = getopt_long(argc, argv, "hcteGCv", long_options, NULL);
+		i32 option = getopt_long(argc, argv, "hctO::eGCv", long_options, NULL);
 		if (option == -1) {
 			break;
 		}
@@ -72,6 +76,22 @@ int main(int argc, char **argv) {
 				break;
 			case 't':
 				mode = MODE_TYPECHECK;
+				break;
+			case 'O':
+				if (optarg == NULL || optarg[0] == '\0') {
+					optlevel = 2;
+				} else if (optarg[1] == '\0') {
+					optlevel = (u32)optarg[0] - '0';
+					if (optlevel > 2) {
+						fprintf(stderr, "%s: -O requires an argument of 0, 1, or 2\n",
+						        argv[0]);
+						return 2;
+					}
+				} else {
+					fprintf(stderr, "%s: -O requires an argument of 0, 1, or 2\n", argv[0]);
+					return 2;
+				}
+
 				break;
 			case 'e':
 				output = OUTPUT_EXECUTABLE;
@@ -137,7 +157,7 @@ int main(int argc, char **argv) {
 		map_free(&vars);
 		goto cleanup_typecheck;
 	}
-	build_graphs(result.blocks, pool.boolean);
+	build_graphs(result.blocks, pool.boolean, optlevel >= 1);
 	switch (output) {
 		case OUTPUT_EXECUTABLE:
 			break;
