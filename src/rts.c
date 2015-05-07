@@ -16,6 +16,10 @@ typedef double v2df __attribute__((vector_size(16)));
 #define STRINGIFY(str) STRINGIFY_(str)
 #define noreturn _Noreturn
 #define static_assert _Static_assert
+typedef __builtin_va_list va_list;
+#define va_start(ap, param) __builtin_va_start(ap, param)
+#define va_end(ap)          __builtin_va_end(ap)
+#define va_arg(ap, type)    __builtin_va_arg(ap, type)
 
 extern f64 floor(f64 value);
 
@@ -224,10 +228,51 @@ void print_f64(f64 value) {
 
 static
 void printf(char *format, ...) {
-	u64 size;
-	for (size = 0; format[size]; size++) {
+	u8 buf[1024];
+	u32 i = 0;
+	va_list ap;
+	va_start(ap, format);
+	char c;
+	while ((c = *format++)) {
+		if (c != '%') {
+			if (i == sizeof(buf)) {
+				write(1, buf, sizeof(buf));
+				i = 0;
+			}
+			buf[i++] = (u8)c;
+		} else {
+			write(1, buf, i);
+			i = 0;
+			c = *format++;
+			if (c == '\0') {
+				char message[] = "<format spec at end of string>";
+				write(1, (u8 *)message, sizeof(message) - 1);
+			} else {
+				switch (c) {
+					case 's':
+						{
+							u8 *str = va_arg(ap, u8 *);
+							u32 len = 0;
+							while (str[len] != 0) {
+								len++;
+							}
+							write(1, str, len);
+							break;
+						}
+					case 'f': print_f64(va_arg(ap, f64)); break;
+					default:
+						{
+							char message[] = "<invalid format spec>";
+							write(1, (u8 *)message, sizeof(message) - 1);
+						}
+				}
+			}
+		}
 	}
-	write(1, (u8 *)format, (s64)size);
+	if (i != 0) {
+		write(1, buf, i);
+	}
+	va_end(ap);
 }
 
 static noreturn
@@ -424,9 +469,9 @@ void main(int argc, char **argv) {
 		argstr++;
 		negate = true;
 	}
-	char c;
 	b32 seen_dp = false;
 	f64 scale = 1;
+	char c;
 	while ((c = *argstr++)) {
 		if (c == '.') {
 			if (seen_dp) {
@@ -450,8 +495,7 @@ void main(int argc, char **argv) {
 	arg = negate ? -arg : arg;
 	Value unit = {.bits = UNIT};
 	Value result = block_0(alloc_pair(alloc_pair((Value){.number = arg}, unit), alloc_pair(unit, unit)));
-	printf("%f\n", result.pair->first.number);
-	print_f64(result.pair->first.pair->first.number);
+	printf("%f\n", result.pair->first.pair->first.number);
 }
 
 // This was originally written in 2011 by Nicholas J. Kain, and was released
