@@ -157,6 +157,7 @@ void print_f64(f64 value) {
 		buf[0] = '-';
 		// XXX This is horrifically inefficient. Add buffered I/O!
 		write(1, buf, 1);
+		value = -value;
 	}
 	union fpbits {
 		f64 value;
@@ -212,12 +213,12 @@ void print_f64(f64 value) {
 		buf[i] += '0';
 	}
 	if (dp != n) {
-		for (u32 i = n-1; i < n; i--) {
+		for (u32 i = n-1; i >= dp; i--) {
 			buf[i + 1] = buf[i] + '0';
 		}
 		buf[dp] = '.';
+		n++;
 	}
-	n++;
 	write(1, buf, n);
 }
 
