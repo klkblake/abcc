@@ -217,11 +217,20 @@ void print_f64(f64 value) {
 		buf[i] += '0';
 	}
 	if (dp != n) {
-		for (u32 i = n-1; i >= dp; i--) {
-			buf[i + 1] = buf[i] + '0';
+		u32 delta = 1;
+		if (dp == 0) {
+			delta = 2;
 		}
-		buf[dp] = '.';
-		n++;
+		for (u32 i = n-1; i >= dp && i < n; i--) {
+			buf[i + delta] = buf[i] + '0';
+		}
+		if (dp == 0) {
+			buf[0] = '0';
+			buf[1] = '.';
+		} else {
+			buf[dp] = '.';
+		}
+		n += delta;
 	}
 	write(1, buf, n);
 }
