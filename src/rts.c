@@ -424,14 +424,29 @@ void main(int argc, char **argv) {
 		negate = true;
 	}
 	char c;
+	b32 seen_dp = false;
+	f64 scale = 1;
 	while ((c = *argstr++)) {
-		if (c < '0' || c > '9') {
-			printf("The argument to %s must be an integer\n", argv[0]);
+		if (c == '.') {
+			if (seen_dp) {
+				printf("The argument to %s must be an number\n", argv[0]);
+				exit(2);
+			} else {
+				seen_dp = true;
+				continue;
+			}
+		} else if (c < '0' || c > '9') {
+			printf("The argument to %s must be an number\n", argv[0]);
 			exit(2);
 		}
 		arg *= 10;
 		arg += c - '0';
+		if (seen_dp) {
+			scale *= 10;
+		}
 	}
+	arg /= scale;
+	arg = negate ? -arg : arg;
 	Value unit = {.bits = UNIT};
 	Value result = block_0(alloc_pair(alloc_pair((Value){.number = arg}, unit), alloc_pair(unit, unit)));
 	printf("%f\n", result.pair->first.number);
