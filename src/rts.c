@@ -1,6 +1,7 @@
 typedef __UINT8_TYPE__ u8;
 typedef __UINT32_TYPE__ u32;
 typedef __UINT64_TYPE__ u64;
+typedef __INT32_TYPE__ s32;
 typedef __INT64_TYPE__ s64;
 typedef double f64;
 typedef _Bool b1;
@@ -89,7 +90,7 @@ s64 syscall1(u64 syscall_number, u64 arg1) {
 #define EXIT_ASSERT_FAILED  65
 
 static inline
-s64 write(u32 fd, u8 *buf, s64 size) {
+s64 try_write(u32 fd, u8 *buf, s64 size) {
 	while (true) {
 		s64 result = syscall3(SYS_write, fd, (s64)buf, size);
 		if (result == size) {
@@ -103,13 +104,21 @@ s64 write(u32 fd, u8 *buf, s64 size) {
 	}
 }
 
+static void die_syscall(char *syscall, s64 error);
+
+static inline
+void write(u32 fd, u8 *buf, s64 size) {
+	s64 result = try_write(fd, buf, size);
+	if (result < 0) {
+		die_syscall("write", result);
+	}
+}
+
 static inline noreturn
 void exit(u8 err) {
 	syscall1(SYS_exit, err);
 	__builtin_unreachable();
 }
-
-static void die_syscall(char *syscall, s64 error);
 
 #define PROT_READ     0x01
 #define PROT_WRITE    0x02
@@ -132,15 +141,92 @@ void munmap(void *addr, u64 size) {
 	}
 }
 
+// See http://research.swtch.com/ftoa for the algorithm
+static
+void print_f64(f64 value) {
+	// The maximum number of digits occurs for the smallest positive number
+	// 1/2^e, which has ceil(0.7e) digits. e is 1074 for doubles. Add an
+	// extra one for the decimal point.
+	u8 buf[753];
+	if (value == 0) {
+		buf[0] = '0';
+		write(1, buf, 1);
+		return;
+	}
+	if (value < 0) {
+		buf[0] = '-';
+		// XXX This is horrifically inefficient. Add buffered I/O!
+		write(1, buf, 1);
+	}
+	union fpbits {
+		f64 value;
+		u64 bits;
+	} value_ = {value};
+	f64 fr = (union fpbits){.bits = (value_.bits &~ (0x7ffllu << 52)) | ((1023ull - 1) << 52)}.value;
+	s32 exp = (s32)((value_.bits >> 52) &~ (1u << 11)) - 1023 + 1;
+	s64 v = (s64)(fr * (1ll << 53));
+	s32 e = exp - 53;
+	u32 n = 0;
+	while (v != 0) {
+		buf[n++] = v % 10;
+		v /= 10;
+	}
+	for (u32 i = 0; i < n / 2; i++) {
+		u8 tmp = buf[i];
+		buf[i] = buf[n - i - 1];
+		buf[n - i - 1] = tmp;
+	}
+	for (; e > 0; e--) {
+		u32 delta = buf[0] >= 5;
+		u32 x = 0;
+		for (u32 i = n - 1; i < n; i--) {
+			x += 2 * buf[i];
+			buf[i + delta] = x % 10;
+			x /= 10;
+		}
+		if (delta) {
+			buf[0] = 1;
+			n++;
+		}
+	}
+	u32 dp = n;
+	for (; e < 0; e++) {
+		if (buf[n - 1] % 2 != 0) {
+			buf[n++] = 0;
+		}
+		u32 delta = 0;
+		u32 x = 0;
+		if (buf[0] < 2) {
+			delta = 1;
+			x = buf[0];
+			n--;
+			dp--;
+		}
+		for (u32 i = 0; i < n; i++) {
+			x = x * 10 + buf[i + delta];
+			buf[i] = (u8)(x / 2);
+			x %= 2;
+		}
+	}
+	for (u32 i = 0; i < dp; i++) {
+		buf[i] += '0';
+	}
+	if (dp != n) {
+		for (u32 i = n-1; i < n; i--) {
+			buf[i + 1] = buf[i] + '0';
+		}
+		buf[dp] = '.';
+	}
+	n++;
+	write(1, buf, n);
+}
+
 static
 void printf(char *format, ...) {
 	u64 size;
 	for (size = 0; format[size]; size++) {
 	}
-	s64 result = write(1, (u8 *)format, (s64)size);
-	if (result < 0) {
-		die_syscall("write", result);
-	}
+	write(1, (u8 *)format, (s64)size);
 }
 
 static noreturn
@@ -349,6 +435,7 @@ void main(int argc, char **argv) {
 	Value unit = {.bits = UNIT};
 	Value result = block_0(alloc_pair(alloc_pair((Value){.number = arg}, unit), alloc_pair(unit, unit)));
 	printf("%f\n", result.pair->first.number);
+	print_f64(result.pair->first.pair->first.number);
 }
 
 // This was originally written in 2011 by Nicholas J. Kain, and was released

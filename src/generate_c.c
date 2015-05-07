@@ -119,7 +119,7 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 			case UOP_UNSUM:
 				{
 					out("v%u.boolean = v%u.bits & 0x1;", out[2], in[0]);
-					out("v%u = ((Sum *)(v%u.bits &~ 0x1))->value;", out[0], in[0]);
+					out("v%u = ((Sum *)(v%u.bits &~ 0x1llu))->value;", out[0], in[0]);
 					out("v%u = v%u;", out[1], out[0]);
 					out("if (v%u.boolean) {", out[2]);
 					indent++;
