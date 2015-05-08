@@ -145,13 +145,15 @@ void munmap(void *addr, u64 size) {
 	}
 }
 
+typedef union {
+	f64 value;
+	u64 bits;
+} F64Bits;
+
 // This assumes the input is a positive finite number
 static inline
 f64 frexp(f64 value, s32 *exp) {
-	union fpbits {
-		f64 value;
-		u64 bits;
-	} value_ = {value};
+	F64Bits value_ = {value};
 	*exp = (s32)((value_.bits >> 52) &~ (1u << 11)) - 1023 + 1;
 	u64 mantissa = value_.bits & ((1ll << 52) - 1);
 	if (*exp == -1022) {
@@ -161,7 +163,7 @@ f64 frexp(f64 value, s32 *exp) {
 		*exp = *exp - shift + 1;
 	}
 	u64 fr = mantissa | ((1023ull - 1) << 52);
-	return (union fpbits){.bits = fr}.value;
+	return (F64Bits){.bits = fr}.value;
 }
 
 // See http://research.swtch.com/ftoa for the algorithm
@@ -252,6 +254,114 @@ void print_f64(f64 value) {
 		n += delta;
 	}
 	write(1, buf, n);
+}
+
+// Essentially just running the algorithm for print_f64 backwards
+static
+b32 read_f64(char *str, f64 *result) {
+	u8 buf[1076]; // FIXME figure out the size for this.
+	b32 seen_dp = false;
+	b32 seen_nonzero = false;
+	s32 n = 0;
+	s32 dp = 0;
+	char c;
+	// TODO cap number of digits pre-dp
+	while ((c = *str++)) {
+		if (c == '.') {
+			if (seen_dp) {
+				return false;
+			}
+			seen_dp = true;
+			continue;
+		}
+		if (c < '0' || c > '9') {
+			return false;
+		}
+		if (!seen_nonzero && c == '0') {
+			if (seen_dp) {
+				dp--;
+			}
+			continue;
+		}
+		seen_nonzero = true;
+		// 17 digits is enough to uniquely identify any double
+		if (n < 17) {
+			buf[n++] = (u8)c - '0';
+		} else if (n == 17) {
+			// XXX we *must* round correctly.
+
+		}
+		if (!seen_dp) {
+			dp++;
+		}
+	}
+	if (n == 0) {
+		return 0;
+	}
+	s32 exp = 0;
+	while (dp < 1 && exp > -1022) {
+		s32 delta = buf[0] >= 5;
+		u32 x = 0;
+		for (s32 i = n - 1; i >= 0; i--) {
+			x += 2 * buf[i];
+			buf[i + delta] = x % 10;
+			x /= 10;
+		}
+		exp--;
+		if (delta) {
+			buf[0] = 1;
+			n++;
+			dp++;
+		}
+	}
+	if (dp < 1) {
+		exp--;
+		s32 delta = 1 - dp;
+		for (s32 i = n - 1; i >= 0; i--) {
+			buf[i + delta] = buf[i];
+		}
+		for (s32 i = 0; i < delta; i++) {
+			buf[i] = 0;
+		}
+		n += delta;
+	} else {
+		while (dp > 1 || buf[0] != 1) {
+			if (buf[n - 1] % 2 != 0) {
+				buf[n++] = 0;
+			}
+			s32 delta = 0;
+			u32 x = 0;
+			if (buf[0] < 2) {
+				delta = 1;
+				x = buf[0];
+				n--;
+				dp--;
+			}
+			for (s32 i = 0; i < n; i++) {
+				x = x * 10 + buf[i + delta];
+				buf[i] = (u8)(x / 2);
+				x %= 2;
+			}
+			exp++;
+		}
+	}
+	u64 mantissa = 0;
+	for (u32 i = 0; i < 52; i++) {
+		u32 x = 0;
+		for (s32 j = n - 1; j >= 1; j--) {
+			x += 2 * buf[j];
+			buf[j] = x % 10;
+			x /= 10;
+		}
+		if (x == 1) {
+			mantissa = (mantissa << 1) | 1;
+		} else {
+			mantissa <<= 1;
+		}
+	}
+	u64 bits = ((u64)(exp + 1023) << 52) | mantissa;
+	*result = (F64Bits){.bits = bits}.value;
+	return true;
 }
 
 static
@@ -497,6 +607,7 @@ void main(int argc, char **argv) {
 		argstr++;
 		negate = true;
 	}
+#if 0
 	b32 seen_dp = false;
 	f64 scale = 1;
 	char c;
@@ -520,10 +631,18 @@ void main(int argc, char **argv) {
 		}
 	}
 	arg /= scale;
+#endif
+	b32 success = read_f64(argstr, &arg);
+	if (!success) {
+		printf("The argument to %s must be an number\n", argv[0]);
+		exit(2);
+	}
 	arg = negate ? -arg : arg;
 	Value unit = {.bits = UNIT};
 	Value result = block_0(alloc_pair(alloc_pair((Value){.number = arg}, unit), alloc_pair(unit, unit)));
 	printf("%f\n", result.pair->first.pair->first.number);
+	printf("%f\n", __DBL_MIN__);
+	printf("%f\n", __DBL_DENORM_MIN__);
 }
 
 // This was originally written in 2011 by Nicholas J. Kain, and was released
