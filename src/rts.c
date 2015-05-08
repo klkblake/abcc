@@ -149,9 +149,10 @@ void munmap(void *addr, u64 size) {
 static
 void print_f64(f64 value) {
 	// The maximum number of digits occurs for the smallest positive number
-	// 1/2^e, which has ceil(0.7e) digits. e is 1074 for doubles. Add an
-	// extra one for the decimal point.
-	u8 buf[753];
+	// 1/2^e, which has e digits after the decimal point. e is 1022 for
+	// doubles (assuming normalised). Add an extra one for the decimal
+	// point, and another for the zero before it.
+	u8 buf[1024];
 	if (value == 0) {
 		buf[0] = '0';
 		write(1, buf, 1);
@@ -171,20 +172,20 @@ void print_f64(f64 value) {
 	s32 exp = (s32)((value_.bits >> 52) &~ (1u << 11)) - 1023 + 1;
 	s64 v = (s64)(fr * (1ll << 53));
 	s32 e = exp - 53;
-	u32 n = 0;
+	s32 n = 0;
 	while (v != 0) {
 		buf[n++] = v % 10;
 		v /= 10;
 	}
-	for (u32 i = 0; i < n / 2; i++) {
+	for (s32 i = 0; i < n / 2; i++) {
 		u8 tmp = buf[i];
 		buf[i] = buf[n - i - 1];
 		buf[n - i - 1] = tmp;
 	}
 	for (; e > 0; e--) {
-		u32 delta = buf[0] >= 5;
+		s32 delta = buf[0] >= 5;
 		u32 x = 0;
-		for (u32 i = n - 1; i < n; i--) {
+		for (s32 i = n - 1; i >= 0; i--) {
 			x += 2 * buf[i];
 			buf[i + delta] = x % 10;
 			x /= 10;
@@ -194,12 +195,12 @@ void print_f64(f64 value) {
 			n++;
 		}
 	}
-	u32 dp = n;
+	s32 dp = n;
 	for (; e < 0; e++) {
 		if (buf[n - 1] % 2 != 0) {
 			buf[n++] = 0;
 		}
-		u32 delta = 0;
+		s32 delta = 0;
 		u32 x = 0;
 		if (buf[0] < 2) {
 			delta = 1;
@@ -207,26 +208,29 @@ void print_f64(f64 value) {
 			n--;
 			dp--;
 		}
-		for (u32 i = 0; i < n; i++) {
+		for (s32 i = 0; i < n; i++) {
 			x = x * 10 + buf[i + delta];
 			buf[i] = (u8)(x / 2);
 			x %= 2;
 		}
 	}
-	for (u32 i = 0; i < dp; i++) {
+	for (s32 i = 0; i < dp; i++) {
 		buf[i] += '0';
 	}
 	if (dp != n) {
-		u32 delta = 1;
-		if (dp == 0) {
-			delta = 2;
+		s32 delta = 1;
+		if (dp <= 0) {
+			delta = 2 - dp;
 		}
-		for (u32 i = n-1; i >= dp && i < n; i--) {
+		for (s32 i = n-1; i >= dp && i >= 0; i--) {
 			buf[i + delta] = buf[i] + '0';
 		}
-		if (dp == 0) {
+		if (dp <= 0) {
 			buf[0] = '0';
 			buf[1] = '.';
+			for (s32 i = 0; i < -dp; i++) {
+				buf[2 + i] = '0';
+			}
 		} else {
 			buf[dp] = '.';
 		}
