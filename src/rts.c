@@ -528,7 +528,7 @@ static_assert(sizeof(Chunk) == CHUNK_SIZE, "Chunk had padding inserted");
 typedef struct {
 	Chunk *first_chunk;
 	void *first_free;
-	u64 used;
+	u32 used;
 	u64 num_chunks;
 } Pool;
 
@@ -562,7 +562,9 @@ void *alloc_(Pool *pool, u64 size) {
 		}
 #endif
 	}
-	return &pool->first_chunk->data[pool->used++ * size];
+	u32 index = pool->used;
+	pool->used += size;
+	return &pool->first_chunk->data[index];
 }
 
 static
