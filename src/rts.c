@@ -145,14 +145,33 @@ void munmap(void *addr, u64 size) {
 	}
 }
 
+// This assumes the input is a positive finite number
+static inline
+f64 frexp(f64 value, s32 *exp) {
+	union fpbits {
+		f64 value;
+		u64 bits;
+	} value_ = {value};
+	*exp = (s32)((value_.bits >> 52) &~ (1u << 11)) - 1023 + 1;
+	u64 mantissa = value_.bits & ((1ll << 52) - 1);
+	if (*exp == -1022) {
+		// Denormal
+		s32 shift = __builtin_clzll(mantissa) - 12 + 1;
+		mantissa = (mantissa << shift) & ((1ll << 52) - 1);
+		*exp = *exp - shift + 1;
+	}
+	u64 fr = mantissa | ((1023ull - 1) << 52);
+	return (union fpbits){.bits = fr}.value;
+}
+
 // See http://research.swtch.com/ftoa for the algorithm
 static
 void print_f64(f64 value) {
 	// The maximum number of digits occurs for the smallest positive number
-	// 1/2^e, which has e digits after the decimal point. e is 1022 for
-	// doubles (assuming normalised). Add an extra one for the decimal
-	// point, and another for the zero before it.
-	u8 buf[1024];
+	// 1/2^e, which has e digits after the decimal point. e is 1074 for
+	// doubles. Add an extra one for the decimal point, and another for the
+	// zero before it.
+	u8 buf[1076];
 	if (value == 0) {
 		buf[0] = '0';
 		write(1, buf, 1);
@@ -164,12 +183,8 @@ void print_f64(f64 value) {
 		write(1, buf, 1);
 		value = -value;
 	}
-	union fpbits {
-		f64 value;
-		u64 bits;
-	} value_ = {value};
-	f64 fr = (union fpbits){.bits = (value_.bits &~ (0x7ffllu << 52)) | ((1023ull - 1) << 52)}.value;
-	s32 exp = (s32)((value_.bits >> 52) &~ (1u << 11)) - 1023 + 1;
+	s32 exp;
+	f64 fr = frexp(value, &exp);
 	s64 v = (s64)(fr * (1ll << 53));
 	s32 e = exp - 53;
 	s32 n = 0;
