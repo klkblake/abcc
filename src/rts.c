@@ -266,6 +266,11 @@ b32 read_f64(char *str, f64 *result) {
 	b32 rounded_up = false;
 	s32 n = 0;
 	s32 dp = 0;
+	u64 negate = false;
+	if (str[0] == '-') {
+		str++;
+		negate = true;
+	}
 	char c;
 	// TODO cap number of digits pre-dp
 	while ((c = *str++)) {
@@ -313,7 +318,8 @@ b32 read_f64(char *str, f64 *result) {
 		}
 	}
 	if (n == 0) {
-		return 0;
+		*result = 0;
+		return true;
 	}
 	s32 exp = 0;
 	while (dp < 1 && exp > -1022) {
@@ -402,7 +408,7 @@ b32 read_f64(char *str, f64 *result) {
 			mantissa++;
 		}
 	}
-	u64 bits = ((u64)(exp + 1023) << 52) | mantissa;
+	u64 bits = (negate << 63) | ((u64)(exp + 1023) << 52) | mantissa;
 	*result = (F64Bits){.bits = bits}.value;
 	return true;
 }
@@ -643,44 +649,12 @@ void main(int argc, char **argv) {
 		printf("%s takes exactly one argument\n", argv[0]);
 		exit(2);
 	}
-	char *argstr = argv[1];
-	f64 arg = 0;
-	b32 negate = false;
-	if (argstr[0] == '-') {
-		argstr++;
-		negate = true;
-	}
-#if 0
-	b32 seen_dp = false;
-	f64 scale = 1;
-	char c;
-	while ((c = *argstr++)) {
-		if (c == '.') {
-			if (seen_dp) {
-				printf("The argument to %s must be an number\n", argv[0]);
-				exit(2);
-			} else {
-				seen_dp = true;
-				continue;
-			}
-		} else if (c < '0' || c > '9') {
-			printf("The argument to %s must be an number\n", argv[0]);
-			exit(2);
-		}
-		arg *= 10;
-		arg += c - '0';
-		if (seen_dp) {
-			scale *= 10;
-		}
-	}
-	arg /= scale;
-#endif
-	b32 success = read_f64(argstr, &arg);
+	f64 arg;
+	b32 success = read_f64(argv[1], &arg);
 	if (!success) {
 		printf("The argument to %s must be an number\n", argv[0]);
 		exit(2);
 	}
-	arg = negate ? -arg : arg;
 	Value unit = {.bits = UNIT};
 	Value result = block_0(alloc_pair(alloc_pair((Value){.number = arg}, unit), alloc_pair(unit, unit)));
 	printf("%f\n", result.pair->first.pair->first.number);
