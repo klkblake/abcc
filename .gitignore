@@ -2,6 +2,7 @@ abcc
 expect
 src/infer_types.gen.c
 src/rts.gen.c
+src/rts-intrin.gen.c
 all
 words/
 show-graph/show-graph.jar
