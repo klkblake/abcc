@@ -262,6 +262,8 @@ b32 read_f64(char *str, f64 *result) {
 	u8 buf[1076]; // FIXME figure out the size for this.
 	b32 seen_dp = false;
 	b32 seen_nonzero = false;
+	b32 rounded = false;
+	b32 rounded_up = false;
 	s32 n = 0;
 	s32 dp = 0;
 	char c;
@@ -284,12 +286,27 @@ b32 read_f64(char *str, f64 *result) {
 			continue;
 		}
 		seen_nonzero = true;
-		// 17 digits is enough to uniquely identify any double
+		u8 digit = (u8)c - '0';
+		// 17 digits is enough to uniquely identify any double,
+		// assuming it is rounded. The tie-breaker doesn't matter.
 		if (n < 17) {
-			buf[n++] = (u8)c - '0';
-		} else if (n == 17) {
-			// XXX we *must* round correctly.
-
+			buf[n++] = digit;
+		} else if (!rounded) {
+			if (digit >= 5) {
+				s32 i = n - 1;
+				while (i >= 0 && buf[i] == 9) {
+					buf[i] = 0;
+					i--;
+				}
+				if (i >= 0) {
+					buf[i]++;
+				} else {
+					buf[0] = 1;
+					dp++;
+				}
+				rounded_up = true;
+			}
+			rounded = true;
 		}
 		if (!seen_dp) {
 			dp++;
@@ -357,6 +374,32 @@ b32 read_f64(char *str, f64 *result) {
 			mantissa = (mantissa << 1) | 1;
 		} else {
 			mantissa <<= 1;
+		}
+	}
+	if (n > 1) {
+		b32 should_round_up;
+		if (buf[1] == 5) {
+			b32 found_nonzero = false;
+			for (s32 i = 2; i < n; i++) {
+				if (buf[i] != 0) {
+					found_nonzero = true;
+					break;
+				}
+			}
+			if (found_nonzero) {
+				should_round_up = true;
+			} else {
+				if (rounded) {
+					should_round_up = !rounded_up;
+				} else {
+					should_round_up = mantissa & 1;
+				}
+			}
+		} else {
+			should_round_up = buf[1] > 5;
+		}
+		if (should_round_up) {
+			mantissa++;
 		}
 	}
 	u64 bits = ((u64)(exp + 1023) << 52) | mantissa;
@@ -641,8 +684,6 @@ void main(int argc, char **argv) {
 	Value unit = {.bits = UNIT};
 	Value result = block_0(alloc_pair(alloc_pair((Value){.number = arg}, unit), alloc_pair(unit, unit)));
 	printf("%f\n", result.pair->first.pair->first.number);
-	printf("%f\n", __DBL_MIN__);
-	printf("%f\n", __DBL_DENORM_MIN__);
 }
 
 // This was originally written in 2011 by Nicholas J. Kain, and was released
