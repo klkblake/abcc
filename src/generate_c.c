@@ -7,19 +7,21 @@
 
 extern char *rts_c;
 
-void do_indent(u32 indent) {
+void do_indent(FILE *file, u32 indent) {
 	for (u32 i = 0; i < indent; i++) {
-		putchar('\t');
+		putc('\t', file);
 	}
 }
 
-#define out(fmt, ...) do_indent(indent); printf(fmt "\n", ##__VA_ARGS__)
+#define out(fmt, ...) do_indent(file, indent); fprintf(file, fmt "\n", ##__VA_ARGS__)
 
 internal
-void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
-	u32 indent = 1;
-	printf("\nstatic\n");
-	printf("Value block_%u(Value v%u) {\n", graph->id, graph->input.out_link_id[0]);
+void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
+	u32 indent = 0;
+	out("");
+	out("static");
+	out("Value block_%u(Value v%u) {", graph->id, graph->input.out_link_id[0]);
+	indent++;
 	struct node_ptr_array worklist = {};
 	array_push(&worklist, graph->input.out[0]);
 	for (struct node *constant = graph->constants; constant; constant = constant->next_constant) {
@@ -350,15 +352,16 @@ void generate(struct graph *graph, u64 traversal1, u64 traversal2) {
 	}
 	assert(return_value != (u32)-1);
 	out("return v%u;", return_value);
-	printf("}\n");
+	indent--;
+	out("}");
 	array_free(&worklist);
 }
 
-void generate_c(struct block_ptr_array blocks) {
+void generate_c(FILE *file, struct block_ptr_array blocks) {
 	u64 traversal1 = global_traversal++;
 	u64 traversal2 = global_traversal++;
-	printf("%s", rts_c);
+	fprintf(file, "%s", rts_c);
 	foreach (block, blocks) {
-		generate(&(*block)->graph, traversal1, traversal2);
+		generate(file, &(*block)->graph, traversal1, traversal2);
 	}
 }

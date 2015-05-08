@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <unistd.h>
 #include <getopt.h>
 
 #include "type.h"
@@ -50,6 +51,8 @@ struct option long_options[] = {
 	{ "c",          no_argument, NULL, 'C' },
 	{ "verbose",    no_argument, NULL, 'v' },
 };
+
+extern char *rts_intrin_ll;
 
 int main(int argc, char **argv) {
 	enum mode {
@@ -160,12 +163,59 @@ int main(int argc, char **argv) {
 	build_graphs(result.blocks, pool.boolean, optlevel >= 1);
 	switch (output) {
 		case OUTPUT_EXECUTABLE:
-			break;
+			{
+				char c_filename[] = "/tmp/abcc-c.XXXXXX.c";
+				i32 fd = mkstemps(c_filename, 2);
+				if (fd < 0) {
+					perror("abcc");
+					return 1;
+				}
+				FILE *c_file = fdopen(fd, "w");
+				if (!c_file) {
+					perror("abcc");
+					return 1;
+				}
+				generate_c(c_file, result.blocks);
+				if (fclose(c_file)) {
+					perror("abcc");
+					return 1;
+				}
+				char ll_filename[] = "/tmp/abcc-ll.XXXXXX.ll";
+				fd = mkstemps(ll_filename, 3);
+				if (fd < 0) {
+					perror("abcc");
+					return 1;
+				}
+				FILE *ll_file = fdopen(fd, "w");
+				if (!ll_file) {
+					perror("abcc");
+					return 1;
+				}
+				fprintf(ll_file, "%s", rts_intrin_ll);
+				if (fclose(ll_file)) {
+					perror("abcc");
+					return 1;
+				}
+				execlp("clang",
+				       "clang",
+				       "-std=c11",
+				       "-Wall",
+				       "-ffreestanding",
+				       "-nostdlib",
+				       "-g",
+				       "-msse4.1",
+				       ll_filename,
+				       c_filename,
+				       (char *)NULL);
+				perror("abcc");
+				return 1;
+				// TODO delete temporary files
+			}
 		case OUTPUT_GRAPHVIZ:
 			generate_graphviz(result.blocks);
 			break;
 		case OUTPUT_C:
-			generate_c(result.blocks);
+			generate_c(stdout, result.blocks);
 			break;
 	}
 
