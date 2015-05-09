@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <getopt.h>
+#include <string.h>
 
 #include "type.h"
 #include "parser.h"
@@ -37,7 +39,7 @@ char *help_text =
 	"  -O1               Enable basic optimisations (default)\n"
 	"  -O2, -O           Enable advanced optimisations\n"
 	"  -g, --debug       Embed debugging information (prevents reproducible builds)\n"
-	"  -e, --executable  Output an executable (default)"
+	"  -e, --executable  Output an executable (default)\n"
 	"  -G, --graphviz    Output the dataflow graph in graphviz format\n"
 	"  -C, --c           Output the generated C source\n"
 	"  -v, --verbose     Display verbose output\n";
@@ -170,52 +172,60 @@ int main(int argc, char **argv) {
 	switch (output) {
 		case OUTPUT_EXECUTABLE:
 			{
-				char c_filename[] = "/tmp/abcc-c.XXXXXX.c";
-				i32 fd = mkstemps(c_filename, 2);
-				if (fd < 0) {
+#define DIE_IF(expr) if (expr) { perror("abcc"); return 1; }
+				char dirname[] = "/tmp/abcc-XXXXXX";
+				DIE_IF(!mkdtemp(dirname));
+				char *oldwd = getcwd(NULL, 0);
+				DIE_IF(!oldwd);
+				DIE_IF(chdir(dirname));
+
+				char *cname = "program.c";
+				FILE *cfile = fopen(cname, "w");
+				DIE_IF(!cfile);
+				generate_c(cfile, result.blocks);
+				DIE_IF(fclose(cfile));
+
+				char *llname = "rts-intrin.ll";
+				FILE *llfile = fopen(llname, "w");
+				DIE_IF(!llfile);
+				fprintf(llfile, "%s", rts_intrin_ll);
+				DIE_IF(fclose(llfile));
+
+				pid_t pid = fork();
+				DIE_IF(pid == -1);
+				if (pid == 0) {
+					execlp("clang",
+					       "clang",
+					       "-std=c11",
+					       "-Wall",
+					       "-ffreestanding",
+					       "-nostdlib",
+					       debug ? "-g" : "-O2",
+					       "-msse4.1",
+					       cname,
+					       llname,
+					       (char *)NULL);
 					perror("abcc");
 					return 1;
 				}
-				FILE *c_file = fdopen(fd, "w");
-				if (!c_file) {
-					perror("abcc");
+				int status;
+				DIE_IF(waitpid(pid, &status, 0) == -1);
+				if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+					// Clang hopefully printed out whatever caused it to fail.
 					return 1;
 				}
-				generate_c(c_file, result.blocks);
-				if (fclose(c_file)) {
-					perror("abcc");
-					return 1;
-				}
-				char ll_filename[] = "/tmp/abcc-ll.XXXXXX.ll";
-				fd = mkstemps(ll_filename, 3);
-				if (fd < 0) {
-					perror("abcc");
-					return 1;
-				}
-				FILE *ll_file = fdopen(fd, "w");
-				if (!ll_file) {
-					perror("abcc");
-					return 1;
-				}
-				fprintf(ll_file, "%s", rts_intrin_ll);
-				if (fclose(ll_file)) {
-					perror("abcc");
-					return 1;
-				}
-				execlp("clang",
-				       "clang",
-				       "-std=c11",
-				       "-Wall",
-				       "-ffreestanding",
-				       "-nostdlib",
-				       debug ? "-g" : "-O2",
-				       "-msse4.1",
-				       ll_filename,
-				       c_filename,
-				       (char *)NULL);
-				perror("abcc");
-				return 1;
-				// TODO delete temporary files
+
+				size_t oldwd_size = strlen(oldwd);
+				char *new_exe = malloc(oldwd_size + 7);
+				memcpy(new_exe, oldwd, oldwd_size);
+				memcpy(new_exe + oldwd_size, "/a.out", 7);
+				DIE_IF(rename("a.out", new_exe));
+
+				DIE_IF(remove(cname));
+				DIE_IF(remove(llname));
+				DIE_IF(chdir(oldwd));
+				DIE_IF(remove(dirname));
+				break;
 			}
 		case OUTPUT_GRAPHVIZ:
 			generate_graphviz(result.blocks);
@@ -237,3 +247,4 @@ cleanup_typecheck:
 	array_free(&result.blocks);
 	return 0;
 }
+
