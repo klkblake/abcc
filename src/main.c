@@ -36,6 +36,7 @@ char *help_text =
 	"  -O0               Disable optimisation (not recommended)\n"
 	"  -O1               Enable basic optimisations (default)\n"
 	"  -O2, -O           Enable advanced optimisations\n"
+	"  -g, --debug       Embed debugging information (prevents reproducible builds)\n"
 	"  -e, --executable  Output an executable (default)"
 	"  -G, --graphviz    Output the dataflow graph in graphviz format\n"
 	"  -C, --c           Output the generated C source\n"
@@ -46,6 +47,7 @@ struct option long_options[] = {
 	{ "help",       no_argument, NULL, 'h' },
 	{ "compile",    no_argument, NULL, 'c' },
 	{ "typecheck",  no_argument, NULL, 't' },
+	{ "debug",      no_argument, NULL, 'g' },
 	{ "executable", no_argument, NULL, 'e' },
 	{ "graphviz",   no_argument, NULL, 'G' },
 	{ "c",          no_argument, NULL, 'C' },
@@ -65,6 +67,7 @@ int main(int argc, char **argv) {
 		OUTPUT_C,
 	} output = OUTPUT_EXECUTABLE;
 	u32 optlevel = 1;
+	b32 debug = false;
 	while (true) {
 		i32 option = getopt_long(argc, argv, "hctO::eGCv", long_options, NULL);
 		if (option == -1) {
@@ -95,6 +98,9 @@ int main(int argc, char **argv) {
 					return 2;
 				}
 
+				break;
+			case 'g':
+				debug = true;
 				break;
 			case 'e':
 				output = OUTPUT_EXECUTABLE;
@@ -202,7 +208,7 @@ int main(int argc, char **argv) {
 				       "-Wall",
 				       "-ffreestanding",
 				       "-nostdlib",
-				       "-g",
+				       debug ? "-g" : "-O2",
 				       "-msse4.1",
 				       ll_filename,
 				       c_filename,
