@@ -11,21 +11,21 @@ To build, run `./build`. As `abcc` depends only on the C standard library, you
 shouldn't need to do anything else. If you are debugging `abcc`, look in the
 build script for options.
 
-If you wish to use the `show-graph` debugging tool, you will need to download
-the [GraphStream](http://graphstream-project.org) libraries, and place them in
-`show-graph/lib`. Then from the `show-graph` directory, run `./build`. The
-libraries you will need are gs-core-1.2.jar and gs-ui-1.2.jar.
+If you wish to use the `show-graph` debugging tool you will need to download
+the [GraphStream](http://graphstream-project.org) libraries and place them in
+`show-graph/lib`. Then run `./build` from `show-graph`. The libraries you will
+need are gs-core-1.2.jar and gs-ui-1.2.jar.
 
 Running `abcc`
 --------------
 
-Run `abcc --help` for usage information. `abcc` only compiles ABC, so if you
-have some AO code you will need to compile it to ABC first. Something like `ao
-abc <your function here> | abcc` usually does what you want. Replace `ao abc`
-with `ao abc.ann` if you want better error reporting.
+Run `abcc --help` for usage information. `abcc` only compiles Awelon Bytecode
+(ABC); if you want to compile Awelon Object code you must compile it to ABC
+first. Use something like `ao abc <your function here> | abcc`. Replace `ao
+abc` with `ao abc.ann` if you want better error reporting.
 
-`abcc` may take its input on stdin or as a file. Text-based output formats
-output to `stdout`, actual executables are written to `a.out`.
+Inputs to `abcc` may be either from `stdin` or a file. Executables are written
+to `a.out` and text based output is passed to `stdout`.
 
 The type inferencer prints the input and output types on separate lines of
 `stdout`. `->` represents a polymorphic block, and `=>` a monomorphic one. Void
@@ -34,15 +34,14 @@ not inferred.
 
 The graphviz output is designed to help visualise the generated program, and
 may be useful if you want to see how well the optimiser is doing. Pipe it into
-`dot` for easy viewing: `abcc -G | dot -Tx11`. Be warned that dot isn't great
-with large graphs, and may take a while or segfault.
+`dot` for easy viewing: `abcc -G | dot -Tx11`. `dot` may either take a while or
+segfault when producing large graphs.
 
-Currently when building programs, `abcc` assumes the program has type
-`(N*1)*(1*1) -> (N*1)*(1*1)`. The output executable is a statically linked
-amd64 linux executable. It does not depend on the C standard library, but it
-does require SSE4.1 (for implementing `Q` efficiently). Building programs is
-still a work in progress, and so many things (text, notably) don't work and
-memory is never freed or reused.
+Programs are assumed to have type `(N*1)*(1*1) -> (N*1)*(1*1)`. Statically
+linked amd64 linux executables are generated, which require SSE4.1 (for
+implementing `Q` efficiently) and do not depend on the standard C library. At
+present memory is neither freed or reused, and text constants are
+unimplemented.
 
 Other scripts
 -------------
@@ -54,9 +53,9 @@ These are mostly for use in development, but some may be useful to others.
  * `compare-simplified`: Simple tool for visualising what impact the `ao`
    simplifier has.
 
- * `constantify`: Convert a file into a C file with that file's contents as a
-   string constant. Useful for embedding files into the `abcc` binary so that
-   it doesn't need to find anything at runtime.
+ * `constantify`: Converts a file's contents into a string constant stored in a
+   C file for embedding into the abcc binary. This allows the `abcc` binary to
+   be self-contained.
 
  * `expect`: Auto generates part of the type inferencer for a small but
    noticable performance improvement.
