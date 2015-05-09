@@ -58,6 +58,11 @@ struct option long_options[] = {
 
 extern char *rts_intrin_ll;
 
+// Exit codes:
+// 0 - Success
+// 1 - Failure due to ABC
+// 2 - Failure due to user error
+// 3 - Failure due to unusual conditions (missing /tmp, etc)
 int main(int argc, char **argv) {
 	enum mode {
 		MODE_COMPILE,
@@ -172,7 +177,7 @@ int main(int argc, char **argv) {
 	switch (output) {
 		case OUTPUT_EXECUTABLE:
 			{
-#define DIE_IF(expr) if (expr) { perror("abcc"); return 1; }
+#define DIE_IF(expr) if (expr) { perror("abcc"); return 3; }
 				char dirname[] = "/tmp/abcc-XXXXXX";
 				DIE_IF(!mkdtemp(dirname));
 				char *oldwd = getcwd(NULL, 0);
