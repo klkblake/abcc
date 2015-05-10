@@ -646,20 +646,21 @@ Value apply(Block *block, Value value) {
 static Value block_0 (Value input);
 
 static __attribute__((used))
-void main(int argc, char **argv) {
+u32 main(u32 argc, char **argv) {
 	if (argc != 2) {
 		printf("%s takes exactly one argument\n", argv[0]);
-		exit(2);
+		return 2;
 	}
 	f64 arg;
 	b32 success = read_f64(argv[1], &arg);
 	if (!success) {
 		printf("The argument to %s must be an number\n", argv[0]);
-		exit(2);
+		return 2;
 	}
 	Value unit = {.bits = UNIT};
 	Value result = block_0(alloc_pair(alloc_pair((Value){.number = arg}, unit), alloc_pair(unit, unit)));
 	printf("%f\n", result.pair->first.pair->first.number);
+	return 0;
 }
 
 // This was originally written in 2011 by Nicholas J. Kain, and was released
