@@ -97,7 +97,7 @@ void print_node(struct node *node, struct graph *graph, u64 traversal, struct ty
 		printf("node_%p [label=\"constant: %f\"]\n", node, node->number);
 	} else if (node->uop == UOP_BLOCK_CONSTANT) {
 		printf("node_%p [label=\"block constant\"]\n", node);
-		printf("node_%p -> node_%p [style=dotted,constraint=false]\n", node, &node->block->input);
+		printf("node_%p -> node_%p [style=dotted,weight=0]\n", node, &node->block->input);
 	} else {
 		printf("node_%p [label=\"%s\"]\n", node, uop_names[node->uop]);
 	}
@@ -114,6 +114,7 @@ void print_graph(struct graph *graph, b32 is_main, u64 traversal) {
 	struct type_ptr_u64_map vars = {};
 	print_node(&graph->input, graph, traversal, &vars);
 	for (struct node *node = graph->constants; node; node = node->next_constant) {
+		printf("node_%p -> node_%p [style=dotted,weight=0]\n", &graph->input, node);
 		print_node(node, graph, traversal, &vars);
 	}
 	map_free(&vars);
