@@ -190,18 +190,18 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 	}
 }
 
-void print_type(union type *type, struct type_ptr_u64_map *vars) {
+void print_type(FILE *file, union type *type, struct type_ptr_u64_map *vars) {
 	struct type_ptr_b1_map seen = {};
 	struct u8_array buf = {};
 	print_type_(type, 0, &seen, vars, &buf);
-	fwrite(buf.data, 1, buf.size, stdout);
+	fwrite(buf.data, 1, buf.size, file);
 	map_free(&seen);
 	array_free(&buf);
 }
 
-void print_type_single(union type *type) {
+void print_type_single(FILE *file, union type *type) {
 	struct type_ptr_u64_map vars = {};
-	print_type(type, &vars);
+	print_type(file, type, &vars);
 	map_free(&vars);
 }
 

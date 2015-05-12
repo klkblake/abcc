@@ -3,6 +3,8 @@
 #include "array.h"
 #include "map.h"
 
+#include <stdio.h>
+
 // Sealed values are pointers so they always have the high bit clear
 #define HIGH_PTR_BIT (1ull << (sizeof(void *) * 8 - 1))
 // Only blocks can be marked polymorphic
@@ -54,8 +56,8 @@ static_assert(offsetof(union type, child1) == offsetof(union type, var_count), "
 #define VAR_BIT (1ull << (sizeof(usize) * 8 - 1))
 #define IS_VAR(type) (((type)->var_count & VAR_BIT) != 0)
 
-void print_type(union type *type, struct type_ptr_u64_map *vars);
-void print_type_single(union type *type);
+void print_type(FILE *file, union type *type, struct type_ptr_u64_map *vars);
+void print_type_single(FILE *file, union type *type);
 
 union type *rep(union type *v);
 union type *deref(union type *type);

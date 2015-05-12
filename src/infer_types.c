@@ -217,17 +217,17 @@ struct unification_error {
 
 internal
 void print_unification_error(usize i, u8 op, struct unification_error err, union type *left, union type *right) {
-	printf("Error on opcode %lu (%c), matching ", i, op);
-	print_symbol(stdout, err.left);
-	printf(" against ");
-	print_symbol(stdout, err.right);
-	printf(", while unifying\n\t");
+	fprintf(stderr, "Error on opcode %lu (%c), matching ", i, op);
+	print_symbol(stderr, err.left);
+	fprintf(stderr, " against ");
+	print_symbol(stderr, err.right);
+	fprintf(stderr, ", while unifying\n\t");
 	struct type_ptr_u64_map vars = {};
-	print_type(left, &vars);
-	printf("\nagainst\n\t");
-	print_type(right, &vars);
+	print_type(stderr, left, &vars);
+	fprintf(stderr, "\nagainst\n\t");
+	print_type(stderr, right, &vars);
 	map_free(&vars);
-	putchar('\n');
+	putc('\n', stderr);
 }
 
 internal
@@ -537,14 +537,15 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct type_pool *po
 #endif
 
 void print_expect_error(usize i, u8 op, union type* loc, union type *input) {
-	printf("Error on opcode %lu (%c), expected product, got ", i, op);
-	print_symbol(stdout, loc->symbol);
-	putchar('\n');
-	print_type_single(input);
-	putchar('\n');
+	fprintf(stderr, "Error on opcode %lu (%c), expected product, got ", i, op);
+	print_symbol(stderr, loc->symbol);
+	putc('\n', stderr);
+	print_type_single(stderr, input);
+	putc('\n', stderr);
 }
 
-// TODO be consistent with stdout/stderr
+// TODO Type inference can happen *after* graph construction and the most
+// beneficial optimisations
 // TODO clean up error reporting
 internal
 b32 infer_block(struct block *block, struct type_pool *pool) {
@@ -564,7 +565,7 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 		union type *vars[5];
 #if 0
 #define expect(pat) if (!expect_((u8 *) (pat), &input, vars, pool)) { \
-	printf("Error on opcode %lu (%c)\n", i, op); \
+	fprintf(stderr, "Error on opcode %lu (%c)\n", i, op); \
 	return false; \
 }
 #endif
@@ -603,19 +604,19 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 					if (!IS_VAR(type)) {
 						if (IS_SEALED(type->symbol)) {
 							if (type->seal != seal) {
-								printf("Error on opcode %lu (%c), attempted to unseal value sealed with \"", i, op);
-								print_string(stdout, type->seal);
-								printf("\" using unsealer \"");
-								print_string(stdout, seal);
-								printf("\"\n");
+								fprintf(stderr, "Error on opcode %lu (%c), attempted to unseal value sealed with \"", i, op);
+								print_string(stderr, type->seal);
+								fprintf(stderr, "\" using unsealer \"");
+								print_string(stderr, seal);
+								fprintf(stderr, "\"\n");
 								fail();
 							}
 						} else {
-							printf("Error on opcode %lu, unsealing non-sealed value ", i);
-							print_symbol(stdout, type->symbol);
-							printf(" with sealer \"");
-							print_string(stdout, seal);
-							printf("\"\n");
+							fprintf(stderr, "Error on opcode %lu, unsealing non-sealed value ", i);
+							print_symbol(stderr, type->symbol);
+							fprintf(stderr, " with sealer \"");
+							print_string(stderr, seal);
+							fprintf(stderr, "\"\n");
 							fail();
 						}
 					} else {
@@ -797,7 +798,7 @@ b32 infer_types(struct block_ptr_array blocks, struct type_pool *pool) {
 	pool->boolean = set_term(alloc_type(pool), SYMBOL_BOOL, NULL, NULL);
 	foreach (block, blocks) {
 		if (!infer_block(*block, pool)) {
-			printf("Failed in block %lu\n", block_index);
+			fprintf(stderr, "Failed in block %lu\n", block_index);
 			return false;
 		}
 	}

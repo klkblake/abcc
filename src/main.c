@@ -166,9 +166,9 @@ int main(int argc, char **argv) {
 	if (mode == MODE_TYPECHECK) {
 		struct block *block = result.blocks.data[result.blocks.size - 1];
 		struct type_ptr_u64_map vars = {};
-		print_type(block->types[0], &vars);
+		print_type(stdout, block->types[0], &vars);
 		printf("\n");
-		print_type(block->types[block->size], &vars);
+		print_type(stdout, block->types[block->size], &vars);
 		printf("\n");
 		map_free(&vars);
 		goto cleanup_typecheck;
