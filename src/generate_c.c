@@ -20,10 +20,10 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 	u32 indent = 0;
 	out("");
 	out("static");
-	out("Value block_%u(Value v%u) {", graph->id, graph->input.out_link_id[0]);
+	out("Value block_%u(Value v%u) {", graph->id, OUT0(&graph->input).link_id);
 	indent++;
 	struct node_ptr_array worklist = {};
-	array_push(&worklist, graph->input.out[0]);
+	array_push(&worklist, OUT0(&graph->input).node);
 	for (struct node *constant = graph->constants; constant; constant = constant->next_constant) {
 		array_push(&worklist, constant);
 	}
@@ -35,7 +35,7 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 		}
 		b32 ready = true;
 		for (u32 i = 0; i < node->in_count; i++) {
-			if (node->in[i]->seen != traversal1) {
+			if (in_link(node, i)->node->seen != traversal1) {
 				ready = false;
 			}
 		}
@@ -44,14 +44,15 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 		}
 		node->seen = traversal1;
 		for (u32 i = 0; i < node->out_count; i++) {
-			out("Value v%u;", node->out_link_id[i]);
-			array_push(&worklist, node->out[i]);
+			struct out_link *link = out_link(node, i);
+			out("Value v%u;", link->link_id);
+			array_push(&worklist, link->node);
 		}
 	}
 	struct node *const MARKER_ELSE = (struct node *)0x1;
 	struct node *const MARKER_END  = (struct node *)0x2;
 	u32 return_value = (u32)-1;
-	array_push(&worklist, graph->input.out[0]);
+	array_push(&worklist, OUT0(&graph->input).node);
 	for (struct node *constant = graph->constants; constant; constant = constant->next_constant) {
 		array_push(&worklist, constant);
 	}
@@ -74,7 +75,7 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 		}
 		b32 ready = true;
 		for (u32 i = 0; i < node->in_count; i++) {
-			if (node->in[i]->seen != traversal2) {
+			if (in_link(node, i)->node->seen != traversal2) {
 				ready = false;
 			}
 		}
@@ -82,13 +83,14 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 			continue;
 		}
 		node->seen = traversal2;
-		u32 in[array_count(node->in)];
-		u32 out[array_count(node->out)];
+		u32 in[node->in_count];
+		u32 out[node->out_count];
 		for (u32 i = 0; i < node->in_count; i++) {
-			in[i] = node->in[i]->out_link_id[node->src_slot[i]];
+			struct in_link *link = in_link(node, i);
+			in[i] = out_link(link->node, link->slot)->link_id;
 		}
 		for (u32 i = 0; i < node->out_count; i++) {
-			out[i] = node->out_link_id[i];
+			out[i] = out_link(node, i)->link_id;
 		}
 		b32 add_out_nodes = true;
 		switch (node->uop) {
@@ -125,11 +127,11 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 					out("v%u = v%u;", out[1], out[0]);
 					out("if (v%u.boolean) {", out[2]);
 					indent++;
-					array_push(&worklist, node->out[2]);
+					array_push(&worklist, OUT2(node).node);
 					array_push(&worklist, MARKER_END);
-					array_push(&worklist, node->out[1]);
+					array_push(&worklist, OUT1(node).node);
 					array_push(&worklist, MARKER_ELSE);
-					array_push(&worklist, node->out[0]);
+					array_push(&worklist, OUT0(node).node);
 					add_out_nodes = false;
 					break;
 				}
@@ -166,7 +168,7 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 				}
 			case UOP_COPY:
 				{
-					union type *in_type = node->in[0]->output_type[node->src_slot[0]];
+					union type *in_type = out_link(IN0(node).node, IN0(node).slot)->type;
 					while (!IS_VAR(in_type) && IS_SEALED(in_type->symbol)) {
 						// FIXME This can loop infinitely if there is a loop of
 						// seals. This is invalid, but we don't check for it.
@@ -293,13 +295,13 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 					out("v%u = v%u;", out[3], in[1]);
 					out("if (v%u.boolean) {", out[4]);
 					indent++;
-					array_push(&worklist, node->out[4]);
+					array_push(&worklist, OUT4(node).node);
 					array_push(&worklist, MARKER_END);
-					array_push(&worklist, node->out[3]);
-					array_push(&worklist, node->out[2]);
+					array_push(&worklist, OUT3(node).node);
+					array_push(&worklist, OUT2(node).node);
 					array_push(&worklist, MARKER_ELSE);
-					array_push(&worklist, node->out[1]);
-					array_push(&worklist, node->out[0]);
+					array_push(&worklist, OUT1(node).node);
+					array_push(&worklist, OUT0(node).node);
 					add_out_nodes = false;
 					break;
 				}
@@ -346,7 +348,7 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 		}
 		if (add_out_nodes) {
 			for (u32 i = 0; i < node->out_count; i++) {
-				array_push(&worklist, node->out[i]);
+				array_push(&worklist, out_link(node, i)->node);
 			}
 		}
 	}

@@ -79,10 +79,10 @@ char *out_port(u32 slot_count, u32 slot) {
 }
 
 void print_node_link(struct node *from, u32 slot_count, u32 slot, struct type_ptr_u64_map *vars) {
-	struct node *to = from->out[slot];
+	struct out_link *to = out_link(from, slot);
 	printf("node_%p:%s -> node_%p:%s [label=\"",
-	       from, out_port(slot_count, slot), to, in_port(to->in_count, from->dst_slot[slot]));
-	print_type(from->output_type[slot], vars);
+	       from, out_port(slot_count, slot), to->node, in_port(to->node->in_count, to->slot));
+	print_type(stdout, to->type, vars);
 	printf("\"]\n");
 }
 
@@ -103,7 +103,7 @@ void print_node(struct node *node, struct graph *graph, u64 traversal, struct ty
 	}
 	for (u32 i = 0; i < node->out_count; i++) {
 		print_node_link(node, node->out_count, i, vars);
-		print_node(node->out[i], graph, traversal, vars);
+		print_node(out_link(node, i)->node, graph, traversal, vars);
 	}
 }
 

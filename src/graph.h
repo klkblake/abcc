@@ -1,6 +1,6 @@
 #ifndef GRAPH_H
 
-#include "array.h"
+#include "pool.h"
 
 enum uop {
 	UOP_START,
@@ -44,16 +44,34 @@ enum uop {
 	UOP_DEBUG_PRINT_TEXT,
 };
 
+struct in_link {
+	struct node *node;
+	u32 slot;
+};
+
+struct out_link {
+	struct node *node;
+	u32 slot;
+	u32 link_id;
+	union type *type;
+};
+
+struct in_link_chunk {
+	struct in_link links[3];
+	struct in_link_chunk *next;
+};
+
+struct out_link_chunk {
+	struct out_link links[3];
+	struct out_link_chunk *next;
+};
+
 struct node {
 	enum uop uop;
 	u32 in_count;
-	struct node *in[3];
-	u32 src_slot[3]; // TODO more consistent naming
+	struct in_link_chunk in;
 	u32 out_count;
-	struct node *out[5];
-	u32 dst_slot[5];
-	u32 out_link_id[5];
-	union type *output_type[5];
+	struct out_link_chunk out;
 	union {
 		struct node *next_constant;
 		struct node *left_constant;
@@ -78,18 +96,29 @@ struct graph {
 };
 DEFINE_ARRAY(struct graph, graph);
 
-struct chunk {
-	u32 indent;
-	struct u8_array text;
-	struct chunk *root; // Only filled for chunks with only constant roots
-	struct chunk *next;
-	struct chunk *next_else;
-	u32 depth;
+struct graph_pools {
+	struct pool node_pool;
+	struct pool in_link_pool;
+	struct pool out_link_pool;
 };
-DEFINE_ARRAY(struct chunk, chunk);
-DEFINE_ARRAY(struct chunk *, chunk_ptr);
 
 extern u64 global_traversal;
+
+#define IN0(node) ((node)->in.links[0])
+#define IN1(node) ((node)->in.links[1])
+#define IN2(node) ((node)->in.links[2])
+
+#define OUT0(node) ((node)->out.links[0])
+#define OUT1(node) ((node)->out.links[1])
+#define OUT2(node) ((node)->out.links[2])
+#define OUT3(node) ((node)->out.next->links[0])
+#define OUT4(node) ((node)->out.next->links[1])
+
+struct in_link *in_link(struct node *node, u32 index);
+struct out_link *out_link(struct node *node, u32 index);
+
+struct in_link *add_in_link(struct graph_pools *pools, struct node *node);
+struct out_link *add_out_link(struct graph_pools *pools, struct node *node);
 
 #define GRAPH_H
 #endif
