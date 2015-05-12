@@ -1,12 +1,6 @@
-#include "generate_c.h"
+#include "generate_graphviz.c"
 
-#include "type.h"
-
-#include <stdlib.h>
-#include <stdio.h>
-
-extern char *rts_c;
-
+internal
 void do_indent(FILE *file, u32 indent) {
 	for (u32 i = 0; i < indent; i++) {
 		putc('\t', file);
@@ -359,6 +353,7 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 	array_free(&worklist);
 }
 
+internal
 void generate_c(FILE *file, struct block_ptr_array blocks) {
 	u64 traversal1 = global_traversal++;
 	u64 traversal2 = global_traversal++;

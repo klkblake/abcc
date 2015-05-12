@@ -1,11 +1,21 @@
-#include <unistd.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <assert.h>
+#include "block.c"
 
-#include "abcc.h"
-#include "parser.h"
+struct parse_error {
+	struct u8_array line;
+	u32 code;
+	u32 lineno;
+	u32 col;
+};
+DEFINE_ARRAY(struct parse_error, parse_error);
+
+struct parse_result {
+	// NULL if the parse failed
+	struct block *block;
+	// All the blocks transitively referenced by block, sorted
+	// topologically (leaves first)
+	struct block_ptr_array blocks;
+	struct parse_error_array errors;
+};
 
 internal
 void array_stack_snoc(u8 *buf, struct u8_array *array, u8 c) {
@@ -256,7 +266,8 @@ DEFINE_MEMO_TABLE(block, struct block,
 #define PARSE_WARN_MISMATCHED_FRAME_POP (PARSE_WARN | 1)
 #define PARSE_WARN_EOF_IN_FRAME         (PARSE_WARN | 2)
 
-static char *parse_error_messages[] = {
+internal
+char *parse_error_messages[] = {
 	"Hit end-of-file while parsing block",
 	"Hit end-of-file while parsing invocation",
 	"Hit end-of-file while parsing text",
@@ -268,7 +279,8 @@ static char *parse_error_messages[] = {
 	"Popped frame when already at top level",
 };
 
-static char *parse_warning_messages[] = {
+internal
+char *parse_warning_messages[] = {
 	"Unknown annotation",
 	"Tried to pop frame that does not match the top frame",
 	"Hit end-of-file while inside stack frame",
@@ -728,6 +740,7 @@ struct parse_block_result parse_block(struct parse_state *state, b32 expect_eof)
 	}
 }
 
+internal
 struct parse_result parse(FILE *stream) {
 	struct parse_state state = {};
 	state.stream = stream;
@@ -743,6 +756,7 @@ struct parse_result parse(FILE *stream) {
 	return (struct parse_result){result.block, state.blocks, state.errors};
 }
 
+internal
 void print_parse_error(struct parse_error error) {
 	// We store line, col zero indexed instead of one indexed
 	if ((error.code & PARSE_WARN) == 0) {

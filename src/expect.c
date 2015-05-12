@@ -1,8 +1,5 @@
-#include "abcc.h"
+#include "common.h"
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
 #include <errno.h>
 
 void do_indent(u32 indent) {

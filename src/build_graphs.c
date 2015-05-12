@@ -1,11 +1,4 @@
-#include "build_graphs.h"
-
-#include "type.h"
-
-#include <stdlib.h>
-#include <string.h>
-
-u64 global_traversal = 1;
+#include "infer_types.gen.c"
 
 internal
 struct node *alloc_node(struct graph_pools *pools, enum uop uop) {
@@ -14,6 +7,7 @@ struct node *alloc_node(struct graph_pools *pools, enum uop uop) {
 	return result;
 }
 
+internal
 struct in_link *in_link(struct node *node, u32 index) {
 	struct in_link_chunk *chunk = &node->in;
 	while (index >= array_count(chunk->links)) {
@@ -23,6 +17,7 @@ struct in_link *in_link(struct node *node, u32 index) {
 	return &chunk->links[index];
 }
 
+internal
 struct out_link *out_link(struct node *node, u32 index) {
 	struct out_link_chunk *chunk = &node->out;
 	while (index >= array_count(chunk->links)) {
@@ -32,6 +27,7 @@ struct out_link *out_link(struct node *node, u32 index) {
 	return &chunk->links[index];
 }
 
+internal
 struct in_link *add_in_link(struct graph_pools *pools, struct node *node) {
 	struct in_link_chunk *chunk = &node->in;
 	u32 index = node->in_count++;
@@ -45,6 +41,7 @@ struct in_link *add_in_link(struct graph_pools *pools, struct node *node) {
 	return &chunk->links[index];
 }
 
+internal
 struct out_link *add_out_link(struct graph_pools *pools, struct node *node) {
 	struct out_link_chunk *chunk = &node->out;
 	u32 index = node->out_count++;
@@ -840,6 +837,7 @@ void build_graph(struct block *block, u32 graph_id, u32 *link_id, union type *bo
 }
 
 // TODO move the link_id stuff into generate_c
+internal
 void build_graphs(struct block_ptr_array blocks, union type *bool_type, b32 optimise) {
 	u32 link_id = 0;
 	foreach (block, blocks) {

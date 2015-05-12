@@ -1,8 +1,4 @@
-#include "generate_graphviz.h"
-
-#include "type.h"
-
-#include <stdio.h>
+#include "build_graphs.c"
 
 internal char *uop_names[] = {
 	"START",
@@ -46,6 +42,7 @@ internal char *uop_names[] = {
 	"debug print text",
 };
 
+internal
 char *in_port(u32 slot_count, u32 slot) {
 	static char *ports[] = {"nw", "n", "ne"};
 	switch (slot_count) {
@@ -60,6 +57,7 @@ char *in_port(u32 slot_count, u32 slot) {
 	}
 }
 
+internal
 char *out_port(u32 slot_count, u32 slot) {
 	static char *ports[] = {"w", "sw", "s", "se", "e"};
 	switch (slot_count) {
@@ -78,6 +76,7 @@ char *out_port(u32 slot_count, u32 slot) {
 	}
 }
 
+internal
 void print_node_link(struct node *from, u32 slot_count, u32 slot, struct type_ptr_u64_map *vars) {
 	struct out_link *to = out_link(from, slot);
 	printf("node_%p:%s -> node_%p:%s [label=\"",
@@ -86,6 +85,7 @@ void print_node_link(struct node *from, u32 slot_count, u32 slot, struct type_pt
 	printf("\"]\n");
 }
 
+internal
 void print_node(struct node *node, struct graph *graph, u64 traversal, struct type_ptr_u64_map *vars) {
 	if (node->seen == traversal) {
 		return;
@@ -107,6 +107,7 @@ void print_node(struct node *node, struct graph *graph, u64 traversal, struct ty
 	}
 }
 
+internal
 void print_graph(struct graph *graph, b32 is_main, u64 traversal) {
 	if (!is_main) {
 		printf("subgraph cluster_%p {\n", graph);
@@ -123,6 +124,7 @@ void print_graph(struct graph *graph, b32 is_main, u64 traversal) {
 	}
 }
 
+internal
 void generate_graphviz(struct block_ptr_array blocks) {
 	printf("digraph {\n");
 	u64 traversal = global_traversal++;

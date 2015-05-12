@@ -1,16 +1,13 @@
-#include "infer_types.h"
+#include "peephole.c"
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-
-#include "string.h"
-#include "map.h"
-#include "type.h"
-
-#define CHUNK_SIZE 4096
+struct type_pool {
+	struct type_ptr_array chunks;
+	usize used;
+	union type *unit;
+	union type *number;
+	union type *text;
+	union type *boolean;
+};
 
 internal
 union type *alloc_type(struct type_pool *pool) {
@@ -53,7 +50,7 @@ void print_symbol(FILE *out, u64 symbol) {
 		struct string_rc *seal = (struct string_rc *) symbol;
 		fprintf(out, "seal \"");
 		print_string(out, seal);
-		putc('"', out);
+		fputc('"', out);
 	} else {
 		switch (symbol) {
 			case SYMBOL_VOID:    fprintf(out, "void");    break;
@@ -227,7 +224,7 @@ void print_unification_error(usize i, u8 op, struct unification_error err, union
 	fprintf(stderr, "\nagainst\n\t");
 	print_type(stderr, right, &vars);
 	map_free(&vars);
-	putc('\n', stderr);
+	fputc('\n', stderr);
 }
 
 internal
@@ -536,12 +533,13 @@ b32 expect_(u8 *pat, union type **input, union type **vars, struct type_pool *po
 }
 #endif
 
+internal
 void print_expect_error(usize i, u8 op, union type* loc, union type *input) {
 	fprintf(stderr, "Error on opcode %lu (%c), expected product, got ", i, op);
 	print_symbol(stderr, loc->symbol);
-	putc('\n', stderr);
+	fputc('\n', stderr);
 	print_type_single(stderr, input);
-	putc('\n', stderr);
+	fputc('\n', stderr);
 }
 
 // TODO Type inference can happen *after* graph construction and the most
@@ -784,10 +782,18 @@ b32 infer_block(struct block *block, struct type_pool *pool) {
 			          return false;
 		}
 		block->types[i+1] = output;
+#undef output
+#undef fail
+#undef fail_expect
 	}
 	return true;
+#undef prod
+#undef sum
+#undef block
+#undef sealed
 }
 
+internal
 b32 infer_types(struct block_ptr_array blocks, struct type_pool *pool) {
 	pool->unit   = set_term(alloc_type(pool), SYMBOL_UNIT,   NULL, NULL);
 	pool->number = set_term(alloc_type(pool), SYMBOL_NUMBER, NULL, NULL);

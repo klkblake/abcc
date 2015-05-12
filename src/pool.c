@@ -1,9 +1,4 @@
-#ifndef POOL_H
-
-#include "array.h"
-
-#include <stdlib.h>
-#include <string.h>
+#include "map.c"
 
 #define CHUNK_SIZE 512
 
@@ -24,6 +19,3 @@ void *alloc(struct pool *pool, u32 size) {
 	memset(result, 0, size);
 	return result;
 }
-
-#define POOL_H
-#endif

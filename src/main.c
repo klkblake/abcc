@@ -1,21 +1,10 @@
-#include <stdlib.h>
-#include <unistd.h>
+#include "generate_c.c"
+
 #include <sys/wait.h>
 #include <getopt.h>
-#include <string.h>
 
-#include "type.h"
-#include "parser.h"
-#include "peephole.h"
-#include "infer_types.h"
-#include "build_graphs.h"
-#include "generate_graphviz.h"
-#include "generate_c.h"
-
-extern char *global_source;
-extern b32 global_verbose;
-char *global_source = NULL;
-b32 global_verbose = false;
+internal char *global_source = NULL;
+internal b32 global_verbose = false;
 
 #define log(...) if (global_verbose) { fprintf(stderr, __VA_ARGS__); }
 
@@ -55,8 +44,6 @@ struct option long_options[] = {
 	{ "c",          no_argument, NULL, 'C' },
 	{ "verbose",    no_argument, NULL, 'v' },
 };
-
-extern char *rts_intrin_ll;
 
 // Exit codes:
 // 0 - Success

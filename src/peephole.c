@@ -1,6 +1,4 @@
-#include "peephole.h"
-
-#include <stdlib.h>
+#include "parser.c"
 
 /*
  * This pass implements the following rewrite rules, matching in order:
@@ -151,6 +149,7 @@ void simplify(struct block *block) {
 	block->size = new_size;
 }
 
+internal
 void peephole_simplify(struct block_ptr_array blocks) {
 	foreach (block, blocks) {
 		simplify(*block);

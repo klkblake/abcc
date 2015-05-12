@@ -1,6 +1,4 @@
-#ifndef GRAPH_H
-
-#include "pool.h"
+#include "type.c"
 
 enum uop {
 	UOP_START,
@@ -102,8 +100,6 @@ struct graph_pools {
 	struct pool out_link_pool;
 };
 
-extern u64 global_traversal;
-
 #define IN0(node) ((node)->in.links[0])
 #define IN1(node) ((node)->in.links[1])
 #define IN2(node) ((node)->in.links[2])
@@ -114,11 +110,4 @@ extern u64 global_traversal;
 #define OUT3(node) ((node)->out.next->links[0])
 #define OUT4(node) ((node)->out.next->links[1])
 
-struct in_link *in_link(struct node *node, u32 index);
-struct out_link *out_link(struct node *node, u32 index);
-
-struct in_link *add_in_link(struct graph_pools *pools, struct node *node);
-struct out_link *add_out_link(struct graph_pools *pools, struct node *node);
-
-#define GRAPH_H
-#endif
+internal u64 global_traversal = 1;

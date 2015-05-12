@@ -1,0 +1,41 @@
+This project uses a unity build. In other words, all files are included into a
+single translation unit. This reduces compile times and significantly reduces
+the amount of time spent messing with headers.
+
+shared:
+<stdlib.h>
+<stdio.h>
+<stdbool.h>
+<assert.h>
+<string.h>
+common.h
+
+abcc:
+common.h
+<unistd.h>
+<netinet/in.h>
+<sys/socket.h>
+rts.gen.c
+rts-intrin.gen.c
+abcc.h
+array.c
+string.c
+map.c
+pool.c
+type.c
+graph.c
+block.c
+parser.c
+peephole.c
+infer_types.gen.c
+build_graphs.c
+generate_graphviz.c
+generate_c.c
+<getopt.h>
+<sys/wait.h>
+main.c
+
+expect:
+common.h
+<errno.h>
+expect.c
