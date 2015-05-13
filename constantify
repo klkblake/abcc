@@ -17,4 +17,4 @@ s/\\/\\\\/g;
 s/"/\\"/g;
 s/^.*$/"&\\n"/;
 EOF
-sed -e "$script" < "$filename" | cat <(echo "extern char *$variable; char *$variable = ") - <(echo ";") > "$output"
+sed -e "$script" < "$filename" | cat <(echo "static char *$variable = ") - <(echo ";") > "$output"
