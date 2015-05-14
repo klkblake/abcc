@@ -1,24 +1,24 @@
 #include "string.c"
 
 #define DEFINE_MAP_STRUCT(key_type, value_type, name) \
-	struct name ## _map { \
+	typedef struct { \
 		u32 *hashes; \
 		key_type *keys; \
 		value_type *values; \
 		usize size; \
 		usize num_buckets; \
-	};
+	} name ## Map;
 
 #define DEFINE_MAP_RESULT_STRUCT(value_type, name) \
-	struct name ## _map_get_result { \
+	typedef struct { \
 		value_type value; \
 		usize bucket; \
 		b32 found; \
-	};
+	} name ## MapGetResult;
 
-#define DEFINE_MAP_GROW_SIG(name) void name ## _map_grow(struct name ## _map *map)
-#define DEFINE_MAP_GROW(key_type, value_type, name) \
-	DEFINE_MAP_GROW_SIG(name) { \
+#define DEFINE_MAP_GROW_SIG(func_name, name) void func_name ## _map_grow(name ## Map *map)
+#define DEFINE_MAP_GROW(key_type, value_type, func_name, name) \
+	DEFINE_MAP_GROW_SIG(func_name, name) { \
 		usize num_buckets = map->num_buckets * 2; \
 		if (num_buckets == 0) { \
 			num_buckets = 64; \
@@ -49,11 +49,11 @@
 		map->num_buckets = num_buckets; \
 	}
 
-#define DEFINE_MAP_GET_SIG(key_type, name) struct name ## _map_get_result name ## _map_get(struct name ## _map *map, key_type key)
-#define DEFINE_MAP_GET(key_type, value_type, name, hash_func) \
-	DEFINE_MAP_GET_SIG(key_type, name) { \
+#define DEFINE_MAP_GET_SIG(key_type, func_name, name) name ## MapGetResult func_name ## _map_get(name ## Map *map, key_type key)
+#define DEFINE_MAP_GET(key_type, value_type, func_name, name, hash_func) \
+	DEFINE_MAP_GET_SIG(key_type, func_name, name) { \
 		if (map->num_buckets == 0) { \
-			name ## _map_grow(map); \
+			func_name ## _map_grow(map); \
 		} \
 		usize mask = map->num_buckets - 1; \
 		u32 hash = hash_func(key); \
@@ -63,16 +63,16 @@
 		usize bucket = hash & mask; \
 		while (map->hashes[bucket] != 0) { \
 			if (map->hashes[bucket] == hash && map->keys[bucket] == key) { \
-				return (struct name ## _map_get_result){map->values[bucket], bucket, true}; \
+				return (name ## MapGetResult){map->values[bucket], bucket, true}; \
 			} \
 			bucket = (bucket + 1) & mask; \
 		} \
-		return (struct name ## _map_get_result){.bucket = bucket, .found = false}; \
+		return (name ## MapGetResult){.bucket = bucket, .found = false}; \
 	}
 
-#define DEFINE_MAP_PUT_BUCKET_SIG(key_type, value_type, name) void name ## _map_put_bucket(struct name ## _map *map, key_type key, value_type value, usize bucket)
-#define DEFINE_MAP_PUT_BUCKET(key_type, value_type, name, hash_func) \
-	DEFINE_MAP_PUT_BUCKET_SIG(key_type, value_type, name) { \
+#define DEFINE_MAP_PUT_BUCKET_SIG(key_type, value_type, func_name, name) void func_name ## _map_put_bucket(name ## Map *map, key_type key, value_type value, usize bucket)
+#define DEFINE_MAP_PUT_BUCKET(key_type, value_type, func_name, name, hash_func) \
+	DEFINE_MAP_PUT_BUCKET_SIG(key_type, value_type, func_name, name) { \
 		u32 hash = hash_func(key); \
 		if (hash == 0) { \
 			hash = 0x80000000; \
@@ -82,43 +82,43 @@
 		map->values[bucket] = value; \
 		map->size++; \
 		if (map->size > map->num_buckets / 2) { \
-			name ## _map_grow(map); \
+			func_name ## _map_grow(map); \
 		} \
 	}
 
 // TODO remove all usages of these now that we use a unity build
-#define DEFINE_MAP_HEADER(key_type, value_type, name) \
+#define DEFINE_MAP_HEADER(key_type, value_type, func_name, name) \
 	DEFINE_MAP_STRUCT(key_type, value_type, name); \
 	DEFINE_MAP_RESULT_STRUCT(value_type, name); \
-	DEFINE_MAP_GROW_SIG(name); \
-	DEFINE_MAP_GET_SIG(key_type, name); \
-	DEFINE_MAP_PUT_BUCKET_SIG(key_type, value_type, name);
+	DEFINE_MAP_GROW_SIG(func_name, name); \
+	DEFINE_MAP_GET_SIG(key_type, func_name, name); \
+	DEFINE_MAP_PUT_BUCKET_SIG(key_type, value_type, func_name, name);
 
-#define DEFINE_MAP_IMPL(key_type, value_type, name, hash_func) \
-	DEFINE_MAP_GROW(key_type, value_type, name); \
-	DEFINE_MAP_GET(key_type, value_type, name, hash_func); \
-	DEFINE_MAP_PUT_BUCKET(key_type, value_type, name, hash_func);
+#define DEFINE_MAP_IMPL(key_type, value_type, func_name, name, hash_func) \
+	DEFINE_MAP_GROW(key_type, value_type, func_name, name); \
+	DEFINE_MAP_GET(key_type, value_type, func_name, name, hash_func); \
+	DEFINE_MAP_PUT_BUCKET(key_type, value_type, func_name, name, hash_func);
 
-#define DEFINE_MAP(key_type, value_type, name, hash_func) \
+#define DEFINE_MAP(key_type, value_type, func_name, name, hash_func) \
 	DEFINE_MAP_STRUCT(key_type, value_type, name); \
 	DEFINE_MAP_RESULT_STRUCT(value_type, name); \
-	DEFINE_MAP_GROW(key_type, value_type, name); \
-	DEFINE_MAP_GET(key_type, value_type, name, hash_func); \
-	DEFINE_MAP_PUT_BUCKET(key_type, value_type, name, hash_func);
+	DEFINE_MAP_GROW(key_type, value_type, func_name, name); \
+	DEFINE_MAP_GET(key_type, value_type, func_name, name, hash_func); \
+	DEFINE_MAP_PUT_BUCKET(key_type, value_type, func_name, name, hash_func);
 
-DEFINE_MAP_STRUCT(void *, void *, void_ptr);
+DEFINE_MAP_STRUCT(void *, void *, VoidPtr);
 
 // We never shrink maps
-#define map_delete_bucket(map, bucket) map_delete_bucket_((struct void_ptr_map *) map, bucket)
+#define map_delete_bucket(map, bucket) map_delete_bucket_((VoidPtrMap *) map, bucket)
 internal
-void map_delete_bucket_(struct void_ptr_map *map, usize bucket) {
+void map_delete_bucket_(VoidPtrMap *map, usize bucket) {
 	map->hashes[bucket] = 0;
 	map->size--;
 }
 
-#define map_free(map) map_free_((struct void_ptr_map *) map)
+#define map_free(map) map_free_((VoidPtrMap *) map)
 internal
-void map_free_(struct void_ptr_map *map) {
+void map_free_(VoidPtrMap *map) {
 	free(map->hashes);
 	free(map->keys);
 	free(map->values);

@@ -8,7 +8,7 @@ internal b32 global_verbose = false;
 
 #define log(...) if (global_verbose) { fprintf(stderr, __VA_ARGS__); }
 
-usize count_ops(struct block_ptr_array blocks) {
+usize count_ops(BlockPtrArray blocks) {
 	usize ops = 0;
 	foreach (block, blocks) {
 		ops += (*block)->size;
@@ -129,7 +129,7 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "Expecting at most a single file argument, got %d\n", argc - optind);
 		return 2;
 	}
-	struct parse_result result = parse(input);
+	ParseResult result = parse(input);
 	foreach (error, result.errors) {
 		print_parse_error(*error);
 		array_free(&error->line);
@@ -145,14 +145,14 @@ int main(int argc, char **argv) {
 	peephole_simplify(result.blocks);
 	log("Total opcodes after simplify: %zu\n", count_ops(result.blocks));
 
-	struct type_pool pool = {};
+	TypePool pool = {};
 	if (!infer_types(result.blocks, &pool)) {
 		fprintf(stderr, "Type inference failed\n");
 		return 1;
 	}
 	if (mode == MODE_TYPECHECK) {
-		struct block *block = result.blocks.data[result.blocks.size - 1];
-		struct type_ptr_u64_map vars = {};
+		Block *block = result.blocks.data[result.blocks.size - 1];
+		TypePtrU64Map vars = {};
 		print_type(stdout, block->types[0], &vars);
 		printf("\n");
 		print_type(stdout, block->types[block->size], &vars);

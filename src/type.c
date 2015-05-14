@@ -24,41 +24,41 @@
  * If symbol/sealer has its high bit set, then it is a normal term, else it is
  * a sealer.
  */
-union type {
+typedef union Type {
 	struct {
 		union {
 			u64 symbol;
-			struct string_rc *seal;
+			StringRC *seal;
 		};
-		union type *next;
-		union type *child1;
-		union type *child2;
+		union Type *next;
+		union Type *child1;
+		union Type *child2;
 	};
 	struct {
-		union type *rep;
-		union type *terms;
+		union Type *rep;
+		union Type *terms;
 		usize var_count;
 	};
-};
-DEFINE_ARRAY(union type *, type_ptr);
+} Type;
+DEFINE_ARRAY(Type *, TypePtr);
 
-DEFINE_MAP_HEADER(union type *, b1, type_ptr_b1);
-DEFINE_MAP_HEADER(union type *, u64, type_ptr_u64);
-DEFINE_MAP_HEADER(union type *, union type *, type_ptr);
+DEFINE_MAP_HEADER(Type *, b1, type_ptr_b1, TypePtrB1);
+DEFINE_MAP_HEADER(Type *, u64, type_ptr_u64, TypePtrU64);
+DEFINE_MAP_HEADER(Type *, Type *, type_ptr, TypePtr);
 
-static_assert(offsetof(union type, child1) == offsetof(union type, var_count), "child1 must be unioned with var_count");
+static_assert(offsetof(Type, child1) == offsetof(Type, var_count), "child1 must be unioned with var_count");
 
 #define VAR_BIT (1ull << (sizeof(usize) * 8 - 1))
 #define IS_VAR(type) (((type)->var_count & VAR_BIT) != 0)
 
 internal
-u32 type_hash(union type *key) {
-	return (u32) ((u64)key / sizeof(union type));
+u32 type_hash(Type *key) {
+	return (u32) ((u64)key / sizeof(Type));
 }
 
-DEFINE_MAP_IMPL(union type *, b1, type_ptr_b1, type_hash);
-DEFINE_MAP_IMPL(union type *, union type *, type_ptr, type_hash);
-DEFINE_MAP_IMPL(union type *, u64, type_ptr_u64, type_hash);
+DEFINE_MAP_IMPL(Type *, b1, type_ptr_b1,TypePtrB1, type_hash);
+DEFINE_MAP_IMPL(Type *, u64, type_ptr_u64, TypePtrU64, type_hash);
+DEFINE_MAP_IMPL(Type *, Type *, type_ptr, TypePtr, type_hash);
 
 internal
 u32 var_len(u64 var) {
@@ -80,22 +80,22 @@ void write_var(u8 *buf, u64 var, u32 len) {
 }
 
 internal
-void push_var(struct u8_array *buf, u64 var) {
+void push_var(U8Array *buf, u64 var) {
 	u32 len = var_len(var);
 	array_bump(buf, len);
 	write_var(buf->data + buf->size - len, var, len);
 }
 
 internal
-void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struct type_ptr_u64_map *vars, struct u8_array *buf) {
+void print_type_(Type *type, u32 prec, TypePtrB1Map *seen, TypePtrU64Map *vars, U8Array *buf) {
 	if (IS_VAR(type)) {
-		union type *type_rep = type->rep;
+		Type *type_rep = type->rep;
 		while (type != type_rep) {
 			type = type_rep;
 			type_rep = type->rep;
 		}
 		if (type->terms == NULL) {
-			struct type_ptr_u64_map_get_result result = type_ptr_u64_map_get(vars, type);
+			TypePtrU64MapGetResult result = type_ptr_u64_map_get(vars, type);
 			if (!result.found) {
 				result.value = vars->size;
 				type_ptr_u64_map_put_bucket(vars, type, result.value, result.bucket);
@@ -106,15 +106,15 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 			type = type->terms;
 		} else {
 			array_push(buf, '{');
-			union type *term = type->terms;
+			Type *term = type->terms;
 			do {
 				// TODO consider printing out the full type
 				if (term == type->terms) {
 					array_push(buf, ',');
 				}
 				if (IS_SEALED(term->symbol)) {
-					u8_array_push_cstring(buf, "sealed \" ");
-					u8_array_push_many(buf, term->seal->data, term->seal->size);
+					u8Array_push_cstring(buf, "sealed \" ");
+					u8Array_push_many(buf, term->seal->data, term->seal->size);
 					array_push(buf, '"');
 				} else {
 					switch (term->symbol) {
@@ -123,8 +123,8 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 						case SYMBOL_NUMBER:  array_push(buf, 'N'); break;
 						case SYMBOL_PRODUCT: array_push(buf, '*'); break;
 						case SYMBOL_SUM:     array_push(buf, '+'); break;
-						case SYMBOL_BLOCK:                   u8_array_push_cstring(buf, "=>"); break;
-						case SYMBOL_BLOCK | POLYMORPHIC_BIT: u8_array_push_cstring(buf, "->"); break;
+						case SYMBOL_BLOCK:                   u8Array_push_cstring(buf, "=>"); break;
+						case SYMBOL_BLOCK | POLYMORPHIC_BIT: u8Array_push_cstring(buf, "->"); break;
 						case SYMBOL_BOOL: array_push(buf, 'B'); break;
 						default: array_push(buf, '?'); break;
 					}
@@ -135,9 +135,9 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 			return;
 		}
 	}
-	struct type_ptr_b1_map_get_result seen_result = type_ptr_b1_map_get(seen, type);
+	TypePtrB1MapGetResult seen_result = type_ptr_b1_map_get(seen, type);
 	if (seen_result.found) {
-		struct type_ptr_u64_map_get_result vars_result = type_ptr_u64_map_get(vars, type);
+		TypePtrU64MapGetResult vars_result = type_ptr_u64_map_get(vars, type);
 		if (!vars_result.found) {
 			vars_result.value = vars->size;
 			type_ptr_u64_map_put_bucket(vars, type, vars_result.value, vars_result.bucket);
@@ -146,7 +146,7 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 		return;
 	}
 	type_ptr_b1_map_put_bucket(seen, type, true, seen_result.bucket);
-	struct type_ptr_u64_map_get_result vars_result = type_ptr_u64_map_get(vars, type);
+	TypePtrU64MapGetResult vars_result = type_ptr_u64_map_get(vars, type);
 	if (vars_result.found) {
 		map_delete_bucket(vars, vars_result.bucket);
 	}
@@ -155,9 +155,9 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 		if (prec > 8) {
 			array_push(buf, '(');
 		}
-		u8_array_push_cstring(buf, "sealed \"");
-		u8_array_push_many(buf, type->seal->data, type->seal->size);
-		u8_array_push_cstring(buf, "\" ");
+		u8Array_push_cstring(buf, "sealed \"");
+		u8Array_push_many(buf, type->seal->data, type->seal->size);
+		u8Array_push_cstring(buf, "\" ");
 		print_type_(type->child1, 9, seen, vars, buf);
 		if (prec > 8) {
 			array_push(buf, ')');
@@ -190,9 +190,9 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 			print_type_(type->child1, newprec + 1, seen, vars, buf);
 		}
 		if (type->symbol == SYMBOL_BLOCK) {
-			u8_array_push_cstring(buf, " => ");
+			u8Array_push_cstring(buf, " => ");
 		} else if (type->symbol == (SYMBOL_BLOCK | POLYMORPHIC_BIT)) {
-			u8_array_push_cstring(buf, " -> ");
+			u8Array_push_cstring(buf, " -> ");
 		} else {
 			if (children) {
 				array_push(buf, ' ');
@@ -236,9 +236,9 @@ void print_type_(union type *type, u32 prec, struct type_ptr_b1_map *seen, struc
 }
 
 internal
-void print_type(FILE *file, union type *type, struct type_ptr_u64_map *vars) {
-	struct type_ptr_b1_map seen = {};
-	struct u8_array buf = {};
+void print_type(FILE *file, Type *type, TypePtrU64Map *vars) {
+	TypePtrB1Map seen = {};
+	U8Array buf = {};
 	print_type_(type, 0, &seen, vars, &buf);
 	fwrite(buf.data, 1, buf.size, file);
 	map_free(&seen);
@@ -246,20 +246,20 @@ void print_type(FILE *file, union type *type, struct type_ptr_u64_map *vars) {
 }
 
 internal
-void print_type_single(FILE *file, union type *type) {
-	struct type_ptr_u64_map vars = {};
+void print_type_single(FILE *file, Type *type) {
+	TypePtrU64Map vars = {};
 	print_type(file, type, &vars);
 	map_free(&vars);
 }
 
 internal
-union type *rep(union type *v) {
-	union type *v0 = v->rep;
+Type *rep(Type *v) {
+	Type *v0 = v->rep;
 	while (v0 != v0->rep) {
 		v0 = v0->rep;
 	}
 	while (v->rep != v0) {
-		union type *tmp = v->rep;
+		Type *tmp = v->rep;
 		v->rep = v0;
 		v = tmp;
 	}
@@ -267,7 +267,7 @@ union type *rep(union type *v) {
 }
 
 internal
-union type *deref(union type *type) {
+Type *deref(Type *type) {
 	if (IS_VAR(type)) {
 		type = rep(type);
 		if (type->terms) {

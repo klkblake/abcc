@@ -8,30 +8,30 @@
 #define OP_DEBUG_PRINT_RAW  6
 #define OP_DEBUG_PRINT_TEXT 7
 
-struct ao_stack_frame {
-	struct ao_stack_frame *next;
-	struct string_rc *word;
-	struct string_rc *file;
+typedef struct AOStackFrame {
+	struct AOStackFrame *next;
+	StringRC *word;
+	StringRC *file;
 	u32 line;
 	u32 refcount;
-};
+} AOStackFrame;
 
-struct block {
+typedef struct Block {
 	usize size;
 	u8 *opcodes;
-	union type **types;
-	struct ao_stack_frame **frames;
-	struct block **blocks;
-	struct string_rc **texts;
-	struct string_rc **sealers;
-	struct graph graph;
+	Type **types;
+	AOStackFrame **frames;
+	struct Block **blocks;
+	StringRC **texts;
+	StringRC **sealers;
+	Graph graph;
 	// Unlike for other structs, this is not used for memory management
 	u32 refcount;
-};
-DEFINE_ARRAY(struct block *, block_ptr);
+} Block;
+DEFINE_ARRAY(Block *, BlockPtr);
 
 internal
-void print_backtrace(struct ao_stack_frame *frame) {
+void print_backtrace(AOStackFrame *frame) {
 	printf("Backtrace:\n");
 	if (frame == NULL) {
 		printf("No backtrace data available\n");
@@ -47,15 +47,15 @@ void print_backtrace(struct ao_stack_frame *frame) {
 }
 
 internal
-void ao_stack_frame_free(struct ao_stack_frame frame) {
+void ao_stack_frame_free(AOStackFrame frame) {
 	string_rc_decref(frame.word);
 	string_rc_decref(frame.file);
 }
 
 internal
-void ao_stack_frame_decref(struct ao_stack_frame *frame) {
+void ao_stack_frame_decref(AOStackFrame *frame) {
 	if (--frame->refcount == 0) {
-		struct ao_stack_frame *next = frame->next;
+		AOStackFrame *next = frame->next;
 		ao_stack_frame_free(*frame);
 		free(frame);
 		if (next) {
@@ -65,7 +65,7 @@ void ao_stack_frame_decref(struct ao_stack_frame *frame) {
 }
 
 internal
-void block_free(struct block *block) {
+void block_free(Block *block) {
 	for (usize i = 0, frame_index = 0, text_index = 0, sealer_index = 0; i < block->size; i++) {
 		u8 opcode = block->opcodes[i];
 		if (opcode == OP_FRAME_PUSH) {

@@ -10,20 +10,20 @@ void do_indent(FILE *file, u32 indent) {
 #define out(fmt, ...) do_indent(file, indent); fprintf(file, fmt "\n", ##__VA_ARGS__)
 
 internal
-void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
+void generate(FILE *file, Graph *graph, u64 traversal1, u64 traversal2) {
 	u32 indent = 0;
 	out("");
 	out("static");
 	out("Value block_%u(Value v%u) {", graph->id, OUT0(&graph->input).link_id);
 	indent++;
-	struct node_ptr_array worklist = {};
+	NodePtrArray worklist = {};
 	array_push(&worklist, OUT0(&graph->input).node);
-	for (struct node *constant = graph->constants; constant; constant = constant->next_constant) {
+	for (Node *constant = graph->constants; constant; constant = constant->next_constant) {
 		array_push(&worklist, constant);
 	}
 	graph->input.seen = traversal1;
 	while (worklist.size > 0) {
-		struct node *node = array_pop(&worklist);
+		Node *node = array_pop(&worklist);
 		if (node->seen == traversal1) {
 			continue;
 		}
@@ -38,21 +38,21 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 		}
 		node->seen = traversal1;
 		for (u32 i = 0; i < node->out_count; i++) {
-			struct out_link *link = out_link(node, i);
+			OutLink *link = out_link(node, i);
 			out("Value v%u;", link->link_id);
 			array_push(&worklist, link->node);
 		}
 	}
-	struct node *const MARKER_ELSE = (struct node *)0x1;
-	struct node *const MARKER_END  = (struct node *)0x2;
+	Node *const MARKER_ELSE = (Node *)0x1;
+	Node *const MARKER_END  = (Node *)0x2;
 	u32 return_value = (u32)-1;
 	array_push(&worklist, OUT0(&graph->input).node);
-	for (struct node *constant = graph->constants; constant; constant = constant->next_constant) {
+	for (Node *constant = graph->constants; constant; constant = constant->next_constant) {
 		array_push(&worklist, constant);
 	}
 	graph->input.seen = traversal2;
 	while (worklist.size > 0) {
-		struct node *node = array_pop(&worklist);
+		Node *node = array_pop(&worklist);
 		if (node == MARKER_ELSE) {
 			indent--;
 			out("} else {");
@@ -80,7 +80,7 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 		u32 in[node->in_count];
 		u32 out[node->out_count];
 		for (u32 i = 0; i < node->in_count; i++) {
-			struct in_link *link = in_link(node, i);
+			InLink *link = in_link(node, i);
 			in[i] = out_link(link->node, link->slot)->link_id;
 		}
 		for (u32 i = 0; i < node->out_count; i++) {
@@ -162,7 +162,7 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 				}
 			case UOP_COPY:
 				{
-					union type *in_type = out_link(IN0(node).node, IN0(node).slot)->type;
+					Type *in_type = out_link(IN0(node).node, IN0(node).slot)->type;
 					while (!IS_VAR(in_type) && IS_SEALED(in_type->symbol)) {
 						// FIXME This can loop infinitely if there is a loop of
 						// seals. This is invalid, but we don't check for it.
@@ -354,7 +354,7 @@ void generate(FILE *file, struct graph *graph, u64 traversal1, u64 traversal2) {
 }
 
 internal
-void generate_c(FILE *file, struct block_ptr_array blocks) {
+void generate_c(FILE *file, BlockPtrArray blocks) {
 	u64 traversal1 = global_traversal++;
 	u64 traversal2 = global_traversal++;
 	fprintf(file, "%s", rts_c);

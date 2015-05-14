@@ -24,7 +24,7 @@
 #define MATCH5(s, c0, c1, c2, c3, c4) ((s & 0xffffffffff) == (((u64)c0 << 32) | ((c1) << 24) | ((c2) << 16) | ((c3) << 8) | (c4)))
 
 internal
-void simplify(struct block *block) {
+void simplify(Block *block) {
 	usize new_size = block->size;
 	u8 *ops = block->opcodes;
 	u64 seen = 0;
@@ -150,7 +150,7 @@ void simplify(struct block *block) {
 }
 
 internal
-void peephole_simplify(struct block_ptr_array blocks) {
+void peephole_simplify(BlockPtrArray blocks) {
 	foreach (block, blocks) {
 		simplify(*block);
 	}

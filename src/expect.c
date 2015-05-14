@@ -112,9 +112,9 @@ char *consume(char *directive, u32 *var, u32 indent, u32 loc) {
 			} else {
 				iprintf("} else if (loc%u->symbol == SYMBOL_%s) {", loc, sym);
 			}
-			iprintf("	union type *loc%u = deref(loc%u->child1);", loc + 1, loc);
+			iprintf("	Type *loc%u = deref(loc%u->child1);", loc + 1, loc);
 			directive = consume(directive, var, indent + 1, loc + 1);
-			iprintf("	union type *loc%u = deref(loc%u->child2);", loc + 2, loc);
+			iprintf("	Type *loc%u = deref(loc%u->child2);", loc + 2, loc);
 			directive = consume(directive, var, indent + 1, loc + 2);
 			iprintf("} else {");
 			iprintf("	fail_expect(loc%u);", loc);
@@ -129,7 +129,7 @@ char *consume(char *directive, u32 *var, u32 indent, u32 loc) {
 
 void expect(char *directive) {
 	printf("{\n");
-	printf("	union type *loc0 = deref(input);\n");
+	printf("	Type *loc0 = deref(input);\n");
 	u32 var = 0;
 	directive = consume(directive, &var, 1, 0);
 	char c = *directive;

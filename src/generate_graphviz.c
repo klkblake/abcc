@@ -77,8 +77,8 @@ char *out_port(u32 slot_count, u32 slot) {
 }
 
 internal
-void print_node_link(struct node *from, u32 slot_count, u32 slot, struct type_ptr_u64_map *vars) {
-	struct out_link *to = out_link(from, slot);
+void print_node_link(Node *from, u32 slot_count, u32 slot, TypePtrU64Map *vars) {
+	OutLink *to = out_link(from, slot);
 	printf("node_%p:%s -> node_%p:%s [label=\"",
 	       from, out_port(slot_count, slot), to->node, in_port(to->node->in_count, to->slot));
 	print_type(stdout, to->type, vars);
@@ -86,7 +86,7 @@ void print_node_link(struct node *from, u32 slot_count, u32 slot, struct type_pt
 }
 
 internal
-void print_node(struct node *node, struct graph *graph, u64 traversal, struct type_ptr_u64_map *vars) {
+void print_node(Node *node, Graph *graph, u64 traversal, TypePtrU64Map *vars) {
 	if (node->seen == traversal) {
 		return;
 	}
@@ -108,13 +108,13 @@ void print_node(struct node *node, struct graph *graph, u64 traversal, struct ty
 }
 
 internal
-void print_graph(struct graph *graph, b32 is_main, u64 traversal) {
+void print_graph(Graph *graph, b32 is_main, u64 traversal) {
 	if (!is_main) {
 		printf("subgraph cluster_%p {\n", graph);
 	}
-	struct type_ptr_u64_map vars = {};
+	TypePtrU64Map vars = {};
 	print_node(&graph->input, graph, traversal, &vars);
-	for (struct node *node = graph->constants; node; node = node->next_constant) {
+	for (Node *node = graph->constants; node; node = node->next_constant) {
 		printf("node_%p -> node_%p [style=dotted,weight=0]\n", &graph->input, node);
 		print_node(node, graph, traversal, &vars);
 	}
@@ -125,7 +125,7 @@ void print_graph(struct graph *graph, b32 is_main, u64 traversal) {
 }
 
 internal
-void generate_graphviz(struct block_ptr_array blocks) {
+void generate_graphviz(BlockPtrArray blocks) {
 	printf("digraph {\n");
 	u64 traversal = global_traversal++;
 	foreach (block, blocks) {

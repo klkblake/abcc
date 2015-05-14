@@ -42,63 +42,63 @@ enum uop {
 	UOP_DEBUG_PRINT_TEXT,
 };
 
-struct in_link {
-	struct node *node;
+typedef struct {
+	struct Node *node;
 	u32 slot;
-};
+} InLink;
 
-struct out_link {
-	struct node *node;
+typedef struct {
+	struct Node *node;
 	u32 slot;
 	u32 link_id;
-	union type *type;
-};
+	Type *type;
+} OutLink;
 
-struct in_link_chunk {
-	struct in_link links[3];
-	struct in_link_chunk *next;
-};
+typedef struct InLinkChunk {
+	InLink links[3];
+	struct InLinkChunk *next;
+} InLinkChunk;
 
-struct out_link_chunk {
-	struct out_link links[3];
-	struct out_link_chunk *next;
-};
+typedef struct OutLinkChunk {
+	OutLink links[3];
+	struct OutLinkChunk *next;
+} OutLinkChunk;
 
-struct node {
+typedef struct Node {
 	enum uop uop;
 	u32 in_count;
-	struct in_link_chunk in;
+	InLinkChunk in;
 	u32 out_count;
-	struct out_link_chunk out;
+	OutLinkChunk out;
 	union {
-		struct node *next_constant;
-		struct node *left_constant;
+		struct Node *next_constant;
+		struct Node *left_constant;
 	};
 	union {
-		struct node *right_constant;
-		struct graph *block;
-		struct string_rc *seal;
-		struct string_rc *text;
+		struct Node *right_constant;
+		struct Graph *block;
+		StringRC *seal;
+		StringRC *text;
 		f64 number; // XXX should be a rational
 		b32 boolean;
 	};
 	u64 seen;
-};
-DEFINE_ARRAY(struct node *, node_ptr);
+} Node;
+DEFINE_ARRAY(Node *, NodePtr);
 
-struct graph {
+typedef struct Graph {
 	u32 id;
-	struct node input;
-	struct node output;
-	struct node *constants;
-};
-DEFINE_ARRAY(struct graph, graph);
+	Node input;
+	Node output;
+	Node *constants;
+} Graph;
+DEFINE_ARRAY(Graph, graph);
 
-struct graph_pools {
-	struct pool node_pool;
-	struct pool in_link_pool;
-	struct pool out_link_pool;
-};
+typedef struct {
+	Pool node_pool;
+	Pool in_link_pool;
+	Pool out_link_pool;
+} GraphPools;
 
 #define IN0(node) ((node)->in.links[0])
 #define IN1(node) ((node)->in.links[1])

@@ -1,11 +1,11 @@
 #include "abcc.h"
 
 #define DEFINE_ARRAY(type, name) \
-	struct name ## _array { \
+	typedef struct { \
 		type *data; \
 		usize size; \
 		usize cap; \
-	};
+	} name ## Array;
 
 #define DEFINE_SLICE(type, name) \
 	struct name ## _slice { \
@@ -13,11 +13,11 @@
 		usize size; \
 	};
 
-DEFINE_ARRAY(u8, u8);
+DEFINE_ARRAY(u8, U8);
 
-#define array_grow(array) array_grow_((struct u8_array *) (array), sizeof((array)->data[0]))
+#define array_grow(array) array_grow_((U8Array *) (array), sizeof((array)->data[0]))
 internal
-void array_grow_(struct u8_array *array, usize size) {
+void array_grow_(U8Array *array, usize size) {
 	if (array->cap == 0) {
 		array->cap = 64;
 		array->data = malloc(array->cap * size);
@@ -30,9 +30,9 @@ void array_grow_(struct u8_array *array, usize size) {
 	}
 }
 
-#define array_bump(array, num) array_bump_((struct u8_array *) (array), (num), sizeof((array)->data[0]))
+#define array_bump(array, num) array_bump_((U8Array *) (array), (num), sizeof((array)->data[0]))
 internal
-void *array_bump_(struct u8_array *array, usize num, usize size) {
+void *array_bump_(U8Array *array, usize num, usize size) {
 	while (array->size + num - 1 >= array->cap) {
 		array_grow_(array, size);
 	}
@@ -41,13 +41,13 @@ void *array_bump_(struct u8_array *array, usize num, usize size) {
 }
 
 #define array_push(array, elem) ({ \
-		typeof(array) _array = (array); \
-		*((typeof(_array->data))array_bump(_array, 1)) = elem; \
+		typeof(array) Array = (array); \
+		*((typeof(Array->data))array_bump(Array, 1)) = elem; \
 	})
 
 #define array_pop(array) ({ \
-		typeof(array) _array = (array); \
-		_array->data[_array->size-- - 1]; \
+		typeof(array) Array = (array); \
+		Array->data[Array->size-- - 1]; \
 	})
 
 #define foreach(var, array) \
@@ -56,17 +56,17 @@ void *array_bump_(struct u8_array *array, usize num, usize size) {
 		     var ## _index < (array).size && (var = &(array).data[var ## _index], true); \
 		     var ## _index++)
 
-#define u8_array_push_cstring(buf, str) u8_array_push_many(buf, (u8 *)str, sizeof(str) - 1)
+#define u8Array_push_cstring(buf, str) u8Array_push_many(buf, (u8 *)str, sizeof(str) - 1)
 internal
-void u8_array_push_many(struct u8_array *buf, u8 *str, usize len) {
+void u8Array_push_many(U8Array *buf, u8 *str, usize len) {
 	for (usize i = 0; i < len; i++) {
 		array_push(buf, str[i]);
 	}
 }
 
-#define array_trim(array) array_trim_((struct u8_array *) (array), sizeof((array)->data[0]))
+#define array_trim(array) array_trim_((U8Array *) (array), sizeof((array)->data[0]))
 internal
-void array_trim_(struct u8_array *array, usize size) {
+void array_trim_(U8Array *array, usize size) {
 	if (array->cap) {
 		array->cap = array->size;
 		array->data = realloc(array->data, array->cap * size);
@@ -75,6 +75,6 @@ void array_trim_(struct u8_array *array, usize size) {
 
 internal
 void array_free(void *array) {
-	struct u8_array *array2 = array;
+	U8Array *array2 = array;
 	free(array2->data);
 }
