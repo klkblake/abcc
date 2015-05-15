@@ -16,9 +16,8 @@
 		b32 found; \
 	} name ## MapGetResult;
 
-#define DEFINE_MAP_GROW_SIG(func_name, name) void func_name ## _map_grow(name ## Map *map)
 #define DEFINE_MAP_GROW(key_type, value_type, func_name, name) \
-	DEFINE_MAP_GROW_SIG(func_name, name) { \
+	void func_name ## _map_grow(name ## Map *map) { \
 		usize num_buckets = map->num_buckets * 2; \
 		if (num_buckets == 0) { \
 			num_buckets = 64; \
@@ -49,9 +48,8 @@
 		map->num_buckets = num_buckets; \
 	}
 
-#define DEFINE_MAP_GET_SIG(key_type, func_name, name) name ## MapGetResult func_name ## _map_get(name ## Map *map, key_type key)
 #define DEFINE_MAP_GET(key_type, value_type, func_name, name, hash_func) \
-	DEFINE_MAP_GET_SIG(key_type, func_name, name) { \
+	name ## MapGetResult func_name ## _map_get(name ## Map *map, key_type key) { \
 		if (map->num_buckets == 0) { \
 			func_name ## _map_grow(map); \
 		} \
@@ -70,9 +68,8 @@
 		return (name ## MapGetResult){.bucket = bucket, .found = false}; \
 	}
 
-#define DEFINE_MAP_PUT_BUCKET_SIG(key_type, value_type, func_name, name) void func_name ## _map_put_bucket(name ## Map *map, key_type key, value_type value, usize bucket)
 #define DEFINE_MAP_PUT_BUCKET(key_type, value_type, func_name, name, hash_func) \
-	DEFINE_MAP_PUT_BUCKET_SIG(key_type, value_type, func_name, name) { \
+	void func_name ## _map_put_bucket(name ## Map *map, key_type key, value_type value, usize bucket) { \
 		u32 hash = hash_func(key); \
 		if (hash == 0) { \
 			hash = 0x80000000; \
@@ -85,19 +82,6 @@
 			func_name ## _map_grow(map); \
 		} \
 	}
-
-// TODO remove all usages of these now that we use a unity build
-#define DEFINE_MAP_HEADER(key_type, value_type, func_name, name) \
-	DEFINE_MAP_STRUCT(key_type, value_type, name); \
-	DEFINE_MAP_RESULT_STRUCT(value_type, name); \
-	DEFINE_MAP_GROW_SIG(func_name, name); \
-	DEFINE_MAP_GET_SIG(key_type, func_name, name); \
-	DEFINE_MAP_PUT_BUCKET_SIG(key_type, value_type, func_name, name);
-
-#define DEFINE_MAP_IMPL(key_type, value_type, func_name, name, hash_func) \
-	DEFINE_MAP_GROW(key_type, value_type, func_name, name); \
-	DEFINE_MAP_GET(key_type, value_type, func_name, name, hash_func); \
-	DEFINE_MAP_PUT_BUCKET(key_type, value_type, func_name, name, hash_func);
 
 #define DEFINE_MAP(key_type, value_type, func_name, name, hash_func) \
 	DEFINE_MAP_STRUCT(key_type, value_type, name); \

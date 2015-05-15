@@ -42,10 +42,6 @@ typedef union Type {
 } Type;
 DEFINE_ARRAY(Type *, TypePtr);
 
-DEFINE_MAP_HEADER(Type *, b1, type_ptr_b1, TypePtrB1);
-DEFINE_MAP_HEADER(Type *, u64, type_ptr_u64, TypePtrU64);
-DEFINE_MAP_HEADER(Type *, Type *, type_ptr, TypePtr);
-
 static_assert(offsetof(Type, child1) == offsetof(Type, var_count), "child1 must be unioned with var_count");
 
 #define VAR_BIT (1ull << (sizeof(usize) * 8 - 1))
@@ -56,9 +52,9 @@ u32 type_hash(Type *key) {
 	return (u32) ((u64)key / sizeof(Type));
 }
 
-DEFINE_MAP_IMPL(Type *, b1, type_ptr_b1,TypePtrB1, type_hash);
-DEFINE_MAP_IMPL(Type *, u64, type_ptr_u64, TypePtrU64, type_hash);
-DEFINE_MAP_IMPL(Type *, Type *, type_ptr, TypePtr, type_hash);
+DEFINE_MAP(Type *, b1, type_ptr_b1,TypePtrB1, type_hash);
+DEFINE_MAP(Type *, u64, type_ptr_u64, TypePtrU64, type_hash);
+DEFINE_MAP(Type *, Type *, type_ptr, TypePtr, type_hash);
 
 internal
 u32 var_len(u64 var) {
