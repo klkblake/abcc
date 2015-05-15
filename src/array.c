@@ -7,13 +7,9 @@
 		usize cap; \
 	} name ## Array;
 
-#define DEFINE_SLICE(type, name) \
-	struct name ## _slice { \
-		type *data; \
-		usize size; \
-	};
-
 DEFINE_ARRAY(u8, U8);
+DEFINE_ARRAY(u8 *, U8Ptr);
+DEFINE_ARRAY(usize, USize);
 
 #define array_grow(array) array_grow_((U8Array *) (array), sizeof((array)->data[0]))
 internal

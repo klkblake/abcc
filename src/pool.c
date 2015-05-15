@@ -2,8 +2,6 @@
 
 #define CHUNK_SIZE 512
 
-DEFINE_ARRAY(u8 *, U8Ptr);
-
 typedef struct {
 	U8PtrArray chunks;
 	u32 used;

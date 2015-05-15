@@ -274,8 +274,6 @@ void merge(Type *v1, Type *v2, TypePtrArray *var_stack) {
 	bigV->var_count = r1 + r2 | VAR_BIT;
 }
 
-DEFINE_ARRAY(usize, USize);
-
 internal
 UnificationError commonFrontier(TypePtrArray t_list, TypePtrArray *var_stack) {
 	// TODO benchmark with and without checks for identical nodes

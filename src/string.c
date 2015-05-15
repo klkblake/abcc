@@ -7,6 +7,7 @@ typedef struct {
 	u8 pad[16 - sizeof(usize) - sizeof(u32)];
 	u8 data[];
 } StringRC;
+DEFINE_ARRAY(StringRC *, StringRCPtr);
 
 internal
 void print_string(FILE *out, StringRC *str) {

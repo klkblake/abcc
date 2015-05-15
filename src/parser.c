@@ -127,9 +127,6 @@ void memo_table_maybe_grow(MemoTable *table) {
 		free((table).buckets); \
 	} while (0)
 
-DEFINE_ARRAY(StringRC *, StringRCPtr);
-DEFINE_ARRAY(AOStackFrame *, AOStackFramePtr);
-
 internal
 StringRC *memoise_string_rc(MemoTable *table, u8 *data, usize size) {
 	u32 hash = jenkins_hash(data, size);

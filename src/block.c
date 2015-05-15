@@ -15,6 +15,7 @@ typedef struct AOStackFrame {
 	u32 line;
 	u32 refcount;
 } AOStackFrame;
+DEFINE_ARRAY(AOStackFrame *, AOStackFramePtr);
 
 typedef struct Block {
 	usize size;
