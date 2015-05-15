@@ -73,6 +73,13 @@ OutLink *add_out_link(Graph *graph, Node *node) {
 }
 
 typedef struct {
+	b32 optimise;
+	u32 graph_id;
+	u32 link_id;
+	Pool graph_pool;
+} GraphState;
+
+typedef struct {
 	Node *node;
 	u32 slot;
 	Type *type;
@@ -92,12 +99,12 @@ typedef struct {
 } Link5;
 
 internal inline
-Link append_node01(Graph *graph, u32 *link_id, u8 uop, Type *type) {
+Link append_node01(GraphState *state, Graph *graph, u8 uop, Type *type) {
 	Node *result = alloc_node(graph, uop);
 	result->next_constant = graph->constants;
 	graph->constants = result;
 	OUT0(result).type = type;
-	OUT0(result).link_id = (*link_id)++;
+	OUT0(result).link_id = state->link_id++;
 	result->out_count = 1;
 	return (Link){result, 0, type};
 }
@@ -114,9 +121,8 @@ Node *append_node10(Graph *graph, u8 uop, Link link) {
 }
 
 internal inline
-Link append_node11(Graph *graph, u32 *link_id,
-                          u8 uop, Link link, Type *type, b32 optimise) {
-	if (optimise) {
+Link append_node11(GraphState *state, Graph *graph, u8 uop, Link link, Type *type) {
+	if (state->optimise) {
 		// We ignore assertion errors at this stage. It'll be more
 		// convenient to catch them in future passes
 		u8 prevuop = link.node->uop;
@@ -133,18 +139,17 @@ Link append_node11(Graph *graph, u32 *link_id,
 	}
 	Node *result = append_node10(graph, uop, link);
 	OUT0(result).type = type;
-	OUT0(result).link_id = (*link_id)++;
+	OUT0(result).link_id = state->link_id++;
 	result->out_count = 1;
 	return (Link){result, 0, type};
 }
 
 internal inline
-Link2 append_node12(Graph *graph, u32 *link_id,
-                           u8 uop,
-                           Link link,
-                           Type *type1, Type *type2,
-                           b32 optimise) {
-	if (optimise) {
+Link2 append_node12(GraphState *state, Graph *graph,
+                    u8 uop,
+                    Link link,
+                    Type *type1, Type *type2) {
+	if (state->optimise) {
 		if (uop == UOP_UNPAIR && link.node->uop == UOP_PAIR) {
 			out_link(IN0(link.node).node, IN0(link.node).slot)->node = NULL;
 			out_link(IN1(link.node).node, IN1(link.node).slot)->node = NULL;
@@ -155,7 +160,7 @@ Link2 append_node12(Graph *graph, u32 *link_id,
 		}
 		if (uop == UOP_COPY) {
 			if (is_constant(link.node->uop)) {
-				Link copy = append_node01(graph, link_id, link.node->uop, link.type);
+				Link copy = append_node01(state, graph, link.node->uop, link.type);
 				copy.node->text = link.node->text;
 				return (Link2){{link, copy}};
 			}
@@ -170,19 +175,18 @@ Link2 append_node12(Graph *graph, u32 *link_id,
 	Node *result = append_node10(graph, uop, link);
 	OUT0(result).type = type1;
 	OUT1(result).type = type2;
-	OUT0(result).link_id = (*link_id)++;
-	OUT1(result).link_id = (*link_id)++;
+	OUT0(result).link_id = state->link_id++;
+	OUT1(result).link_id = state->link_id++;
 	result->out_count = 2;
 	return (Link2){{{result, 0, type1}, {result, 1, type2}}};
 }
 
 internal inline
-Link3 append_node13(Graph *graph, u32 *link_id,
-                           u8 uop,
-                           Link link,
-                           Type *type1, Type *type2, Type *type3,
-                           b32 optimise) {
-	if (optimise) {
+Link3 append_node13(GraphState *state, Graph *graph,
+                    u8 uop,
+                    Link link,
+                    Type *type1, Type *type2, Type *type3) {
+	if (state->optimise) {
 		if (uop == UOP_UNSUM  && link.node->uop == UOP_SUM) {
 			out_link(IN0(link.node).node, IN0(link.node).slot)->node = NULL;
 			out_link(IN1(link.node).node, IN1(link.node).slot)->node = NULL;
@@ -198,9 +202,9 @@ Link3 append_node13(Graph *graph, u32 *link_id,
 	OUT0(result).type = type1;
 	OUT1(result).type = type2;
 	OUT2(result).type = type3;
-	OUT0(result).link_id = (*link_id)++;
-	OUT1(result).link_id = (*link_id)++;
-	OUT2(result).link_id = (*link_id)++;
+	OUT0(result).link_id = state->link_id++;
+	OUT1(result).link_id = state->link_id++;
+	OUT2(result).link_id = state->link_id++;
 	result->out_count = 3;
 	return (Link3){{{result, 0, type1}, {result, 1, type2}, {result, 2, type3}}};
 }
@@ -223,12 +227,11 @@ Node *append_node20(Graph *graph, u8 uop, Link link1, Link link2) {
 }
 
 internal inline
-Link append_node21(Graph *graph, u32 *link_id,
-                          u8 uop,
-                          Link link1, Link link2,
-                          Type *type,
-                          b32 optimise) {
-	if (optimise) {
+Link append_node21(GraphState *state, Graph *graph,
+                   u8 uop,
+                   Link link1, Link link2,
+                   Type *type) {
+	if (state->optimise) {
 		if (uop == UOP_AND) {
 			if (link1.node->uop == UOP_BOOL_CONSTANT && link1.node->boolean) {
 				delete_constant(graph, link1.node);
@@ -250,21 +253,21 @@ Link append_node21(Graph *graph, u32 *link_id,
 	}
 	Node *result = append_node20(graph, uop, link1, link2);
 	OUT0(result).type = type;
-	OUT0(result).link_id = (*link_id)++;
+	OUT0(result).link_id = state->link_id++;
 	result->out_count = 1;
 	return (Link){result, 0, type};
 }
 
 internal inline
-Link2 append_node22(Graph *graph, u32 *link_id,
-                           u8 uop,
-			   Link link1, Link link2,
-                           Type *type1, Type *type2) {
+Link2 append_node22(GraphState *state, Graph *graph,
+                    u8 uop,
+                    Link link1, Link link2,
+                    Type *type1, Type *type2) {
 	Node *result = append_node20(graph, uop, link1, link2);
 	OUT0(result).type = type1;
 	OUT1(result).type = type2;
-	OUT0(result).link_id = (*link_id)++;
-	OUT1(result).link_id = (*link_id)++;
+	OUT0(result).link_id = state->link_id++;
+	OUT1(result).link_id = state->link_id++;
 	result->out_count = 2;
 	return (Link2){{{result, 0, type1}, {result, 1, type2}}};
 }
@@ -292,13 +295,13 @@ Node *append_node30(Graph *graph, u8 uop, Link link1, Link link2, Link link3) {
 }
 
 internal inline
-Link append_node31(Graph *graph, u32 *link_id,
-                          u8 uop,
-                          Link link1, Link link2, Link link3,
-                          Type *type) {
+Link append_node31(GraphState *state, Graph *graph,
+                   u8 uop,
+                   Link link1, Link link2, Link link3,
+                   Type *type) {
 	Node *result = append_node30(graph, uop, link1, link2, link3);
 	OUT0(result).type = type;
-	OUT0(result).link_id = (*link_id)++;
+	OUT0(result).link_id = state->link_id++;
 	result->out_count = 1;
 	return (Link){result, 0, type};
 }
@@ -309,85 +312,83 @@ Link append_node31(Graph *graph, u32 *link_id,
 #define child2(type) deref((type)->child2)
 
 internal inline
-Link2 unpair_(Graph *graph, u32 *link_id, Link link, b32 optimise) {
+Link2 unpair_(GraphState *state, Graph *graph, Link link) {
 	assert_product(link.type);
-	return append_node12(graph, link_id, UOP_UNPAIR, link, child1(link.type), child2(link.type), optimise);
+	return append_node12(state, graph, UOP_UNPAIR, link, child1(link.type), child2(link.type));
 }
 
 internal inline
-Link3 unpair2_(Graph *graph, u32 *link_id, Link link, b32 optimise) {
-	Link2 outer = unpair_(graph, link_id, link, optimise);
-	Link2 inner = unpair_(graph, link_id, outer.l[1], optimise);
+Link3 unpair2_(GraphState *state, Graph *graph, Link link) {
+	Link2 outer = unpair_(state, graph, link);
+	Link2 inner = unpair_(state, graph, outer.l[1]);
 	return (Link3){{outer.l[0], inner.l[0], inner.l[1]}};
 }
 
 internal inline
-Link pair2_(Graph *graph, u32 *link_id,
-                   Link link1, Link link2, Link link3,
-                   Type *type,
-                   b32 optimise) {
+Link pair2_(GraphState *state, Graph *graph,
+            Link link1, Link link2, Link link3,
+            Type *type) {
 	assert_product(type);
-	Link right = append_node21(graph, link_id, UOP_PAIR, link2, link3, child2(type), optimise);
-	return append_node21(graph, link_id, UOP_PAIR, link1, right, type, optimise);
+	Link right = append_node21(state, graph, UOP_PAIR, link2, link3, child2(type));
+	return append_node21(state, graph, UOP_PAIR, link1, right, type);
 }
 
 internal inline
-Link3 unsum_(Graph *graph, u32 *link_id, Link link, Type *bool_type, b32 optimise) {
+Link3 unsum_(GraphState *state, Graph *graph, Link link, Type *bool_type) {
 	assert_sum(link.type);
-	return append_node13(graph, link_id, UOP_UNSUM, link,
-	                     child1(link.type), child2(link.type), bool_type,
-	                     optimise);
+	return append_node13(state, graph, UOP_UNSUM, link,
+	                     child1(link.type), child2(link.type), bool_type);
 }
 
 internal inline
-Link5 unsum2_(Graph *graph, u32 *link_id, Link link, Type *bool_type, b32 optimise) {
-	Link3 outer = unsum_(graph, link_id, link, bool_type, optimise);
-	Link3 inner = unsum_(graph, link_id, outer.l[1], bool_type, optimise);
+Link5 unsum2_(GraphState *state, Graph *graph, Link link, Type *bool_type) {
+	Link3 outer = unsum_(state, graph, link, bool_type);
+	Link3 inner = unsum_(state, graph, outer.l[1], bool_type);
 	return (Link5){{outer.l[0], inner.l[0], inner.l[1], outer.l[2], inner.l[2]}};
 }
 
 internal inline
-Link sum2_(Graph *graph, u32 *link_id,
-                   Link link1, Link link2, Link link3, Link link4, Link link5,
-                   Type *type) {
+Link sum2_(GraphState *state, Graph *graph,
+           Link link1, Link link2, Link link3, Link link4, Link link5,
+           Type *type) {
 	assert_sum(type);
-	Link right = append_node31(graph, link_id, UOP_SUM, link2, link3, link5, child2(type));
-	return append_node31(graph, link_id, UOP_SUM, link1, right, link4, type);
+	Link right = append_node31(state, graph, UOP_SUM, link2, link3, link5, child2(type));
+	return append_node31(state, graph, UOP_SUM, link1, right, link4, type);
 }
 
 internal
-void build_graph(Block *block, u32 graph_id, u32 *link_id, Type *bool_type, b32 optimise) {
+void build_graph(GraphState *state, Block *block, Type *bool_type) {
 	if (block->size == 0) {
 		return;
 	}
 	Graph *graph = &block->graph;
-#define append01(uop, type) append_node01(graph, link_id, (uop), (type))
+#define append01(uop, type) append_node01(state, graph, (uop), (type))
 #define append10(uop, link) append_node10(graph, (uop), (link))
-#define append11(uop, link, type) append_node11(graph, link_id, (uop), (link), (type), optimise)
-#define append12(uop, link, type1, type2) append_node12(graph, link_id, (uop), (link), (type1), (type2), optimise)
+#define append11(uop, link, type) append_node11(state, graph, (uop), (link), (type))
+#define append12(uop, link, type1, type2) append_node12(state, graph, (uop), (link), (type1), (type2))
 #define append20(uop, link1, link2) append_node20(graph, (uop), (link1), (link2))
 #define append21(uop, link1, link2, type) \
-	append_node21(graph, link_id, (uop), (link1), (link2), (type), optimise)
+	append_node21(state, graph, (uop), (link1), (link2), (type))
 #define append22(uop, link1, link2, type1, type2) \
-	append_node22(graph, link_id, (uop), (link1), (link2), (type1), (type2))
+	append_node22(state, graph, (uop), (link1), (link2), (type1), (type2))
 #define append31(uop, link1, link2, link3, type) \
-	append_node31(graph, link_id, (uop), (link1), (link2), (link3), (type))
-#define unpair(link) unpair_(graph, link_id, (link), optimise)
-#define unpair2(link) unpair2_(graph, link_id, (link), optimise)
+	append_node31(state, graph, (uop), (link1), (link2), (link3), (type))
+#define unpair(link) unpair_(state, graph, (link))
+#define unpair2(link) unpair2_(state, graph, (link))
 #define pair(link1, link2, type) append21(UOP_PAIR, (link1), (link2), (type))
 #define pair2(link1, link2, link3, type) \
-	pair2_(graph, link_id, (link1), (link2), (link3), (type), optimise)
-#define unsum(link) unsum_(graph, link_id, (link), bool_type, optimise)
-#define unsum2(link) unsum2_(graph, link_id, (link), bool_type, optimise)
+	pair2_(state, graph, (link1), (link2), (link3), (type))
+#define unsum(link) unsum_(state, graph, (link), bool_type)
+#define unsum2(link) unsum2_(state, graph, (link), bool_type)
 #define sum(link1, link2, link3, type) append31(UOP_SUM, (link1), (link2), (link3), (type))
 #define sum2(link1, link2, link3, link4, link5, type) \
-	sum2_(graph, link_id, (link1), (link2), (link3), (link4), (link5), (type))
+	sum2_(state, graph, (link1), (link2), (link3), (link4), (link5), (type))
 #define and(link1, link2) append21(UOP_AND, (link1), (link2), bool_type)
 #define or(link1, link2) append21(UOP_OR, (link1), (link2), bool_type)
 #define not(link) append11(UOP_NOT, (link), bool_type)
-	graph->id = graph_id;
+	graph->id = state->graph_id++;
 	OUT0(&graph->input).type = deref(block->types[0]);
-	OUT0(&graph->input).link_id = (*link_id)++;
+	OUT0(&graph->input).link_id = state->link_id++;
 	graph->input.out_count = 1;
 	Link last = {&graph->input, 0, OUT0(&graph->input).type};
 	AOStackFrame *frame = NULL;
@@ -848,11 +849,11 @@ void build_graph(Block *block, u32 graph_id, u32 *link_id, Type *bool_type, b32 
 					OUT2(greater).type = g2.type;
 					OUT3(greater).type = g3.type;
 					OUT4(greater).type = g4.type;
-					OUT0(greater).link_id = (*link_id)++;
-					OUT1(greater).link_id = (*link_id)++;
-					OUT2(greater).link_id = (*link_id)++;
-					OUT3(greater).link_id = (*link_id)++;
-					OUT4(greater).link_id = (*link_id)++;
+					OUT0(greater).link_id = state->link_id++;
+					OUT1(greater).link_id = state->link_id++;
+					OUT2(greater).link_id = state->link_id++;
+					OUT3(greater).link_id = state->link_id++;
+					OUT4(greater).link_id = state->link_id++;
 					greater->out_count = 5;
 					assert_product(output_type);
 					Type *type = child1(output_type);
@@ -879,11 +880,12 @@ void build_graph(Block *block, u32 graph_id, u32 *link_id, Type *bool_type, b32 
 	IN0(&graph->output).slot = last.slot;
 }
 
-// TODO move the link_id stuff into generate_c
+// TODO consider moving the link_id stuff into generate_c
 internal
 void build_graphs(BlockPtrArray blocks, Type *bool_type, b32 optimise) {
-	u32 link_id = 0;
+	GraphState state = {};
+	state.optimise = optimise;
 	foreach (block, blocks) {
-		build_graph(*block, (u32)(blocks.size - block_index - 1), &link_id, bool_type, optimise);
+		build_graph(&state, *block, bool_type);
 	}
 }
