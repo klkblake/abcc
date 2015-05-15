@@ -75,6 +75,9 @@ typedef struct Node {
 		struct Node *left_constant;
 	};
 	union {
+		// All fields should be pointer sized or less, so we can copy
+		// whichever is the active one by copying one of the pointers
+		// without caring which one is active
 		struct Node *right_constant;
 		struct Graph *block;
 		StringRC *seal;

@@ -102,7 +102,8 @@ b32 is_constant(u8 uop) {
 	        uop == UOP_VOID_CONSTANT   ||
 		uop == UOP_BLOCK_CONSTANT  ||
 		uop == UOP_NUMBER_CONSTANT ||
-		uop == UOP_TEXT_CONSTANT);
+		uop == UOP_TEXT_CONSTANT   ||
+		uop == UOP_BOOL_CONSTANT);
 }
 
 internal inline
@@ -146,6 +147,9 @@ Link2 append_node12(Graph *graph, u32 *link_id,
 			}};
 		}
 		if (uop == UOP_COPY && is_constant(link.node->uop)) {
+			Link copy = append_node01(graph, link_id, link.node->uop, link.type);
+			copy.node->text = link.node->text;
+			return (Link2){{link, copy}};
 		}
 	}
 	Node *result = append_node10(graph, uop, link);
