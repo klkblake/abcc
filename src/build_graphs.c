@@ -141,7 +141,7 @@ Link append_node11(GraphState *state, Graph *graph, u8 uop, Link link, Type *typ
 		if (uop == UOP_ASSERT_NONZERO && prevuop == UOP_NUMBER_CONSTANT) {
 			// XXX This is bogus, but it doesn't matter because it
 			// will be replaced by exact rationals soon anyway.
-			if (link.node->number < 0.00000000001f && link.node->number > -0.00000000001f) {
+			if (link.node->number > 0.00000000001f || link.node->number < -0.00000000001f) {
 				return link;
 			}
 		}
@@ -156,6 +156,7 @@ Link append_node11(GraphState *state, Graph *graph, u8 uop, Link link, Type *typ
 			Type *output_type = child2(type);
 			assert_product(output_type);
 			quoted = alloc(&state->graph_pool, sizeof(Graph));
+			quoted->id = state->graph_id++;
 			quoted->input.out_count = 1;
 			OUT0(&quoted->input).type = input_type;
 			OUT0(&quoted->input).link_id = state->link_id++;
@@ -206,7 +207,7 @@ Link2 append_node12(GraphState *state, Graph *graph,
 			if (does_implicit_copies(link.node->uop)) {
 				OutLink *copy = add_out_link(graph, link.node);
 				copy->type = type2;
-				copy->link_id = out_link(link.node, link.slot)->link_id;
+				copy->link_id = state->link_id++;
 				return (Link2){{link, {link.node, link.node->out_count - 1, type2}}};
 			}
 		}

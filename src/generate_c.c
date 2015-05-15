@@ -254,16 +254,25 @@ void generate(FILE *file, Graph *graph, u64 traversal1, u64 traversal2) {
 			case UOP_AND:
 				{
 					out("v%u.boolean = v%u.boolean && v%u.boolean;", out[0], in[0], in[1]);
+					for (u32 i = 1; i < node->out_count; i++) {
+						out("v%u.boolean = v%u.boolean;", out[i], out[0]);
+					}
 					break;
 				}
 			case UOP_OR:
 				{
 					out("v%u.boolean = v%u.boolean || v%u.boolean;", out[0], in[0], in[1]);
+					for (u32 i = 1; i < node->out_count; i++) {
+						out("v%u.boolean = v%u.boolean;", out[i], out[0]);
+					}
 					break;
 				}
 			case UOP_NOT:
 				{
 					out("v%u.boolean = !v%u.boolean;", out[0], in[0]);
+					for (u32 i = 1; i < node->out_count; i++) {
+						out("v%u.boolean = v%u.boolean;", out[i], out[0]);
+					}
 					break;
 				}
 			case UOP_DISTRIB:

@@ -643,7 +643,7 @@ Value apply(Block *block, Value value) {
 	__builtin_unreachable();
 }
 
-static Value block_0 (Value input);
+static Value block_0(Value input);
 
 static __attribute__((used))
 u32 main(u32 argc, char **argv) {
