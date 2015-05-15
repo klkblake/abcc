@@ -94,6 +94,7 @@ typedef struct Graph {
 	Node input;
 	Node output;
 	Node *constants;
+	struct Graph *quoted;
 
 	Pool node_pool;
 	Pool in_link_pool;

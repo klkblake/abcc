@@ -98,6 +98,15 @@ typedef struct {
 	Link l[5];
 } Link5;
 
+#define assert_product(type) assert(!IS_VAR(type) && (type)->symbol == SYMBOL_PRODUCT)
+#define assert_sum(type)     assert(!IS_VAR(type) && (type)->symbol == SYMBOL_SUM)
+#define assert_block(type)   assert(!IS_VAR(type) && ((type)->symbol & POLYMORPHIC_MASK) == SYMBOL_BLOCK)
+#define child1(type) deref((type)->child1)
+#define child2(type) deref((type)->child2)
+
+// We need this to construct pairs for some of the optimisations
+internal Link append_node21(GraphState *state, Graph *graph, u8 uop, Link link1, Link link2, Type *type);
+
 internal inline
 Link append_node01(GraphState *state, Graph *graph, u8 uop, Type *type) {
 	Node *result = alloc_node(graph, uop);
@@ -135,6 +144,36 @@ Link append_node11(GraphState *state, Graph *graph, u8 uop, Link link, Type *typ
 			if (link.node->number < 0.00000000001f && link.node->number > -0.00000000001f) {
 				return link;
 			}
+		}
+		if (uop == UOP_QUOTE && prevuop == UOP_BLOCK_CONSTANT) {
+			Graph *quoted = link.node->block->quoted;
+			if (quoted) {
+				link.node->block = quoted;
+				return link;
+			}
+			assert_block(type);
+			Type *input_type = child1(type);
+			Type *output_type = child2(type);
+			assert_product(output_type);
+			quoted = alloc(&state->graph_pool, sizeof(Graph));
+			quoted->input.out_count = 1;
+			OUT0(&quoted->input).type = input_type;
+			OUT0(&quoted->input).link_id = state->link_id++;
+			Link input = {&quoted->input, 0, input_type};
+			Link block = append_node01(state, quoted, UOP_BLOCK_CONSTANT, child1(output_type));
+			block.node->block = link.node->block;
+			Link output = append_node21(state, quoted, UOP_PAIR, block, input, output_type);
+			OUT0(output.node).node = &quoted->output;
+			OUT0(output.node).slot = 0;
+			IN0(&quoted->output).node = output.node;
+			IN0(&quoted->output).slot = output.slot;
+			quoted->output.uop = UOP_END;
+			quoted->output.in_count = 1;
+			link.node->block->quoted = quoted;
+			link.node->block = quoted;
+			link.type = type;
+			OUT0(link.node).type = type;
+			return link;
 		}
 	}
 	Node *result = append_node10(graph, uop, link);
@@ -305,11 +344,6 @@ Link append_node31(GraphState *state, Graph *graph,
 	result->out_count = 1;
 	return (Link){result, 0, type};
 }
-
-#define assert_product(type) assert(!IS_VAR(type) && (type)->symbol == SYMBOL_PRODUCT)
-#define assert_sum(type)     assert(!IS_VAR(type) && (type)->symbol == SYMBOL_SUM)
-#define child1(type) deref((type)->child1)
-#define child2(type) deref((type)->child2)
 
 internal inline
 Link2 unpair_(GraphState *state, Graph *graph, Link link) {

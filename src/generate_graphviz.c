@@ -135,6 +135,9 @@ void generate_graphviz(BlockPtrArray blocks) {
 	u64 traversal = global_traversal++;
 	foreach (block, blocks) {
 		print_graph(&(*block)->graph, block_index == blocks.size - 1, traversal);
+		if ((*block)->graph.quoted) {
+			print_graph((*block)->graph.quoted, false, traversal);
+		}
 	}
 	printf("}\n");
 }

@@ -360,5 +360,8 @@ void generate_c(FILE *file, BlockPtrArray blocks) {
 	fprintf(file, "%s", rts_c);
 	foreach (block, blocks) {
 		generate(file, &(*block)->graph, traversal1, traversal2);
+		if ((*block)->graph.quoted) {
+			generate(file, (*block)->graph.quoted, traversal1, traversal2);
+		}
 	}
 }
