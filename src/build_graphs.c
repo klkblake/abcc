@@ -919,8 +919,10 @@ void build_graph(GraphState *state, Block *block, Type *bool_type) {
 internal
 void build_graphs(BlockPtrArray blocks, Type *bool_type, b32 optimise) {
 	GraphState state = {};
+	state.graph_id = 1;
 	state.optimise = optimise;
 	foreach (block, blocks) {
 		build_graph(&state, *block, bool_type);
 	}
+	blocks.data[blocks.size - 1]->graph.id = 0;
 }
