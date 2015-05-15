@@ -8,6 +8,23 @@ Node *alloc_node(Graph *graph, enum uop uop) {
 }
 
 internal
+void delete_constant(Graph *graph, Node *node) {
+	if (graph->constants == node) {
+		graph->constants = node->next_constant;
+	} else {
+		Node *constant = graph->constants;
+		while (constant) {
+			if (constant->next_constant == node) {
+				constant->next_constant = node->next_constant;
+				break;
+			}
+			constant = constant->next_constant;
+		}
+	}
+	// TODO Add to free list
+}
+
+internal
 InLink *in_link(Node *node, u32 index) {
 	InLinkChunk *chunk = &node->in;
 	while (index >= array_count(chunk->links)) {
@@ -211,7 +228,28 @@ internal inline
 Link append_node21(Graph *graph, u32 *link_id,
                           u8 uop,
                           Link link1, Link link2,
-                          Type *type) {
+                          Type *type,
+                          b32 optimise) {
+	if (optimise) {
+		if (uop == UOP_AND) {
+			if (link1.node->uop == UOP_BOOL_CONSTANT && link1.node->boolean) {
+				delete_constant(graph, link1.node);
+				return link2;
+			}
+			if (link2.node->uop == UOP_BOOL_CONSTANT && link2.node->boolean) {
+				delete_constant(graph, link2.node);
+				return link1;
+			}
+			if (link1.node->uop == UOP_BOOL_CONSTANT && !link1.node->boolean) {
+				append_node10(graph, UOP_DROP, link2);
+				return link1;
+			}
+			if (link2.node->uop == UOP_BOOL_CONSTANT && !link2.node->boolean) {
+				append_node10(graph, UOP_DROP, link1);
+				return link2;
+			}
+		}
+	}
 	Node *result = append_node20(graph, uop, link1, link2);
 	OUT0(result).type = type;
 	OUT0(result).link_id = (*link_id)++;
@@ -288,10 +326,11 @@ Link3 unpair2_(Graph *graph, u32 *link_id, Link link, b32 optimise) {
 internal inline
 Link pair2_(Graph *graph, u32 *link_id,
                    Link link1, Link link2, Link link3,
-                   Type *type) {
+                   Type *type,
+                   b32 optimise) {
 	assert_product(type);
-	Link right = append_node21(graph, link_id, UOP_PAIR, link2, link3, child2(type));
-	return append_node21(graph, link_id, UOP_PAIR, link1, right, type);
+	Link right = append_node21(graph, link_id, UOP_PAIR, link2, link3, child2(type), optimise);
+	return append_node21(graph, link_id, UOP_PAIR, link1, right, type, optimise);
 }
 
 internal inline
@@ -330,7 +369,7 @@ void build_graph(Block *block, u32 graph_id, u32 *link_id, Type *bool_type, b32 
 #define append12(uop, link, type1, type2) append_node12(graph, link_id, (uop), (link), (type1), (type2), optimise)
 #define append20(uop, link1, link2) append_node20(graph, (uop), (link1), (link2))
 #define append21(uop, link1, link2, type) \
-	append_node21(graph, link_id, (uop), (link1), (link2), (type))
+	append_node21(graph, link_id, (uop), (link1), (link2), (type), optimise)
 #define append22(uop, link1, link2, type1, type2) \
 	append_node22(graph, link_id, (uop), (link1), (link2), (type1), (type2))
 #define append31(uop, link1, link2, link3, type) \
@@ -339,7 +378,7 @@ void build_graph(Block *block, u32 graph_id, u32 *link_id, Type *bool_type, b32 
 #define unpair2(link) unpair2_(graph, link_id, (link), optimise)
 #define pair(link1, link2, type) append21(UOP_PAIR, (link1), (link2), (type))
 #define pair2(link1, link2, link3, type) \
-	pair2_(graph, link_id, (link1), (link2), (link3), (type))
+	pair2_(graph, link_id, (link1), (link2), (link3), (type), optimise)
 #define unsum(link) unsum_(graph, link_id, (link), bool_type, optimise)
 #define unsum2(link) unsum2_(graph, link_id, (link), bool_type, optimise)
 #define sum(link1, link2, link3, type) append31(UOP_SUM, (link1), (link2), (link3), (type))
