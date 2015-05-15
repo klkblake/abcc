@@ -31,6 +31,7 @@ char *help_text =
 	"  -e, --executable  Output an executable (default)\n"
 	"  -G, --graphviz    Output the dataflow graph in graphviz format\n"
 	"  -C, --c           Output the generated C source\n"
+	"  -T, --save-temps  Save temporary source files\n"
 	"  -v, --verbose     Display verbose output\n";
 
 internal
@@ -42,6 +43,7 @@ struct option long_options[] = {
 	{ "executable", no_argument, NULL, 'e' },
 	{ "graphviz",   no_argument, NULL, 'G' },
 	{ "c",          no_argument, NULL, 'C' },
+	{ "save-temps", no_argument, NULL, 'T' },
 	{ "verbose",    no_argument, NULL, 'v' },
 };
 
@@ -62,8 +64,9 @@ int main(int argc, char **argv) {
 	} output = OUTPUT_EXECUTABLE;
 	u32 optlevel = 1;
 	b32 debug = false;
+	b32 save_temps = false;
 	while (true) {
-		i32 option = getopt_long(argc, argv, "hctO::eGCv", long_options, NULL);
+		i32 option = getopt_long(argc, argv, "hctO::eGCTv", long_options, NULL);
 		if (option == -1) {
 			break;
 		}
@@ -104,6 +107,9 @@ int main(int argc, char **argv) {
 				break;
 			case 'C':
 				output = OUTPUT_C;
+				break;
+			case 'T':
+				save_temps = true;
 				break;
 			case 'v':
 				global_verbose = true;
@@ -213,10 +219,14 @@ int main(int argc, char **argv) {
 				memcpy(new_exe + oldwd_size, "/a.out", 7);
 				DIE_IF(rename("a.out", new_exe));
 
-				DIE_IF(remove(cname));
-				DIE_IF(remove(llname));
-				DIE_IF(chdir(oldwd));
-				DIE_IF(remove(dirname));
+				if (save_temps) {
+					fprintf(stderr, "Temporary files saved to %s\n", dirname);
+				} else {
+					DIE_IF(remove(cname));
+					DIE_IF(remove(llname));
+					DIE_IF(chdir(oldwd));
+					DIE_IF(remove(dirname));
+				}
 				break;
 			}
 		case OUTPUT_GRAPHVIZ:
