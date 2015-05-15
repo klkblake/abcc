@@ -10,10 +10,11 @@ void do_indent(FILE *file, u32 indent) {
 #define out(fmt, ...) do_indent(file, indent); fprintf(file, fmt "\n", ##__VA_ARGS__)
 
 internal
-void generate(FILE *file, Graph *graph, u64 traversal1, u64 traversal2) {
+void generate(FILE *file, u32 *link_id, Graph *graph, u64 traversal1, u64 traversal2) {
 	u32 indent = 0;
 	out("");
 	out("static");
+	OUT0(&graph->input).link_id = (*link_id)++;
 	out("Value block_%u(Value v%u) {", graph->id, OUT0(&graph->input).link_id);
 	indent++;
 	NodePtrArray worklist = {};
@@ -39,6 +40,7 @@ void generate(FILE *file, Graph *graph, u64 traversal1, u64 traversal2) {
 		node->seen = traversal1;
 		for (u32 i = 0; i < node->out_count; i++) {
 			OutLink *link = out_link(node, i);
+			link->link_id = (*link_id)++;
 			out("Value v%u;", link->link_id);
 			array_push(&worklist, link->node);
 		}
@@ -366,11 +368,12 @@ internal
 void generate_c(FILE *file, BlockPtrArray blocks) {
 	u64 traversal1 = global_traversal++;
 	u64 traversal2 = global_traversal++;
+	u32 link_id = 0;
 	fprintf(file, "%s", rts_c);
 	foreach (block, blocks) {
-		generate(file, &(*block)->graph, traversal1, traversal2);
+		generate(file, &link_id, &(*block)->graph, traversal1, traversal2);
 		if ((*block)->graph.quoted) {
-			generate(file, (*block)->graph.quoted, traversal1, traversal2);
+			generate(file, &link_id, (*block)->graph.quoted, traversal1, traversal2);
 		}
 	}
 }

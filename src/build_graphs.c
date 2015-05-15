@@ -75,7 +75,6 @@ OutLink *add_out_link(Graph *graph, Node *node) {
 typedef struct {
 	b32 optimise;
 	u32 graph_id;
-	u32 link_id;
 	Pool graph_pool;
 } GraphState;
 
@@ -113,7 +112,6 @@ Link append_node01(GraphState *state, Graph *graph, u8 uop, Type *type) {
 	result->next_constant = graph->constants;
 	graph->constants = result;
 	OUT0(result).type = type;
-	OUT0(result).link_id = state->link_id++;
 	result->out_count = 1;
 	return (Link){result, 0, type};
 }
@@ -159,7 +157,6 @@ Link append_node11(GraphState *state, Graph *graph, u8 uop, Link link, Type *typ
 			quoted->id = state->graph_id++;
 			quoted->input.out_count = 1;
 			OUT0(&quoted->input).type = input_type;
-			OUT0(&quoted->input).link_id = state->link_id++;
 			Link input = {&quoted->input, 0, input_type};
 			Link block = append_node01(state, quoted, UOP_BLOCK_CONSTANT, child1(output_type));
 			block.node->block = link.node->block;
@@ -179,7 +176,6 @@ Link append_node11(GraphState *state, Graph *graph, u8 uop, Link link, Type *typ
 	}
 	Node *result = append_node10(graph, uop, link);
 	OUT0(result).type = type;
-	OUT0(result).link_id = state->link_id++;
 	result->out_count = 1;
 	return (Link){result, 0, type};
 }
@@ -207,7 +203,6 @@ Link2 append_node12(GraphState *state, Graph *graph,
 			if (does_implicit_copies(link.node->uop)) {
 				OutLink *copy = add_out_link(graph, link.node);
 				copy->type = type2;
-				copy->link_id = state->link_id++;
 				return (Link2){{link, {link.node, link.node->out_count - 1, type2}}};
 			}
 		}
@@ -215,8 +210,6 @@ Link2 append_node12(GraphState *state, Graph *graph,
 	Node *result = append_node10(graph, uop, link);
 	OUT0(result).type = type1;
 	OUT1(result).type = type2;
-	OUT0(result).link_id = state->link_id++;
-	OUT1(result).link_id = state->link_id++;
 	result->out_count = 2;
 	return (Link2){{{result, 0, type1}, {result, 1, type2}}};
 }
@@ -242,9 +235,6 @@ Link3 append_node13(GraphState *state, Graph *graph,
 	OUT0(result).type = type1;
 	OUT1(result).type = type2;
 	OUT2(result).type = type3;
-	OUT0(result).link_id = state->link_id++;
-	OUT1(result).link_id = state->link_id++;
-	OUT2(result).link_id = state->link_id++;
 	result->out_count = 3;
 	return (Link3){{{result, 0, type1}, {result, 1, type2}, {result, 2, type3}}};
 }
@@ -293,7 +283,6 @@ Link append_node21(GraphState *state, Graph *graph,
 	}
 	Node *result = append_node20(graph, uop, link1, link2);
 	OUT0(result).type = type;
-	OUT0(result).link_id = state->link_id++;
 	result->out_count = 1;
 	return (Link){result, 0, type};
 }
@@ -306,8 +295,6 @@ Link2 append_node22(GraphState *state, Graph *graph,
 	Node *result = append_node20(graph, uop, link1, link2);
 	OUT0(result).type = type1;
 	OUT1(result).type = type2;
-	OUT0(result).link_id = state->link_id++;
-	OUT1(result).link_id = state->link_id++;
 	result->out_count = 2;
 	return (Link2){{{result, 0, type1}, {result, 1, type2}}};
 }
@@ -341,7 +328,6 @@ Link append_node31(GraphState *state, Graph *graph,
                    Type *type) {
 	Node *result = append_node30(graph, uop, link1, link2, link3);
 	OUT0(result).type = type;
-	OUT0(result).link_id = state->link_id++;
 	result->out_count = 1;
 	return (Link){result, 0, type};
 }
@@ -423,7 +409,6 @@ void build_graph(GraphState *state, Block *block, Type *bool_type) {
 #define not(link) append11(UOP_NOT, (link), bool_type)
 	graph->id = state->graph_id++;
 	OUT0(&graph->input).type = deref(block->types[0]);
-	OUT0(&graph->input).link_id = state->link_id++;
 	graph->input.out_count = 1;
 	Link last = {&graph->input, 0, OUT0(&graph->input).type};
 	AOStackFrame *frame = NULL;
@@ -884,11 +869,6 @@ void build_graph(GraphState *state, Block *block, Type *bool_type) {
 					OUT2(greater).type = g2.type;
 					OUT3(greater).type = g3.type;
 					OUT4(greater).type = g4.type;
-					OUT0(greater).link_id = state->link_id++;
-					OUT1(greater).link_id = state->link_id++;
-					OUT2(greater).link_id = state->link_id++;
-					OUT3(greater).link_id = state->link_id++;
-					OUT4(greater).link_id = state->link_id++;
 					greater->out_count = 5;
 					assert_product(output_type);
 					Type *type = child1(output_type);
@@ -915,7 +895,6 @@ void build_graph(GraphState *state, Block *block, Type *bool_type) {
 	IN0(&graph->output).slot = last.slot;
 }
 
-// TODO consider moving the link_id stuff into generate_c
 internal
 void build_graphs(BlockPtrArray blocks, Type *bool_type, b32 optimise) {
 	GraphState state = {};
