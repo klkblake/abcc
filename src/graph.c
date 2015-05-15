@@ -91,14 +91,12 @@ typedef struct Graph {
 	Node input;
 	Node output;
 	Node *constants;
-} Graph;
-DEFINE_ARRAY(Graph, graph);
 
-typedef struct {
 	Pool node_pool;
 	Pool in_link_pool;
 	Pool out_link_pool;
-} GraphPools;
+} Graph;
+DEFINE_ARRAY(Graph, graph);
 
 #define IN0(node) ((node)->in.links[0])
 #define IN1(node) ((node)->in.links[1])
