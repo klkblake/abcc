@@ -112,3 +112,20 @@ DEFINE_ARRAY(Graph, graph);
 #define OUT4(node) ((node)->out.next->links[1])
 
 internal u64 global_traversal = 1;
+
+internal inline
+b32 is_constant(u8 uop) {
+	return (uop == UOP_UNIT_CONSTANT   ||
+	        uop == UOP_VOID_CONSTANT   ||
+		uop == UOP_BLOCK_CONSTANT  ||
+		uop == UOP_NUMBER_CONSTANT ||
+		uop == UOP_TEXT_CONSTANT   ||
+		uop == UOP_BOOL_CONSTANT);
+}
+
+internal inline
+b32 does_implicit_copies(u8 uop) {
+	return (uop == UOP_AND ||
+	        uop == UOP_OR  ||
+	        uop == UOP_NOT);
+}
