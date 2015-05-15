@@ -73,17 +73,15 @@ u32 jenkins_hash(u8 *data, usize size) {
 	return jenkins_finalise(jenkins_add(0, data, size));
 }
 
-#define DEFINE_MEMO_TABLE_STRUCT(name, type) \
 typedef struct { \
 	u32 *hashes; \
-	type **buckets; \
+	void **buckets; \
 	usize size; \
 	usize num_buckets; /* Must be power of two */ \
-} name ## MemoTable;
-DEFINE_MEMO_TABLE_STRUCT(Void, void);
+} MemoTable;
 
 internal
-void memo_table_maybe_grow(VoidMemoTable *table) {
+void memo_table_maybe_grow(MemoTable *table) {
 	assert(table->size <= table->num_buckets);
 	if (table->num_buckets == 0) {
 		table->num_buckets = 64;
@@ -118,64 +116,45 @@ void memo_table_maybe_grow(VoidMemoTable *table) {
 	}
 }
 
-// TODO consider blowing these out, maybe with some macros for the common parts.
-#define ESCAPE_COMMAS(...) __VA_ARGS__
-#define DEFINE_MEMOISE(func_name, name, type, args, hash_expr, equal_expr, decref_internals_expr, malloc_expr, init_expr) \
-internal \
-type *memoise_ ## func_name(name ## MemoTable *table, args) { \
-	u32 hash = (hash_expr); \
-	memo_table_maybe_grow((VoidMemoTable *) table); \
-	usize bucket_mask = table->num_buckets - 1; \
-	usize bucket = hash & bucket_mask; \
-	while (table->hashes[bucket] != 0) { \
-		if (table->hashes[bucket] == hash) { \
-			type *entry = table->buckets[bucket]; \
-			if (equal_expr) { \
-				entry->refcount++; \
-				decref_internals_expr; \
-				return entry; \
+#define memo_table_free(table, func_name) \
+	do { \
+		for (usize i = 0; i < (table).num_buckets; i++) { \
+			if ((table).hashes[i] != 0) { \
+				func_name ## _decref((table).buckets[i]); \
 			} \
 		} \
-		bucket = (bucket + 1) & bucket_mask; \
-	} \
-	type *entry = malloc(malloc_expr); \
-	init_expr; \
-	entry->refcount = 2; /* The table retains a reference to the entry */ \
-	table->hashes[bucket] = hash; \
-	table->buckets[bucket] = entry; \
-	table->size++; \
-	return entry; \
-}
-
-#define DEFINE_MEMO_TABLE_FREE(name, func_name) \
-internal \
-void func_name ## _memo_table_free(name ## MemoTable *table) { \
-	for (usize i = 0; i < table->num_buckets; i++) { \
-		if (table->hashes[i] != 0) { \
-			func_name ## _decref(table->buckets[i]); \
-		} \
-	} \
-	free(table->hashes); \
-	free(table->buckets); \
-}
-
-#define DEFINE_MEMO_TABLE(name, type, args, hash_expr, equal_expr, decref_internals_expr, malloc_expr, init_expr, func_name) \
-	DEFINE_MEMO_TABLE_STRUCT(name, type); \
-	DEFINE_MEMOISE(func_name, name, type, ESCAPE_COMMAS(args), hash_expr, equal_expr, decref_internals_expr, malloc_expr, init_expr); \
-	DEFINE_MEMO_TABLE_FREE(name, func_name);
+		free((table).hashes); \
+		free((table).buckets); \
+	} while (0)
 
 DEFINE_ARRAY(StringRC *, StringRCPtr);
-
-DEFINE_MEMO_TABLE(StringRC, StringRC,
-                  ESCAPE_COMMAS(u8 *data, usize size),
-                  jenkins_hash(data, size),
-                  entry->size == size && memcmp(entry->data, data, size) == 0,
-                  ,
-                  sizeof(StringRC) + size * sizeof(u8),
-                  { entry->size = size; memcpy(entry->data, data, size); },
-                  string_rc);
-
 DEFINE_ARRAY(AOStackFrame *, AOStackFramePtr);
+
+internal
+StringRC *memoise_string_rc(MemoTable *table, u8 *data, usize size) {
+	u32 hash = jenkins_hash(data, size);
+	memo_table_maybe_grow(table);
+	usize bucket_mask = table->num_buckets - 1;
+	usize bucket = hash & bucket_mask;
+	while (table->hashes[bucket] != 0) {
+		if (table->hashes[bucket] == hash) {
+			StringRC *entry = table->buckets[bucket];
+			if (entry->size == size && memcmp(entry->data, data, size) == 0) {
+				entry->refcount++;
+				return entry;
+			}
+		}
+		bucket = (bucket + 1) & bucket_mask;
+	}
+	StringRC *entry = malloc(sizeof(StringRC) + size * sizeof(u8));
+        entry->size = size;
+        memcpy(entry->data, data, size);
+	entry->refcount = 2; /* The table retains a reference to the entry */
+	table->hashes[bucket] = hash;
+	table->buckets[bucket] = entry;
+	table->size++;
+	return entry;
+}
 
 internal
 u32 hash_ao_stack_frame(AOStackFrame *next, StringRC *word, StringRC *file, u32 line) {
@@ -187,14 +166,38 @@ u32 hash_ao_stack_frame(AOStackFrame *next, StringRC *word, StringRC *file, u32 
 		   return jenkins_finalise(hash);
 }
 
-DEFINE_MEMO_TABLE(AOStackFrame, AOStackFrame,
-                  ESCAPE_COMMAS(AOStackFrame *next, StringRC *word, StringRC *file, u32 line),
-                  hash_ao_stack_frame(next, word, file, line),
-                  entry->next == next && entry->word == word && entry->file == file && entry->line == line,
-                  { string_rc_decref(word); string_rc_decref(file); },
-                  sizeof(AOStackFrame),
-                  ({ *entry = (AOStackFrame){ next, word, file, line, 0 }; if (next) { next->refcount++; } }),
-                  ao_stack_frame);
+internal
+AOStackFrame *memoise_ao_stack_frame(MemoTable *table, AOStackFrame *next, StringRC *word, StringRC *file, u32 line) {
+	u32 hash = hash_ao_stack_frame(next, word, file, line);
+	memo_table_maybe_grow(table);
+	usize bucket_mask = table->num_buckets - 1;
+	usize bucket = hash & bucket_mask;
+	while (table->hashes[bucket] != 0) {
+		if (table->hashes[bucket] == hash) {
+			AOStackFrame *entry = table->buckets[bucket];
+			if (entry->next == next &&
+			    entry->word == word &&
+			    entry->file == file &&
+			    entry->line == line) {
+				entry->refcount++;
+				string_rc_decref(word);
+				string_rc_decref(file);
+				return entry;
+			}
+		}
+		bucket = (bucket + 1) & bucket_mask;
+	}
+	AOStackFrame *entry = malloc(sizeof(AOStackFrame));
+        *entry = (AOStackFrame){next, word, file, line, 0};
+        if (next) {
+	        next->refcount++;
+        }
+	entry->refcount = 2; /* The table retains a reference to the entry */
+	table->hashes[bucket] = hash;
+	table->buckets[bucket] = entry;
+	table->size++;
+	return entry;
+}
 
 typedef struct {
 	U8Array opcodes;
@@ -247,14 +250,31 @@ void block_decref(Block *block) {
 	block->refcount--;
 }
 
-DEFINE_MEMO_TABLE(Block, Block,
-                  ESCAPE_COMMAS(Block *block, u32 bhash),
-                  bhash,
-                  blocks_equal(entry, block),
-                  { block_free(block); block->refcount = 0; },
-                  sizeof(Block),
-                  *entry = *block,
-                  block);
+internal
+Block *memoise_block(MemoTable *table, Block *block, u32 hash) {
+	memo_table_maybe_grow(table);
+	usize bucket_mask = table->num_buckets - 1;
+	usize bucket = hash & bucket_mask;
+	while (table->hashes[bucket] != 0) {
+		if (table->hashes[bucket] == hash) {
+			Block *entry = table->buckets[bucket];
+			if (blocks_equal(entry, block)) {
+				entry->refcount++;
+				block_free(block);
+				block->refcount = 0;
+				return entry;
+			}
+		}
+		bucket = (bucket + 1) & bucket_mask;
+	}
+	Block *entry = malloc(sizeof(Block));
+	*entry = *block;
+	entry->refcount = 2; /* The table retains a reference to the entry */
+	table->hashes[bucket] = hash;
+	table->buckets[bucket] = entry;
+	table->size++;
+	return entry;
+}
 
 #define PARSE_WARN (1u << 31)
 #define PARSE_ERR_EOF_IN_BLOCK         0
@@ -301,9 +321,9 @@ typedef struct {
 	u32 hash; // Hash of all parsed chars (excluding SP and LF), Jenkins One-at-a-Time hash.
 	ParseErrorArray errors;
 	BlockPtrArray blocks;
-	StringRCMemoTable string_table;
-	AOStackFrameMemoTable frame_table;
-	BlockMemoTable block_table;
+	MemoTable string_table;
+	MemoTable frame_table;
+	MemoTable block_table;
 } ParseState;
 
 internal
@@ -752,9 +772,9 @@ ParseResult parse(FILE *stream) {
 	if (state.frame != NULL) {
 		report_error_here(&state, PARSE_WARN_EOF_IN_FRAME);
 	}
-	string_rc_memo_table_free(&state.string_table);
-	ao_stack_frame_memo_table_free(&state.frame_table);
-	block_memo_table_free(&state.block_table);
+	memo_table_free(state.string_table, string_rc);
+	memo_table_free(state.frame_table, ao_stack_frame);
+	memo_table_free(state.block_table, block);
 	array_trim(&state.blocks);
 	array_free(&state.line);
 	return (ParseResult){result.block, state.blocks, state.errors};
