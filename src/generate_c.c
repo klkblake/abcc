@@ -10,7 +10,7 @@ void do_indent(FILE *file, u32 indent) {
 #define out(fmt, ...) do_indent(file, indent); fprintf(file, fmt "\n", ##__VA_ARGS__)
 
 internal
-void generate(FILE *file, Graph *graph, b32 is_main, u32 *link_id, u64 traversal1, u64 traversal2) {
+void generate(FILE *file, BlockGraph *graph, b32 is_main, u32 *link_id, u64 traversal1, u64 traversal2) {
 	u32 indent = 0;
 	out("");
 	out("static");
@@ -369,12 +369,12 @@ void generate(FILE *file, Graph *graph, b32 is_main, u32 *link_id, u64 traversal
 }
 
 internal
-void generate_c(FILE *file, GraphState *graph) {
+void generate_c(FILE *file, ProgramGraph *program) {
 	u64 traversal1 = global_traversal++;
 	u64 traversal2 = global_traversal++;
 	u32 link_id = 0;
 	fprintf(file, "%s", rts_c);
-	for (Graph *block = graph->first; block; block = block->next) {
-		generate(file, block, block == graph->last, &link_id, traversal1, traversal2);
+	for (BlockGraph *block = program->first; block; block = block->next) {
+		generate(file, block, block == program->last, &link_id, traversal1, traversal2);
 	}
 }

@@ -91,7 +91,7 @@ void print_node_link(Node *from, u32 slot_count, u32 slot, TypePtrU64Map *vars) 
 }
 
 internal
-void print_node(Node *node, Graph *graph, u64 traversal, TypePtrU64Map *vars) {
+void print_node(Node *node, BlockGraph *graph, u64 traversal, TypePtrU64Map *vars) {
 	if (node->seen == traversal) {
 		return;
 	}
@@ -113,7 +113,7 @@ void print_node(Node *node, Graph *graph, u64 traversal, TypePtrU64Map *vars) {
 }
 
 internal
-void print_graph(Graph *graph, b32 is_main, u64 traversal) {
+void print_graph(BlockGraph *graph, b32 is_main, u64 traversal) {
 	if (!is_main) {
 		printf("subgraph cluster_%p {\n", graph);
 	}
@@ -130,11 +130,11 @@ void print_graph(Graph *graph, b32 is_main, u64 traversal) {
 }
 
 internal
-void generate_graphviz(GraphState *graph) {
+void generate_graphviz(ProgramGraph *program) {
 	printf("digraph {\n");
 	u64 traversal = global_traversal++;
-	for (Graph *block = graph->first; block; block = block->next) {
-		print_graph(block, block == graph->last, traversal);
+	for (BlockGraph *block = program->first; block; block = block->next) {
+		print_graph(block, block == program->last, traversal);
 	}
 	printf("}\n");
 }

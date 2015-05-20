@@ -25,7 +25,7 @@ typedef struct Block {
 	struct Block **blocks;
 	StringRC **texts;
 	StringRC **sealers;
-	Graph graph;
+	BlockGraph graph;
 	// Unlike for other structs, this is not used for memory management
 	u32 refcount;
 } Block;

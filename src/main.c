@@ -166,7 +166,7 @@ int main(int argc, char **argv) {
 		map_free(&vars);
 		goto cleanup_typecheck;
 	}
-	GraphState graph = build_graphs(result.blocks, pool.boolean, optlevel >= 1);
+	ProgramGraph program = build_graphs(result.blocks, pool.boolean, optlevel >= 1);
 	switch (output) {
 		case OUTPUT_EXECUTABLE:
 			{
@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
 				char *cname = "program.c";
 				FILE *cfile = fopen(cname, "w");
 				DIE_IF(!cfile);
-				generate_c(cfile, &graph);
+				generate_c(cfile, &program);
 				DIE_IF(fclose(cfile));
 
 				char *llname = "rts-intrin.ll";
@@ -230,10 +230,10 @@ int main(int argc, char **argv) {
 				break;
 			}
 		case OUTPUT_GRAPHVIZ:
-			generate_graphviz(&graph);
+			generate_graphviz(&program);
 			break;
 		case OUTPUT_C:
-			generate_c(stdout, &graph);
+			generate_c(stdout, &program);
 			break;
 	}
 

@@ -666,7 +666,7 @@ ParseBlockResult parse_block(ParseState *state, b32 expect_eof) {
 				block.blocks.data,
 				block.texts.data,
 				block.sealers.data,
-				(Graph){},
+				(BlockGraph){},
 				1,
 			};
 			Block *memo_block = memoise_block(&state->block_table, &complete_block, jenkins_finalise(state->hash));

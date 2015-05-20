@@ -79,7 +79,7 @@ typedef struct Node {
 		// whichever is the active one by copying one of the pointers
 		// without caring which one is active
 		struct Node *right_constant;
-		struct Graph *block;
+		struct BlockGraph *block;
 		StringRC *seal;
 		StringRC *text;
 		f64 number; // XXX should be a rational
@@ -89,24 +89,24 @@ typedef struct Node {
 } Node;
 DEFINE_ARRAY(Node *, NodePtr);
 
-typedef struct Graph {
+typedef struct BlockGraph {
 	// We maintain a topological ordering of the graphs. The main graph is
 	// always last.
-	struct Graph *prev;
-	struct Graph *next;
+	struct BlockGraph *prev;
+	struct BlockGraph *next;
 
 	u32 id;
 	Node input;
 	Node output;
 	Node *constants;
-	struct Graph *quoted;
+	struct BlockGraph *quoted;
 
 	Pool node_pool;
 	Pool in_link_pool;
 	Pool out_link_pool;
-} Graph;
-DEFINE_ARRAY(Graph, Graph);
-DEFINE_ARRAY(Graph *, GraphPtr);
+} BlockGraph;
+DEFINE_ARRAY(BlockGraph, BlockGraph);
+DEFINE_ARRAY(BlockGraph *, BlockGraphPtr);
 
 #define IN0(node) ((node)->in.links[0])
 #define IN1(node) ((node)->in.links[1])
