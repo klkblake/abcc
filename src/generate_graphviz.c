@@ -130,14 +130,11 @@ void print_graph(Graph *graph, b32 is_main, u64 traversal) {
 }
 
 internal
-void generate_graphviz(BlockPtrArray blocks) {
+void generate_graphviz(GraphState *graph) {
 	printf("digraph {\n");
 	u64 traversal = global_traversal++;
-	foreach (block, blocks) {
-		print_graph(&(*block)->graph, block_index == blocks.size - 1, traversal);
-		if ((*block)->graph.quoted) {
-			print_graph((*block)->graph.quoted, false, traversal);
-		}
+	for (Graph *block = graph->first; block; block = block->next) {
+		print_graph(block, block == graph->last, traversal);
 	}
 	printf("}\n");
 }

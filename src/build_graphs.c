@@ -72,9 +72,12 @@ OutLink *add_out_link(Graph *graph, Node *node) {
 	return &chunk->links[index];
 }
 
+// TODO rename this to Graph, rename Graph to Subgraph(?)
 typedef struct {
+	GraphPtrArray graphs;
+	Graph *first;
+	Graph *last;
 	b32 optimise;
-	u32 graph_id;
 	Pool graph_pool;
 } GraphState;
 
@@ -154,7 +157,16 @@ Link append_node11(GraphState *state, Graph *graph, u8 uop, Link link, Type *typ
 			Type *output_type = child2(type);
 			assert_product(output_type);
 			quoted = alloc(&state->graph_pool, sizeof(Graph));
-			quoted->id = state->graph_id++;
+			if (graph->prev) {
+				quoted->prev = graph->prev;
+				graph->prev->next = quoted;
+			} else {
+				state->first = quoted;
+			}
+			quoted->next = graph;
+			graph->prev = quoted;
+			quoted->id = (u32)state->graphs.size;
+			array_push(&state->graphs, quoted);
 			quoted->input.out_count = 1;
 			OUT0(&quoted->input).type = input_type;
 			Link input = {&quoted->input, 0, input_type};
@@ -407,7 +419,15 @@ void build_graph(GraphState *state, Block *block, Type *bool_type) {
 #define and(link1, link2) append21(UOP_AND, (link1), (link2), bool_type)
 #define or(link1, link2) append21(UOP_OR, (link1), (link2), bool_type)
 #define not(link) append11(UOP_NOT, (link), bool_type)
-	graph->id = state->graph_id++;
+	if (state->last) {
+		state->last->next = graph;
+		graph->prev = state->last;
+	} else {
+		state->first = graph;
+	}
+	state->last = graph;
+	graph->id = (u32)state->graphs.size;
+	array_push(&state->graphs, graph);
 	OUT0(&graph->input).type = deref(block->types[0]);
 	graph->input.out_count = 1;
 	Link last = {&graph->input, 0, OUT0(&graph->input).type};
@@ -896,12 +916,11 @@ void build_graph(GraphState *state, Block *block, Type *bool_type) {
 }
 
 internal
-void build_graphs(BlockPtrArray blocks, Type *bool_type, b32 optimise) {
+GraphState build_graphs(BlockPtrArray blocks, Type *bool_type, b32 optimise) {
 	GraphState state = {};
-	state.graph_id = 1;
 	state.optimise = optimise;
 	foreach (block, blocks) {
 		build_graph(&state, *block, bool_type);
 	}
-	blocks.data[blocks.size - 1]->graph.id = 0;
+	return state;
 }

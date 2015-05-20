@@ -643,7 +643,7 @@ Value apply(Block *block, Value value) {
 	__builtin_unreachable();
 }
 
-static Value block_0(Value input);
+static Value block_main(Value input);
 
 static __attribute__((used))
 u32 main(u32 argc, char **argv) {
@@ -658,7 +658,7 @@ u32 main(u32 argc, char **argv) {
 		return 2;
 	}
 	Value unit = {.bits = UNIT};
-	Value result = block_0(alloc_pair(alloc_pair((Value){.number = arg}, unit), alloc_pair(unit, unit)));
+	Value result = block_main(alloc_pair(alloc_pair((Value){.number = arg}, unit), alloc_pair(unit, unit)));
 	printf("%f\n", result.pair->first.pair->first.number);
 	return 0;
 }

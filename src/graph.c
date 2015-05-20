@@ -90,6 +90,11 @@ typedef struct Node {
 DEFINE_ARRAY(Node *, NodePtr);
 
 typedef struct Graph {
+	// We maintain a topological ordering of the graphs. The main graph is
+	// always last.
+	struct Graph *prev;
+	struct Graph *next;
+
 	u32 id;
 	Node input;
 	Node output;
@@ -100,7 +105,8 @@ typedef struct Graph {
 	Pool in_link_pool;
 	Pool out_link_pool;
 } Graph;
-DEFINE_ARRAY(Graph, graph);
+DEFINE_ARRAY(Graph, Graph);
+DEFINE_ARRAY(Graph *, GraphPtr);
 
 #define IN0(node) ((node)->in.links[0])
 #define IN1(node) ((node)->in.links[1])
