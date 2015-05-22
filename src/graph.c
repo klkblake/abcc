@@ -90,15 +90,13 @@ typedef struct Node {
 } Node;
 DEFINE_ARRAY(Node *, NodePtr);
 
+DEFINE_ARRAY(struct BlockGraph *, BlockGraphPtr);
 internal inline
 u32 block_graph_hash(struct BlockGraph *key);
 DEFINE_MAP(struct BlockGraph *, struct BlockGraph *, block_graph, BlockGraph, block_graph_hash);
 
 typedef struct BlockGraph {
-	// We maintain a topological ordering of the graphs. The main graph is
-	// always last.
-	struct BlockGraph *prev;
-	struct BlockGraph *next;
+	BlockGraphPtrArray references;
 
 	u32 id;
 	Node input;
@@ -106,13 +104,13 @@ typedef struct BlockGraph {
 	Node *constants;
 	struct BlockGraph *quoted;
 	BlockGraphMap compositions;
+	u64 seen;
 
 	Pool node_pool;
 	Pool in_link_pool;
 	Pool out_link_pool;
 } BlockGraph;
 DEFINE_ARRAY(BlockGraph, BlockGraph);
-DEFINE_ARRAY(BlockGraph *, BlockGraphPtr);
 
 internal inline
 u32 block_graph_hash(BlockGraph *key) {
@@ -146,4 +144,31 @@ b32 does_implicit_copies(u8 uop) {
 	return (uop == UOP_AND ||
 	        uop == UOP_OR  ||
 	        uop == UOP_NOT);
+}
+
+internal
+BlockGraphPtrArray flatten_dependencies(BlockGraph *start) {
+	u64 finished_block = global_traversal++;
+	BlockGraphPtrArray blocks = {};
+	BlockGraphPtrArray stack = {};
+	U32Array indexes = {};
+	array_push(&stack, start);
+	array_push(&indexes, 0);
+	while (stack.size > 0) {
+		BlockGraph *block = array_pop(&stack);
+		u32 index = array_pop(&indexes);
+		if (block->seen == finished_block) {
+			continue;
+		}
+		if (index == block->references.size) {
+			array_push(&blocks, block);
+			block->seen = finished_block;
+		} else {
+			array_push(&stack, block);
+			array_push(&indexes, index + 1);
+			array_push(&stack, block->references.data[index]);
+			array_push(&indexes, 0);
+		}
+	}
+	return blocks;
 }

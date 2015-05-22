@@ -374,7 +374,8 @@ void generate_c(FILE *file, ProgramGraph *program) {
 	u64 traversal2 = global_traversal++;
 	u32 link_id = 0;
 	fprintf(file, "%s", rts_c);
-	for (BlockGraph *block = program->first; block; block = block->next) {
-		generate(file, block, block == program->last, &link_id, traversal1, traversal2);
+	BlockGraphPtrArray blocks = flatten_dependencies(program->main);
+	foreach (block, blocks) {
+		generate(file, *block, *block == program->main, &link_id, traversal1, traversal2);
 	}
 }

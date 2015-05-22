@@ -135,9 +135,10 @@ void print_graph(BlockGraph *graph, b32 is_main, u64 traversal) {
 internal
 void generate_graphviz(ProgramGraph *program) {
 	printf("digraph {\n");
+	BlockGraphPtrArray blocks = flatten_dependencies(program->main);
 	u64 traversal = global_traversal++;
-	for (BlockGraph *block = program->first; block; block = block->next) {
-		print_graph(block, block == program->last, traversal);
+	foreach (block, blocks) {
+		print_graph(*block, *block == program->main, traversal);
 	}
 	printf("}\n");
 }

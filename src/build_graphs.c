@@ -9,8 +9,7 @@ Node *alloc_node(BlockGraph *block, enum uop uop) {
 
 typedef struct {
 	BlockGraphPtrArray blocks;
-	BlockGraph *first;
-	BlockGraph *last;
+	BlockGraph *main;
 	b32 optimise;
 	Pool block_pool;
 } ProgramGraph;
@@ -28,6 +27,9 @@ void delete_constant(BlockGraph *block, Node *node) {
 			}
 			constant = constant->next_constant;
 		}
+	}
+	if (node->uop == UOP_BLOCK_CONSTANT) {
+		array_remove(&block->references, node->block);
 	}
 	release(&block->node_pool, node);
 }
@@ -100,20 +102,7 @@ typedef struct {
 } Link5;
 
 internal inline
-Link init_block_graph(ProgramGraph *program, BlockGraph *block, BlockGraph *after, Type *input_type) {
-	if (after == NULL) {
-		program->first = block;
-		program->last = block;
-	} else if (after->next) {
-		block->prev = after;
-		block->next = after->next;
-		block->next->prev = block;
-		block->prev->next = block;
-	} else {
-		block->prev = after;
-		block->prev->next = block;
-		program->last = block;
-	}
+Link init_block_graph(ProgramGraph *program, BlockGraph *block, Type *input_type) {
 	block->id = (u32)program->blocks.size;
 	array_push(&program->blocks, block);
 	block->input.out_count = 1;
@@ -165,6 +154,9 @@ Link append_block(BlockGraph *block1, Link link, BlockGraph *block2) {
 			continue;
 		}
 		node->copy = alloc_node(block1, node->uop);
+		if (node->uop == UOP_BLOCK_CONSTANT) {
+			array_push(&block1->references, node->block);
+		}
 		// XXX we don't account for constants on sums
 		node->copy->text = node->text;
 		for (u32 i = 0; i < node->in_count; i++) {
@@ -252,7 +244,7 @@ Link append_node11(ProgramGraph *program, BlockGraph *block, u8 uop, Link link, 
 				assert_product(output_type);
 
 				quoted = alloc(&program->block_pool, sizeof(BlockGraph));
-				Link input = init_block_graph(program, quoted, quote_source, input_type);
+				Link input = init_block_graph(program, quoted, input_type);
 				Link constant = append_node01(program, quoted, UOP_BLOCK_CONSTANT,
 				                              child1(output_type));
 				constant.node->block = link.node->block;
@@ -261,6 +253,8 @@ Link append_node11(ProgramGraph *program, BlockGraph *block, u8 uop, Link link, 
 
 				link.node->block->quoted = quoted;
 			}
+			array_remove(&block->references, quote_source);
+			array_push(&block->references, quoted);
 			link.node->block = quoted;
 			link.type = type;
 			OUT0(link.node).type = type;
@@ -291,6 +285,9 @@ Link2 append_node12(ProgramGraph *program, BlockGraph *block,
 			if (is_constant(link.node->uop)) {
 				Link copy = append_node01(program, block, link.node->uop, link.type);
 				copy.node->text = link.node->text;
+				if (link.node->uop == UOP_BLOCK_CONSTANT) {
+					array_push(&block->references, link.node->block);
+				}
 				return (Link2){{link, copy}};
 			}
 			if (does_implicit_copies(link.node->uop)) {
@@ -384,30 +381,9 @@ Link append_node21(ProgramGraph *program, BlockGraph *block,
 			if (!map_result.found) {
 				assert_block(type);
 				Type *input_type = child1(type);
-				// XXX O(n)
-				BlockGraph *b1 = block1;
-				BlockGraph *b2 = block2;
-				BlockGraph *last_source;
-				while (true) {
-					if (b1 == block2) {
-						last_source = block2;
-						break;
-					}
-					if (b2 == block1) {
-						last_source = block1;
-						break;
-					}
-					if (b1) {
-						b1 = b1->next;
-					}
-					if (b2) {
-						b2 = b2->next;
-					}
-					assert(b1 || b2);
-				}
 
 				composed = alloc(&program->block_pool, sizeof(BlockGraph));
-				Link link = init_block_graph(program, composed, last_source, input_type);
+				Link link = init_block_graph(program, composed, input_type);
 				link = append_block(composed, link, block1);
 				link = append_block(composed, link, block2);
 				finish_block_graph(composed, link);
@@ -415,6 +391,8 @@ Link append_node21(ProgramGraph *program, BlockGraph *block,
 				block_graph_map_put_bucket(&block1->compositions, block2, composed,
 				                           map_result.bucket);
 			}
+			array_remove(&block->references, link1.node->block);
+			array_push(&block->references, composed);
 			link1.node->block = composed;
 			link1.type = type;
 			OUT0(link1.node).type = type;
@@ -548,7 +526,7 @@ void build_graph(ProgramGraph *program, Block *block, Type *bool_type) {
 #define and(link1, link2) append21(UOP_AND, (link1), (link2), bool_type)
 #define or(link1, link2) append21(UOP_OR, (link1), (link2), bool_type)
 #define not(link) append11(UOP_NOT, (link), bool_type)
-	Link last = init_block_graph(program, bgraph, program->last, deref(block->types[0]));
+	Link last = init_block_graph(program, bgraph, deref(block->types[0]));
 	AOStackFrame *frame = NULL;
 	for (usize i = 0, frame_index = 0, block_index = 0, text_index = 0, sealer_index = 0; i < block->size; i++) {
 		u8 op = block->opcodes[i];
@@ -599,6 +577,7 @@ void build_graph(ProgramGraph *program, Block *block, Type *bool_type) {
 					Link block_constant = append01(UOP_BLOCK_CONSTANT,
 					                                      child1(output_type));
 					block_constant.node->block = &block->blocks[block_index++]->graph;
+					array_push(&bgraph->references, block_constant.node->block);
 					last = pair(block_constant, last, output_type);
 					break;
 				}
@@ -1035,5 +1014,6 @@ ProgramGraph build_graphs(BlockPtrArray blocks, Type *bool_type, b32 optimise) {
 	foreach (block, blocks) {
 		build_graph(&program, *block, bool_type);
 	}
+	program.main = &blocks.data[blocks.size - 1]->graph;
 	return program;
 }

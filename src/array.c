@@ -9,6 +9,7 @@
 
 DEFINE_ARRAY(u8, U8);
 DEFINE_ARRAY(u8 *, U8Ptr);
+DEFINE_ARRAY(u32, U32);
 DEFINE_ARRAY(usize, USize);
 
 #define array_grow(array) array_grow_((U8Array *) (array), sizeof((array)->data[0]))
@@ -37,13 +38,13 @@ void *array_bump_(U8Array *array, usize num, usize size) {
 }
 
 #define array_push(array, elem) ({ \
-		typeof(array) Array = (array); \
-		*((typeof(Array->data))array_bump(Array, 1)) = elem; \
+		typeof(array) _array = (array); \
+		*((typeof(_array->data))array_bump(_array, 1)) = elem; \
 	})
 
 #define array_pop(array) ({ \
-		typeof(array) Array = (array); \
-		Array->data[Array->size-- - 1]; \
+		typeof(array) _array = (array); \
+		_array->data[_array->size-- - 1]; \
 	})
 
 #define foreach(var, array) \
@@ -59,6 +60,18 @@ void u8Array_push_many(U8Array *buf, u8 *str, usize len) {
 		array_push(buf, str[i]);
 	}
 }
+
+#define array_remove(array, elem) ({ \
+		typeof(array) _array = (array); \
+		typeof(elem) _elem = (elem); \
+		for (usize _index = 0; _index < _array->size; _index++) { \
+			if (_array->data[_index] == _elem) { \
+				_array->data[_index] = _array->data[_array->size - 1]; \
+				_array->size--; \
+				break; \
+			} \
+		} \
+	})
 
 #define array_trim(array) array_trim_((U8Array *) (array), sizeof((array)->data[0]))
 internal
