@@ -26,8 +26,6 @@ typedef struct Block {
 	StringRC **texts;
 	StringRC **sealers;
 	BlockGraph graph;
-	// Unlike for other structs, this is not used for memory management
-	u32 refcount;
 } Block;
 DEFINE_ARRAY(Block *, BlockPtr);
 

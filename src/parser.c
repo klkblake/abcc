@@ -243,11 +243,6 @@ b32 blocks_equal(Block *a, Block *b) {
 }
 
 internal
-void block_decref(Block *block) {
-	block->refcount--;
-}
-
-internal
 Block *memoise_block(MemoTable *table, Block *block, u32 hash) {
 	memo_table_maybe_grow(table);
 	usize bucket_mask = table->num_buckets - 1;
@@ -256,9 +251,7 @@ Block *memoise_block(MemoTable *table, Block *block, u32 hash) {
 		if (table->hashes[bucket] == hash) {
 			Block *entry = table->buckets[bucket];
 			if (blocks_equal(entry, block)) {
-				entry->refcount++;
 				block_free(block);
-				block->refcount = 0;
 				return entry;
 			}
 		}
@@ -266,7 +259,6 @@ Block *memoise_block(MemoTable *table, Block *block, u32 hash) {
 	}
 	Block *entry = malloc(sizeof(Block));
 	*entry = *block;
-	entry->refcount = 2; /* The table retains a reference to the entry */
 	table->hashes[bucket] = hash;
 	table->buckets[bucket] = entry;
 	table->size++;
@@ -666,14 +658,12 @@ ParseBlockResult parse_block(ParseState *state, b32 expect_eof) {
 				block.blocks.data,
 				block.texts.data,
 				block.sealers.data,
-				(BlockGraph){},
-				1,
+				{},
 			};
-			Block *memo_block = memoise_block(&state->block_table, &complete_block, jenkins_finalise(state->hash));
-			if (complete_block.refcount) {
-				// This field is unused, so we have the memo
-				// table implementation clear it to signal that
-				// a matching block was found.
+			usize old_size = state->block_table.size;
+			Block *memo_block = memoise_block(&state->block_table, &complete_block,
+			                                  jenkins_finalise(state->hash));
+			if (state->block_table.size != old_size) {
 				array_push(&state->blocks, memo_block);
 			}
 			result.block = memo_block;
@@ -771,7 +761,8 @@ ParseResult parse(FILE *stream) {
 	}
 	memo_table_free(state.string_table, string_rc);
 	memo_table_free(state.frame_table, ao_stack_frame);
-	memo_table_free(state.block_table, block);
+	free(state.block_table.hashes);
+	free(state.block_table.buckets);
 	array_trim(&state.blocks);
 	array_free(&state.line);
 	return (ParseResult){result.block, state.blocks, state.errors};

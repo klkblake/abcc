@@ -7,6 +7,14 @@ Node *alloc_node(BlockGraph *block, enum uop uop) {
 	return result;
 }
 
+typedef struct {
+	BlockGraphPtrArray blocks;
+	BlockGraph *first;
+	BlockGraph *last;
+	b32 optimise;
+	Pool block_pool;
+} ProgramGraph;
+
 internal
 void delete_constant(BlockGraph *block, Node *node) {
 	if (block->constants == node) {
@@ -21,8 +29,7 @@ void delete_constant(BlockGraph *block, Node *node) {
 			constant = constant->next_constant;
 		}
 	}
-	// TODO Add to free list
-	// TODO destroy unused blocks
+	release(&block->node_pool, node);
 }
 
 internal
@@ -72,14 +79,6 @@ OutLink *add_out_link(BlockGraph *block, Node *node) {
 	}
 	return &chunk->links[index];
 }
-
-typedef struct {
-	BlockGraphPtrArray blocks;
-	BlockGraph *first;
-	BlockGraph *last;
-	b32 optimise;
-	Pool block_pool;
-} ProgramGraph;
 
 typedef struct {
 	Node *node;
