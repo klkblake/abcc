@@ -85,9 +85,14 @@ typedef struct Node {
 		f64 number; // XXX should be a rational
 		b32 boolean;
 	};
+	struct Node *copy;
 	u64 seen;
 } Node;
 DEFINE_ARRAY(Node *, NodePtr);
+
+internal inline
+u32 block_graph_hash(struct BlockGraph *key);
+DEFINE_MAP(struct BlockGraph *, struct BlockGraph *, block_graph, BlockGraph, block_graph_hash);
 
 typedef struct BlockGraph {
 	// We maintain a topological ordering of the graphs. The main graph is
@@ -100,6 +105,7 @@ typedef struct BlockGraph {
 	Node output;
 	Node *constants;
 	struct BlockGraph *quoted;
+	BlockGraphMap compositions;
 
 	Pool node_pool;
 	Pool in_link_pool;
@@ -107,6 +113,11 @@ typedef struct BlockGraph {
 } BlockGraph;
 DEFINE_ARRAY(BlockGraph, BlockGraph);
 DEFINE_ARRAY(BlockGraph *, BlockGraphPtr);
+
+internal inline
+u32 block_graph_hash(BlockGraph *key) {
+	return (u32) ((u64)key / sizeof(BlockGraph));
+}
 
 #define IN0(node) ((node)->in.links[0])
 #define IN1(node) ((node)->in.links[1])

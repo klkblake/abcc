@@ -79,6 +79,9 @@ char *out_port(u32 slot_count, u32 slot) {
 internal
 void print_node_link(Node *from, u32 slot_count, u32 slot, TypePtrU64Map *vars) {
 	OutLink *to = out_link(from, slot);
+	if (!to->node) {
+		return;
+	}
 	if (does_implicit_copies(from->uop)) {
 		printf("node_%p -> node_%p:%s [label=\"",
 		       from, to->node, in_port(to->node->in_count, to->slot));

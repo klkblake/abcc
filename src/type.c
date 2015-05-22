@@ -47,7 +47,7 @@ static_assert(offsetof(Type, child1) == offsetof(Type, var_count), "child1 must 
 #define VAR_BIT (1ull << (sizeof(usize) * 8 - 1))
 #define IS_VAR(type) (((type)->var_count & VAR_BIT) != 0)
 
-internal
+internal inline
 u32 type_hash(Type *key) {
 	return (u32) ((u64)key / sizeof(Type));
 }
