@@ -73,12 +73,14 @@ typedef struct Node {
 	union {
 		struct Node *next_constant;
 		struct Node *left_constant;
+		Type *extra_type1;
 	};
 	union {
 		// All fields should be pointer sized or less, so we can copy
 		// whichever is the active one by copying one of the pointers
 		// without caring which one is active
 		struct Node *right_constant;
+		Type *extra_type2;
 		struct BlockGraph *block;
 		StringRC *seal;
 		StringRC *text;

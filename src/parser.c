@@ -632,6 +632,7 @@ ParseBlockResult parse_block(ParseState *state, b32 expect_eof) {
 	state->frame = NULL;
 	state->block = &block;
 	state->hash = 0;
+	usize num_extra_types = 0;
 	while (true) {
 		i32 c = next(state);
 		if (c == ' ' || c == '\n') {
@@ -650,9 +651,11 @@ ParseBlockResult parse_block(ParseState *state, b32 expect_eof) {
 			array_trim(&block.blocks);
 			array_trim(&block.texts);
 			array_trim(&block.sealers);
+			assert(block.opcodes.size == 0 || block.opcodes.data[0] != '`');
 			Block complete_block = {
 				block.opcodes.size,
 				block.opcodes.data,
+				NULL,
 				NULL,
 				block.frames.data,
 				block.blocks.data,
@@ -664,6 +667,8 @@ ParseBlockResult parse_block(ParseState *state, b32 expect_eof) {
 			Block *memo_block = memoise_block(&state->block_table, &complete_block,
 			                                  jenkins_finalise(state->hash));
 			if (state->block_table.size != old_size) {
+				memo_block->types = malloc((block.opcodes.size + 1) * sizeof(Type *)),
+				memo_block->extra_types = malloc(num_extra_types * sizeof(Type *)),
 				array_push(&state->blocks, memo_block);
 			}
 			result.block = memo_block;
@@ -671,7 +676,7 @@ ParseBlockResult parse_block(ParseState *state, b32 expect_eof) {
 		}
 		AOStackFrame *frame;
 		b32 succeeded;
-		switch ((u8)c) {
+		switch (c) {
 			case '[':
 				frame = state->frame;
 				u32 hash = state->hash;
@@ -741,6 +746,9 @@ ParseBlockResult parse_block(ParseState *state, b32 expect_eof) {
 			case 'M':
 			case 'K':
 			case '>':
+				if (c == 'o') {
+					num_extra_types += 2;
+				}
 				array_push(&state->block->opcodes, (u8)c);
 				break;
 

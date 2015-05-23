@@ -160,6 +160,7 @@ void graph_server_send(Type *t) {
 // TODO Use modified version of Tarjan's SCC algorithm as per
 // http://stackoverflow.com/questions/28924321/copying-part-of-a-graph
 // TODO Will that work with the requirement for sharing via variables?
+// TODO switch all traversals over types to use the seen field
 internal
 Type *inst_(Type *type, b32 share_vars, TypePtrMap *copied, TypePool *pool) {
 	if (IS_VAR(type)) {
@@ -551,10 +552,11 @@ b32 infer_block(Block *block, TypePool *pool) {
 #define block(c1, c2) set_term(alloc_type(pool), SYMBOL_BLOCK,   c1, c2)
 #define sealed(seal, ty) set_sealed(alloc_type(pool), seal, ty)
 
-	block->types = malloc((block->size + 1) * sizeof(Type *));
 	block->types[0] = var();
 	AOStackFrame *frame = NULL;
-	for (usize i = 0, frame_index = 0, block_index = 0, sealer_index = 0; i < block->size; i++) {
+	for (usize i = 0, extra_type_index = 0, frame_index = 0, block_index = 0, sealer_index = 0;
+	     i < block->size;
+	     i++) {
 		u8 op = block->opcodes[i];
 		Type *input = block->types[i];
 		Type *output;
@@ -692,6 +694,8 @@ b32 infer_block(Block *block, TypePool *pool) {
 						print_unification_error(i, op, err, left, right);
 						fail();
 					}
+					block->extra_types[extra_type_index++] = b1->child2;
+					block->extra_types[extra_type_index++] = b2->child1;
 					Type *result = block(b1->child1, b2->child2);
 					output(prod(result, vars[4]));
 				}

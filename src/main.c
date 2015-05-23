@@ -166,7 +166,7 @@ int main(int argc, char **argv) {
 		map_free(&vars);
 		goto cleanup_typecheck;
 	}
-	ProgramGraph program = build_graphs(result.blocks, pool.boolean, optlevel >= 1);
+	ProgramGraph program = build_graphs(result.blocks, &pool, optlevel >= 1);
 	switch (output) {
 		case OUTPUT_EXECUTABLE:
 			{

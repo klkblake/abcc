@@ -11,6 +11,7 @@ typedef struct {
 	BlockGraphPtrArray blocks;
 	BlockGraph *main;
 	b32 optimise;
+	TypePool *type_pool;
 	Pool block_pool;
 } ProgramGraph;
 
@@ -121,8 +122,59 @@ void finish_block_graph(BlockGraph *block, Link last) {
 	IN0(&block->output).slot = last.slot;
 }
 
+void collect_mapping(TypePtrMap *mapping, Type *type1, Type *type2, u64 traversal) {
+	type1 = deref(type1);
+	if (type1->seen == traversal) {
+		return;
+	}
+	type1->seen = traversal;
+	type2 = deref(type2);
+	if (type1 == type2) {
+		return;
+	}
+	if (IS_VAR(type1)) {
+		type_ptr_map_put(mapping, type1, type2);
+	} else {
+		if (type1->symbol == SYMBOL_UNIT || type1->symbol == SYMBOL_NUMBER || type1->symbol == SYMBOL_BOOL) {
+			return;
+		}
+		collect_mapping(mapping, type1->child1, type2->child1, traversal);
+		if (!IS_SEALED(type1->symbol)) {
+			collect_mapping(mapping, type1->child2, type2->child2, traversal);
+		}
+	}
+}
+
+// TODO Maybe use modified version of Tarjan's SCC algorithm as per
+// http://stackoverflow.com/questions/28924321/copying-part-of-a-graph
 internal
-Link append_block(BlockGraph *block1, Link link, BlockGraph *block2) {
+Type *apply_mapping(TypePtrMap *mapping, Type *type, TypePool *pool) {
+	type = deref(type);
+	TypePtrMapGetResult map_result = type_ptr_map_get(mapping, type);
+	if (map_result.found) {
+		return map_result.value;
+	}
+	if (IS_VAR(type) ||
+	    type->symbol == SYMBOL_UNIT ||
+	    type->symbol == SYMBOL_NUMBER ||
+	    type->symbol == SYMBOL_BOOL) {
+		type_ptr_map_put_bucket(mapping, type, type, map_result.bucket);
+		return type;
+	}
+	Type *new = alloc_type(pool);
+	type_ptr_map_put_bucket(mapping, type, new, map_result.bucket);
+	new->symbol = type->symbol;
+	new->next = new;
+	new->child1 = NULL; // Set as term
+	new->child1 = apply_mapping(mapping, type->child1, pool);
+	if (!IS_SEALED(type->symbol)) {
+		new->child2 = apply_mapping(mapping, type->child2, pool);
+	}
+	return new;
+}
+
+internal
+Link append_block(BlockGraph *block1, Link link, BlockGraph *block2, TypePtrMap *mapping, TypePool *type_pool) {
 	u64 traversal = global_traversal++;
 	NodePtrArray worklist = {};
 	array_push(&worklist, OUT0(&block2->input).node);
@@ -177,7 +229,7 @@ Link append_block(BlockGraph *block1, Link link, BlockGraph *block2) {
 			OutLink *out = out_link(node, i);
 			OutLink *out_copy = add_out_link(block1, node->copy);
 			array_push(&worklist, out->node);
-			out_copy->type = out->type;
+			out_copy->type = apply_mapping(mapping, out->type, type_pool);
 		}
 		if (is_constant(node->uop)) {
 			node->copy->next_constant = block1->constants;
@@ -195,7 +247,8 @@ Link append_block(BlockGraph *block1, Link link, BlockGraph *block2) {
 #define child2(type) deref((type)->child2)
 
 // We need this to construct pairs for some of the optimisations
-internal Link append_node21(ProgramGraph *program, BlockGraph *block, u8 uop, Link link1, Link link2, Type *type);
+internal Link append_node21(ProgramGraph *program, BlockGraph *block, u8 uop, Link link1, Link link2,
+                            Type *type, Type *extra_type1, Type *extra_type2);
 
 internal inline
 Link append_node01(ProgramGraph *program, BlockGraph *block, u8 uop, Type *type) {
@@ -248,7 +301,8 @@ Link append_node11(ProgramGraph *program, BlockGraph *block, u8 uop, Link link, 
 				Link constant = append_node01(program, quoted, UOP_BLOCK_CONSTANT,
 				                              child1(output_type));
 				constant.node->block = link.node->block;
-				Link output = append_node21(program, quoted, UOP_PAIR, constant, input, output_type);
+				Link output = append_node21(program, quoted, UOP_PAIR, constant, input,
+				                            output_type, NULL, NULL);
 				finish_block_graph(quoted, output);
 
 				link.node->block->quoted = quoted;
@@ -350,7 +404,7 @@ internal inline
 Link append_node21(ProgramGraph *program, BlockGraph *block,
                    u8 uop,
                    Link link1, Link link2,
-                   Type *type) {
+                   Type *type, Type *extra_type1, Type *extra_type2) {
 	if (program->optimise) {
 		if (uop == UOP_AND) {
 			if (link1.node->uop == UOP_BOOL_CONSTANT && link1.node->boolean) {
@@ -381,11 +435,20 @@ Link append_node21(ProgramGraph *program, BlockGraph *block,
 			if (!map_result.found) {
 				assert_block(type);
 				Type *input_type = child1(type);
+				InLink *in1 = &IN0(&block1->output);
+				InLink *in2 = &IN0(&block2->output);
+				u64 traversal = global_traversal++;
+				TypePtrMap mapping = {};
+				collect_mapping(&mapping, OUT0(&block1->input).type, input_type, traversal);
+				collect_mapping(&mapping, out_link(in1->node, in1->slot)->type, extra_type1, traversal);
+				collect_mapping(&mapping, OUT0(&block2->input).type, extra_type2, traversal);
+				collect_mapping(&mapping, out_link(in2->node, in2->slot)->type, child2(type), traversal);
 
 				composed = alloc(&program->block_pool, sizeof(BlockGraph));
+				input_type = apply_mapping(&mapping, input_type, program->type_pool);
 				Link link = init_block_graph(program, composed, input_type);
-				link = append_block(composed, link, block1);
-				link = append_block(composed, link, block2);
+				link = append_block(composed, link, block1, &mapping, program->type_pool);
+				link = append_block(composed, link, block2, &mapping, program->type_pool);
 				finish_block_graph(composed, link);
 
 				block_graph_map_put_bucket(&block1->compositions, block2, composed,
@@ -469,21 +532,21 @@ Link pair2_(ProgramGraph *program, BlockGraph *graph,
             Link link1, Link link2, Link link3,
             Type *type) {
 	assert_product(type);
-	Link right = append_node21(program, graph, UOP_PAIR, link2, link3, child2(type));
-	return append_node21(program, graph, UOP_PAIR, link1, right, type);
+	Link right = append_node21(program, graph, UOP_PAIR, link2, link3, child2(type), NULL, NULL);
+	return append_node21(program, graph, UOP_PAIR, link1, right, type, NULL, NULL);
 }
 
 internal inline
-Link3 unsum_(ProgramGraph *program, BlockGraph *graph, Link link, Type *bool_type) {
+Link3 unsum_(ProgramGraph *program, BlockGraph *graph, Link link) {
 	assert_sum(link.type);
 	return append_node13(program, graph, UOP_UNSUM, link,
-	                     child1(link.type), child2(link.type), bool_type);
+	                     child1(link.type), child2(link.type), program->type_pool->boolean);
 }
 
 internal inline
-Link5 unsum2_(ProgramGraph *program, BlockGraph *graph, Link link, Type *bool_type) {
-	Link3 outer = unsum_(program, graph, link, bool_type);
-	Link3 inner = unsum_(program, graph, outer.l[1], bool_type);
+Link5 unsum2_(ProgramGraph *program, BlockGraph *graph, Link link) {
+	Link3 outer = unsum_(program, graph, link);
+	Link3 inner = unsum_(program, graph, outer.l[1]);
 	return (Link5){{outer.l[0], inner.l[0], inner.l[1], outer.l[2], inner.l[2]}};
 }
 
@@ -497,10 +560,11 @@ Link sum2_(ProgramGraph *program, BlockGraph *graph,
 }
 
 internal
-void build_graph(ProgramGraph *program, Block *block, Type *bool_type) {
+void build_graph(ProgramGraph *program, Block *block) {
 	if (block->size == 0) {
 		return;
 	}
+	Type *bool_type = program->type_pool->boolean;
 	BlockGraph *bgraph = &block->graph;
 #define append01(uop, type) append_node01(program, bgraph, (uop), (type))
 #define append10(uop, link) append_node10(bgraph, (uop), (link))
@@ -508,7 +572,7 @@ void build_graph(ProgramGraph *program, Block *block, Type *bool_type) {
 #define append12(uop, link, type1, type2) append_node12(program, bgraph, (uop), (link), (type1), (type2))
 #define append20(uop, link1, link2) append_node20(bgraph, (uop), (link1), (link2))
 #define append21(uop, link1, link2, type) \
-	append_node21(program, bgraph, (uop), (link1), (link2), (type))
+	append_node21(program, bgraph, (uop), (link1), (link2), (type), NULL, NULL)
 #define append22(uop, link1, link2, type1, type2) \
 	append_node22(program, bgraph, (uop), (link1), (link2), (type1), (type2))
 #define append31(uop, link1, link2, link3, type) \
@@ -518,17 +582,21 @@ void build_graph(ProgramGraph *program, Block *block, Type *bool_type) {
 #define pair(link1, link2, type) append21(UOP_PAIR, (link1), (link2), (type))
 #define pair2(link1, link2, link3, type) \
 	pair2_(program, bgraph, (link1), (link2), (link3), (type))
-#define unsum(link) unsum_(program, bgraph, (link), bool_type)
-#define unsum2(link) unsum2_(program, bgraph, (link), bool_type)
+#define unsum(link) unsum_(program, bgraph, (link))
+#define unsum2(link) unsum2_(program, bgraph, (link))
 #define sum(link1, link2, link3, type) append31(UOP_SUM, (link1), (link2), (link3), (type))
 #define sum2(link1, link2, link3, link4, link5, type) \
 	sum2_(program, bgraph, (link1), (link2), (link3), (link4), (link5), (type))
 #define and(link1, link2) append21(UOP_AND, (link1), (link2), bool_type)
 #define or(link1, link2) append21(UOP_OR, (link1), (link2), bool_type)
 #define not(link) append11(UOP_NOT, (link), bool_type)
+#define compose(link1, link2, type, extra_type1, extra_type2) \
+	append_node21(program, bgraph, UOP_COMPOSE, (link1), (link2), (type), (extra_type1), (extra_type2))
 	Link last = init_block_graph(program, bgraph, deref(block->types[0]));
 	AOStackFrame *frame = NULL;
-	for (usize i = 0, frame_index = 0, block_index = 0, text_index = 0, sealer_index = 0; i < block->size; i++) {
+	for (usize i = 0, extra_type_index = 0, frame_index = 0, block_index = 0, text_index = 0, sealer_index = 0;
+	     i < block->size;
+	     i++) {
 		u8 op = block->opcodes[i];
 		Type *output_type = deref(block->types[i + 1]);
 		switch (op) {
@@ -672,10 +740,12 @@ void build_graph(ProgramGraph *program, Block *block, Type *bool_type) {
 				{
 					Link3 input = unpair2(last);
 					assert_product(output_type);
-					Link compose = append21(UOP_COMPOSE,
-					                               input.l[0], input.l[1],
-					                               child1(output_type));
-					last = pair(compose, input.l[2], output_type);
+					Link composed = compose(input.l[0], input.l[1],
+					                        child1(output_type),
+					                        block->extra_types[extra_type_index],
+					                        block->extra_types[extra_type_index + 1]);
+					extra_type_index += 2;
+					last = pair(composed, input.l[2], output_type);
 					break;
 				}
 			case '\'':
@@ -1008,11 +1078,12 @@ void build_graph(ProgramGraph *program, Block *block, Type *bool_type) {
 }
 
 internal
-ProgramGraph build_graphs(BlockPtrArray blocks, Type *bool_type, b32 optimise) {
+ProgramGraph build_graphs(BlockPtrArray blocks, TypePool *type_pool, b32 optimise) {
 	ProgramGraph program = {};
+	program.type_pool = type_pool;
 	program.optimise = optimise;
 	foreach (block, blocks) {
-		build_graph(&program, *block, bool_type);
+		build_graph(&program, *block);
 	}
 	program.main = &blocks.data[blocks.size - 1]->graph;
 	return program;

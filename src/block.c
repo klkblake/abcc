@@ -21,6 +21,7 @@ typedef struct Block {
 	usize size;
 	u8 *opcodes;
 	Type **types;
+	Type **extra_types;
 	AOStackFrame **frames;
 	struct Block **blocks;
 	StringRC **texts;

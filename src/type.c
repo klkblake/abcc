@@ -24,21 +24,24 @@
  * If symbol/sealer has its high bit set, then it is a normal term, else it is
  * a sealer.
  */
-typedef union Type {
+typedef struct Type {
+	union {
 	struct {
 		union {
 			u64 symbol;
 			StringRC *seal;
 		};
-		union Type *next;
-		union Type *child1;
-		union Type *child2;
+		struct Type *next;
+		struct Type *child1;
+		struct Type *child2;
 	};
 	struct {
-		union Type *rep;
-		union Type *terms;
+		struct Type *rep;
+		struct Type *terms;
 		usize var_count;
 	};
+	};
+	u64 seen;
 } Type;
 DEFINE_ARRAY(Type *, TypePtr);
 

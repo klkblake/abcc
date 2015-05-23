@@ -83,12 +83,22 @@
 		} \
 	}
 
+#define DEFINE_MAP_PUT(key_type, value_type, func_name, name, hash_func) \
+	void func_name ## _map_put(name ## Map *map, key_type key, value_type value) { \
+		name ## MapGetResult result = func_name ## _map_get(map, key); \
+		if (result.found) { \
+			map_delete_bucket(map, result.bucket); \
+		} \
+		func_name ## _map_put_bucket(map, key, value, result.bucket); \
+	}
+
 #define DEFINE_MAP(key_type, value_type, func_name, name, hash_func) \
 	DEFINE_MAP_STRUCT(key_type, value_type, name); \
 	DEFINE_MAP_RESULT_STRUCT(value_type, name); \
 	DEFINE_MAP_GROW(key_type, value_type, func_name, name); \
 	DEFINE_MAP_GET(key_type, value_type, func_name, name, hash_func); \
-	DEFINE_MAP_PUT_BUCKET(key_type, value_type, func_name, name, hash_func);
+	DEFINE_MAP_PUT_BUCKET(key_type, value_type, func_name, name, hash_func); \
+	DEFINE_MAP_PUT(key_type, value_type, func_name, name, hash_func);
 
 DEFINE_MAP_STRUCT(void *, void *, VoidPtr);
 

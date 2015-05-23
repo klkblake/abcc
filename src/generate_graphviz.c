@@ -119,6 +119,7 @@ internal
 void print_graph(BlockGraph *graph, b32 is_main, u64 traversal) {
 	if (!is_main) {
 		printf("subgraph cluster_%p {\n", graph);
+		printf("label=\"%d\"\n", graph->id);
 	}
 	TypePtrU64Map vars = {};
 	print_node(&graph->input, graph, traversal, &vars);
