@@ -161,7 +161,7 @@ void graph_server_send(Type *t) {
 // http://stackoverflow.com/questions/28924321/copying-part-of-a-graph
 // TODO Will that work with the requirement for sharing via variables?
 internal
-Type *inst_copy(Type *type, b32 share_vars, TypePtrMap *copied, TypePool *pool) {
+Type *inst_(Type *type, b32 share_vars, TypePtrMap *copied, TypePool *pool) {
 	if (IS_VAR(type)) {
 		type = rep(type);
 	}
@@ -181,7 +181,7 @@ Type *inst_copy(Type *type, b32 share_vars, TypePtrMap *copied, TypePool *pool) 
 		new->rep = new;
 		new->var_count = 1 | VAR_BIT;
 		if (type->terms) {
-			new->terms = inst_copy(type->terms, share_vars, copied, pool);
+			new->terms = inst_(type->terms, share_vars, copied, pool);
 		} else {
 			new->terms = NULL;
 		}
@@ -192,9 +192,9 @@ Type *inst_copy(Type *type, b32 share_vars, TypePtrMap *copied, TypePool *pool) 
 		new->symbol = type->symbol;
 		new->next = new;
 		new->child1 = NULL; // Set as term
-		new->child1 = inst_copy(type->child1, share_vars, copied, pool);
+		new->child1 = inst_(type->child1, share_vars, copied, pool);
 		if (!IS_SEALED(type->symbol)) {
-			new->child2 = inst_copy(type->child2, share_vars, copied, pool);
+			new->child2 = inst_(type->child2, share_vars, copied, pool);
 		}
 	}
 	return new;
@@ -203,7 +203,7 @@ Type *inst_copy(Type *type, b32 share_vars, TypePtrMap *copied, TypePool *pool) 
 internal
 Type *inst(Type *type, TypePool *pool) {
 	TypePtrMap seen = {};
-	Type *result = inst_copy(type, true, &seen, pool);
+	Type *result = inst_(type, true, &seen, pool);
 	map_free(&seen);
 	return result;
 }
