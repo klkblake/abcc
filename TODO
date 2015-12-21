@@ -1,0 +1,15 @@
+Todo
+
+Type canonicalisation
+Monomorphisation pass
+Shift type inferencer pass
+Inlining
+Point-of-use-optimisation
+Implement arbitrary precision integers
+Implement arbitrary precision rationals
+
+Port benchmarks
+Fix standard library
+Numeric refinement pass
+Data structure replacement
+Benchmarking and analysis

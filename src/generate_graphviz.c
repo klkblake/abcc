@@ -1,4 +1,4 @@
-#include "build_graphs.c"
+#include "minimise_types.c"
 
 internal char *uop_names[] = {
 	"START",

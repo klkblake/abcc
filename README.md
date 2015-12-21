@@ -1,6 +1,10 @@
 abcc
 ====
 
+WARNING: this project is no longer being developed; the author no longer
+believes that a language without manual memory management can be made
+sufficiently fast.
+
 Optimising compiler for Awelon Bytecode, see [Awelon Project](
 http://github.com/dmbarbour/awelon).
 

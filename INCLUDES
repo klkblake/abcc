@@ -29,6 +29,7 @@ parser.c
 peephole.c
 infer_types.gen.c
 build_graphs.c
+minimise_types.c
 generate_graphviz.c
 generate_c.c
 <getopt.h>

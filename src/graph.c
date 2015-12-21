@@ -1,6 +1,6 @@
 #include "type.c"
 
-enum uop {
+typedef enum {
 	UOP_START,
 	UOP_END,
 	UOP_SEAL,
@@ -40,7 +40,7 @@ enum uop {
 	UOP_ASSERT_EQUAL,
 	UOP_DEBUG_PRINT_RAW,
 	UOP_DEBUG_PRINT_TEXT,
-};
+} UOp;
 
 typedef struct {
 	struct Node *node;
@@ -65,7 +65,7 @@ typedef struct OutLinkChunk {
 } OutLinkChunk;
 
 typedef struct Node {
-	enum uop uop;
+	UOp uop;
 	u32 in_count;
 	InLinkChunk in;
 	u32 out_count;

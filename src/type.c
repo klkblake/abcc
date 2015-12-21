@@ -86,13 +86,34 @@ void push_var(U8Array *buf, u64 var) {
 }
 
 internal
+Type *rep(Type *v) {
+	Type *v0 = v->rep;
+	while (v0 != v0->rep) {
+		v0 = v0->rep;
+	}
+	while (v->rep != v0) {
+		Type *tmp = v->rep;
+		v->rep = v0;
+		v = tmp;
+	}
+	return v0;
+}
+
+internal
+Type *deref(Type *type) {
+	if (IS_VAR(type)) {
+		type = rep(type);
+		if (type->terms) {
+			return type->terms;
+		}
+	}
+	return type;
+}
+
+internal
 void print_type_(Type *type, u32 prec, TypePtrB1Map *seen, TypePtrU64Map *vars, U8Array *buf) {
 	if (IS_VAR(type)) {
-		Type *type_rep = type->rep;
-		while (type != type_rep) {
-			type = type_rep;
-			type_rep = type->rep;
-		}
+		type = rep(type);
 		if (type->terms == NULL) {
 			TypePtrU64MapGetResult result = type_ptr_u64_map_get(vars, type);
 			if (!result.found) {
@@ -249,29 +270,4 @@ void print_type_single(FILE *file, Type *type) {
 	TypePtrU64Map vars = {};
 	print_type(file, type, &vars);
 	map_free(&vars);
-}
-
-internal
-Type *rep(Type *v) {
-	Type *v0 = v->rep;
-	while (v0 != v0->rep) {
-		v0 = v0->rep;
-	}
-	while (v->rep != v0) {
-		Type *tmp = v->rep;
-		v->rep = v0;
-		v = tmp;
-	}
-	return v0;
-}
-
-internal
-Type *deref(Type *type) {
-	if (IS_VAR(type)) {
-		type = rep(type);
-		if (type->terms) {
-			return type->terms;
-		}
-	}
-	return type;
 }

@@ -236,6 +236,7 @@ Link append_block(BlockGraph *block1, Link link, BlockGraph *block2, TypePtrMap 
 			block1->constants = node->copy;
 		}
 	}
+	array_free(&worklist);
 	assert(result.node);
 	return result;
 }
